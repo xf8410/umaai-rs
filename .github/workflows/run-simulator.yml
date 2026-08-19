@@ -1,0 +1,68 @@
+name: Run Ramen Simulator
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Random seed for simulation'
+        required: false
+        default: '20240816'
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'crates/umasim/**'
+      - 'gamedata/**'
+
+jobs:
+  run-simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Copy gamedata
+        run: |
+          mkdir -p target/release/gamedata
+          cp -r gamedata/* target/release/gamedata/
+
+      - name: Build ramen_auto
+        run: cargo build --release --bin ramen_auto
+
+      - name: Run simulation
+        env:
+          SIM_SEED: ${{ github.event.inputs.seed || '20240816' }}
+        run: |
+          cd target/release
+          ./ramen_auto 2>&1 | tee simulation.log
+          
+      - name: Upload log artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: simulation-log
+          path: target/release/simulation.log
+          retention-days: 30
+
+      - name: Show summary
+        run: |
+          echo "## Simulation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Seed: ${{ github.event.inputs.seed || '20240816' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Log uploaded as artifact" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Final Score" >> $GITHUB_STEP_SUMMARY
+          tail -50 target/release/simulation.log | grep -E "(评分|等级|URA|最终|总分|Score)" >> $GITHUB_STEP_SUMMARY || tail -20 target/release/simulation.log >> $GITHUB_STEP_SUMMARY

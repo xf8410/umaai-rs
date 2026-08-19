@@ -11,6 +11,10 @@ path = "src/main.rs"
 name = "ramen_manual"
 path = "src/bin/ramen_manual.rs"
 
+[[bin]]
+name = "ramen_auto"
+path = "src/bin/ramen_auto.rs"
+
 # [[bin]]
 # name = "generate_training_data"
 # path = "src/bin/generate_training_data.rs"
