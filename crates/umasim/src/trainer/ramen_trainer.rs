@@ -488,12 +488,7 @@ impl RamenTrainer {
                     }
                 }
                 Operation::Race => {
-                    // 比赛给 PT 和属性，但消耗体力，给予中等分数
-                    let race_score = 50.0;
-                    if race_score > best_score {
-                        best_score = race_score;
-                        best_idx = i;
-                    }
+                    // 拉面杯场景不支持自选比赛事件（race_g0 未实现），跳过
                 }
                 _ => {
                     // 其他操作（休息/外出等）已在上面优先级规则处理
