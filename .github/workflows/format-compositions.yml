@@ -1,4 +1,4 @@
-name: Format composition benchmark
+name: Update contribution docs
 
 on:
   push:
@@ -8,22 +8,42 @@ permissions:
   contents: write
 
 jobs:
-  format:
+  docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: workbench/format-compositions
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - run: cargo fmt --all
-      - name: Commit formatted source
+          ref: workbench/bench-card-compositions
+          fetch-depth: 0
+      - name: Update changelog and test overview
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          changelog = Path('.trae/documents/changelog.md')
+          text = changelog.read_text()
+          marker = '## 2026-08-21\n\n'
+          entry = ('- **拉面杯全卡型构成基准**：新增 `bench_compositions`，枚举五种普通支援卡各 0..=3 张、合计 5 张再加固定友人的全部 101 种构成；支持固定种子、Random/Handwritten 训练员、CSV 聚合输出与异常局失败；新增构成数量和六卡结构测试\n')
+          if entry not in text:
+              text = text.replace(marker, marker + entry, 1)
+          changelog.write_text(text)
+
+          overview = Path('.trae/documents/tests_overview.md')
+          text = overview.read_text()
+          text = text.replace('总计：**153 个测试**（含 1 个 async）', '总计：**155 个测试**（含 1 个 async）', 1)
+          text = text.replace('- [基准测试](#基准测试binbench_basers)（bench_base 运行说明）', '- [基准测试](#基准测试)（bench_base / bench_compositions 运行说明）', 1)
+          marker = '## 未来缩减参考（规则固化后讨论）'
+          section = '''### `bin/bench_compositions.rs`\n\n固定种子遍历五种普通支援卡各 0..=3 张、合计 5 张再加固定友人的全部 101 种构成，输出评分、五维、训练技能 PT、RMJ 和友人出行聚合 CSV。\n\n```bash\ncargo run --release --bin bench_compositions -- --runs 100 --seed 42 --trainer handwritten --out logs/bench_compositions.csv\n```\n\n- `test_enumerate_all_101_compositions` — 严格验证合法构成总数为 101，且每种合计 5 张、单类型不超过 3 张\n- `test_build_all_composition_decks` — 验证全部构成都生成 5 张普通卡 + 1 张固定友人\n\n'''
+          if section not in text:
+              text = text.replace(marker, section + marker, 1)
+          overview.write_text(text)
+          PY
+      - name: Commit documentation
         run: |
           set -euo pipefail
           if git diff --quiet; then exit 0; fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/umasim/src/bin/bench_compositions.rs
-          git commit -m 'style: format composition benchmark'
-          git push origin HEAD:workbench/format-compositions
+          git add .trae/documents/changelog.md .trae/documents/tests_overview.md
+          git commit -m 'docs: 记录101种卡型构成基准'
+          git push origin HEAD:workbench/bench-card-compositions
