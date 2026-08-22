@@ -8,7 +8,7 @@ use umasim::{
     game::{InheritInfo, Trainer, ramen::RamenGame},
     gamedata::{GAMECONSTANTS, init_global_with_config},
     global,
-    trainer::{LocalRamenTrainer, RamenHandwrittenTrainer},
+    trainer::{LocalRamenTrainer, LoggingTrainer, RamenHandwrittenTrainer},
     utils::{get_workspace_root, load_game_config}
 };
 
@@ -24,12 +24,15 @@ fn status_score(status: &[i32; 5]) -> i32 {
     let cons = global!(GAMECONSTANTS);
     status
         .iter()
-        .map(|&value| cons.five_status_final_score[value.max(0) as usize])
+        .map(|&value| {
+            let idx = (value.max(0) as usize).min(cons.five_status_final_score.len() - 1);
+            cons.five_status_final_score[idx]
+        })
         .sum()
 }
 
-fn run<T: Trainer<RamenGame>>(trainer: &T, run_idx: u64) -> Result<bench::GameOutcome> {
-    let wrapped = umasim::trainer::LoggingTrainer::new(trainer, run_idx);
+fn run<T: Trainer<RamenGame>>(trainer: T, run_idx: u64) -> Result<bench::GameOutcome> {
+    let wrapped = LoggingTrainer::new(trainer, run_idx);
     bench::run_seeded(UMA, &DECK, &INHERIT, BASE_SEED, run_idx, &wrapped)
 }
 
@@ -41,15 +44,13 @@ fn main() -> Result<()> {
     std::env::set_current_dir(workspace)?;
     init_global_with_config(&load_game_config()?)?;
 
-    let baseline = RamenHandwrittenTrainer::new();
-    let candidate = LocalRamenTrainer::matrix_variant(&variant)?;
     let mut output = File::create("matrix-result.csv")?;
     writeln!(output, "variant,shard,run_idx,a_score,b_score,a_skill_pt,b_skill_pt,a_status_score,b_status_score,a_status_sum,b_status_sum")?;
 
     for offset in 0..runs {
         let run_idx = shard * runs + offset;
-        let a = run(&baseline, run_idx)?;
-        let b = run(&candidate, run_idx)?;
+        let a = run(RamenHandwrittenTrainer::new(), run_idx)?;
+        let b = run(LocalRamenTrainer::matrix_variant(&variant)?, run_idx)?;
         let a_sum: i32 = a.five_status.iter().sum();
         let b_sum: i32 = b.five_status.iter().sum();
         writeln!(
