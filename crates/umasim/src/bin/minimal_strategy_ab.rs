@@ -52,6 +52,26 @@ fn apply_cumulative_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLog
     Ok(())
 }
 
+/// 输出所有机器字段的完整说明，避免把不同 PT、单局值和多局平均值混为一谈。
+fn print_legend() {
+    println!("===== 字段说明 / LEGEND =====");
+    println!("seed: 随机种子；同一 seed 下 upstream/local 使用相同初始随机条件进行配对比较。");
+    println!("upstream/local: upstream=原上游手写策略；local=本地修改后的策略。");
+    println!("*_score: 单局最终育成评分；delta=local_score-upstream_score，正数表示本地策略该局更高。");
+    println!("RMJ_*: 单局三个年度 RMJ 中成功的年度数；3/3 表示三个年度全部成功。");
+    println!("RMJ_cumulative_scenario_PT_*: 单局三个年度吃面所得 RMJ 剧本 PT 的累计和；用于年度 RMJ 判定/剧本加成，每年结算后游戏状态会清零。");
+    println!("skill_PT_*: 单局结束时技能点；来自训练/比赛/事件等，用于购买技能；与 RMJ 剧本 PT 不是同一种资源。");
+    println!("ramen_eaten_*: 单局三个年度合计吃面碗数；不是当年剩余值，也不是平均值。");
+    println!("n: 每个策略完成的局数。");
+    println!("mean/median/min/max/std: 最终育成评分的平均值/中位数/最小值/最大值/总体标准差。");
+    println!("avg_RMJ_success_years: 每局 RMJ 成功年度数的平均值，满值为 3。");
+    println!("avg_RMJ_cumulative_scenario_PT: 每局累计 RMJ 剧本 PT 的平均值。");
+    println!("avg_skill_PT: 每局结束技能点的平均值。");
+    println!("avg_ramen_eaten_per_game: 每局三个年度合计吃面碗数的平均值；例如 25.7 表示平均每局吃 25.7 碗。");
+    println!("DELTA local_mean_score-upstream_mean_score: 两策略平均最终评分之差；正数表示本地策略平均分更高。");
+    println!("=============================");
+}
+
 fn print_summary(name: &str, outcomes: &[GameOutcome]) {
     let scores = outcomes.iter().map(|x| x.score as f64).collect::<Vec<_>>();
     let stats = bench::summarize(&scores);
@@ -60,7 +80,7 @@ fn print_summary(name: &str, outcomes: &[GameOutcome]) {
     let skill_pt = outcomes.iter().map(|x| x.skill_pt as f64).sum::<f64>() / outcomes.len() as f64;
     let eat = outcomes.iter().map(|x| x.eat_count as f64).sum::<f64>() / outcomes.len() as f64;
     println!(
-        "RESULT {name}: n={} mean={:.0} median={:.0} min={:.0} max={:.0} std={:.0} RMJ_success_years={:.2}/3 RMJ_scenario_PT={:.0} skill_PT={:.0} total_eat={:.1}",
+        "RESULT {name}: n={} mean={:.0} median={:.0} min={:.0} max={:.0} std={:.0} avg_RMJ_success_years={:.2}/3 avg_RMJ_cumulative_scenario_PT={:.0} avg_skill_PT={:.0} avg_ramen_eaten_per_game={:.1}",
         outcomes.len(), stats.mean, stats.median, stats.min, stats.max, stats.std, rmj, rmj_pt, skill_pt, eat
     );
 }
@@ -70,7 +90,7 @@ fn main() -> Result<()> {
     std::env::set_current_dir(root)?;
     init_global_with_config(&load_game_config()?)?;
 
-    println!("NOTE RMJ_scenario_PT=吃面获得、用于年度RMJ判定/剧本加成；skill_PT=训练等获得、用于购买技能。两者不是同一种PT。");
+    print_legend();
 
     let mut upstream_results = Vec::with_capacity(RUNS);
     let mut local_results = Vec::with_capacity(RUNS);
@@ -88,7 +108,7 @@ fn main() -> Result<()> {
         apply_cumulative_ramen_metrics(&mut b, &local.take_records().rows)?;
 
         println!(
-            "seed={seed} upstream_score={} local_score={} delta={} RMJ_upstream={}/3 RMJ_local={}/3 RMJ_PT_upstream={} RMJ_PT_local={} skill_PT_upstream={} skill_PT_local={} eat_upstream={} eat_local={}",
+            "seed={seed} upstream_score={} local_score={} delta={} RMJ_upstream={}/3 RMJ_local={}/3 RMJ_cumulative_scenario_PT_upstream={} RMJ_cumulative_scenario_PT_local={} skill_PT_upstream={} skill_PT_local={} ramen_eaten_upstream={} ramen_eaten_local={}",
             a.score,
             b.score,
             b.score - a.score,
@@ -109,6 +129,6 @@ fn main() -> Result<()> {
     print_summary("local", &local_results);
     let mean_a = upstream_results.iter().map(|x| x.score as f64).sum::<f64>() / RUNS as f64;
     let mean_b = local_results.iter().map(|x| x.score as f64).sum::<f64>() / RUNS as f64;
-    println!("DELTA local-upstream={:.0}", mean_b - mean_a);
+    println!("DELTA local_mean_score-upstream_mean_score={:.0}", mean_b - mean_a);
     Ok(())
 }
