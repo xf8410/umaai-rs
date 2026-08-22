@@ -21,7 +21,7 @@ use crate::neural::{ThreadLocalNeuralNetLeafEvaluator, ThreadLocalNeuralNetLeafS
 use crate::{
     game::{
         Game,
-        onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame},
+        onsen::{action::OnsenAction, game::OnsenGame},
         ramen::{RamenAction, RamenGame}
     },
     gamedata::EventChoice,
@@ -182,11 +182,12 @@ where
         // 本次搜索的 rollout 种子表：所有候选共享，由传入 rng 派生（可复现性入口）
         let seeds = RolloutSeeds::from_rng(rng);
         debug!(
-            "[回合 {}] 开始搜索: {} 个动作, search_n={}, max_depth={}, radical_factor={:.1}, ucb={}, 根种子={:#018x}",
+            "[回合 {}] 开始搜索: {} 个动作, search_n={}, max_depth={}, leaf_eval={}, radical_factor={:.1}, ucb={}, 根种子={:#018x}",
             game.turn(),
             actions.len(),
             self.config.search_n,
             self.config.max_depth,
+            self.leaf_evaluator.name(),
             radical_factor,
             self.config.use_ucb,
             seeds.root()
@@ -697,20 +698,6 @@ impl FlatSearch<RamenGame> {
         &self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng
     ) -> Result<SearchOutput<RamenAction>> {
         self.search_with(game, actions, rng, |game, action, seed| self.simulate_common(game, action, seed))
-    }
-}
-
-/// 回合阶段编号（种子派生用）
-///
-/// 显式 match 而非依赖枚举判别值：`OnsenTurnStage` 的变体顺序若调整，
-/// 这里会编译报错提醒同步，而不是静默改变所有历史种子。
-fn stage_id(stage: &OnsenTurnStage) -> u64 {
-    match stage {
-        OnsenTurnStage::Begin => 0,
-        OnsenTurnStage::Distribute => 1,
-        OnsenTurnStage::Bathing => 2,
-        OnsenTurnStage::Train => 3,
-        OnsenTurnStage::AfterTrain => 4
     }
 }
 
