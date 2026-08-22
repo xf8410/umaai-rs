@@ -37,6 +37,9 @@ fn main()->Result<()>{
  let sac=env::var("SAC")?.parse()?;let extra=env::var("STRUCTURE").unwrap_or_default();
  let shard:u64=env::var("SHARD").unwrap_or_else(|_|"0".into()).parse()?;let runs:u64=env::var("RUNS_PER_SHARD").unwrap_or_else(|_|"100".into()).parse()?;
  std::env::set_current_dir(get_workspace_root()?)?;init_global_with_config(&load_game_config()?)?;
+ // Parse and construct all three yearly policies even for a zero-run smoke test. This gives CI a
+ // targeted parser check without compiling every unrelated #[cfg(test)] module in the library.
+ let validation=PhaseTrainer::new(pt,sac,&extra).context("分阶段策略参数验证失败")?; drop(validation);
  let mut f=File::create("matrix-result.csv")?;writeln!(f,"variant,shard,run_idx,a_score,b_score,a_skill_pt,b_skill_pt,a_status_score,b_status_score,a_status_sum,b_status_sum")?;
  for off in 0..runs{let i=shard*runs+off;let a=run(RamenHandwrittenTrainer::new(),i)?;let b=run(PhaseTrainer::new(pt,sac,&extra)?,i)?;writeln!(f,"{variant},{shard},{i},{},{},{},{},{},{},{},{}",a.score,b.score,a.skill_pt,b.skill_pt,status_score(&a.five_status),status_score(&b.five_status),a.five_status.iter().sum::<i32>(),b.five_status.iter().sum::<i32>())?;}Ok(())
 }
