@@ -10,7 +10,7 @@ use crate::{
         FriendOutState, Game, Person, PersonType, Trainer,
         ramen::{
             Operation, RamenAction, RamenGame, RamenStage,
-            policy::{RamenPolicy, RamenPolicyOutput}
+            policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput}
         }
     },
     gamedata::{EventChoice, EventData}
@@ -26,8 +26,6 @@ pub struct LocalRamenConfig {
     pub high_fail_penalty: f32,
     pub feeling_overflow_threshold: i32,
     pub overflow_value: f32,
-    pub rmj_urgency_margin: i32,
-    pub rmj_urgency_bonus: f32,
     /// 长期价值修正最多允许放弃的现有策略即时训练分。
     pub max_base_score_sacrifice: f32
 }
@@ -41,10 +39,8 @@ impl Default for LocalRamenConfig {
             low_friend_bond_value: 35.0,
             active_friend_value: 8.0,
             high_fail_penalty: 700.0,
-            feeling_overflow_threshold: 10,
+            feeling_overflow_threshold: 8,
             overflow_value: 8.0,
-            rmj_urgency_margin: 450,
-            rmj_urgency_bonus: 60.0,
             max_base_score_sacrifice: 120.0
         }
     }
@@ -59,17 +55,60 @@ pub struct LocalRamenTrainer {
 
 impl Default for LocalRamenTrainer {
     fn default() -> Self {
-        Self {
-            policy: RamenPolicy::default(),
-            config: LocalRamenConfig::default(),
-            last_breakdown: Mutex::new(None)
-        }
+        Self::with_configs(RamenPolicyConfig::default(), LocalRamenConfig::default())
     }
 }
 
 impl LocalRamenTrainer {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_configs(policy: RamenPolicyConfig, config: LocalRamenConfig) -> Self {
+        Self {
+            policy: RamenPolicy::new(policy),
+            config,
+            last_breakdown: Mutex::new(None)
+        }
+    }
+
+    /// 矩阵实验构造器。名称格式：`pt{倍率}-sac{保护上限}-{long|plain}-fail{惩罚}`。
+    /// 例如 `pt12-sac20-long-fail700`。所有字段都显式编码，便于结果复现。
+    pub fn matrix_variant(name: &str) -> Result<Self> {
+        let mut policy = RamenPolicyConfig::default();
+        let mut local = LocalRamenConfig::default();
+        let mut seen_pt = false;
+        let mut seen_sac = false;
+        let mut seen_mode = false;
+        let mut seen_fail = false;
+        for token in name.split('-') {
+            if let Some(value) = token.strip_prefix("pt") {
+                policy.pt_rate = value.parse()?;
+                seen_pt = true;
+            } else if let Some(value) = token.strip_prefix("sac") {
+                local.max_base_score_sacrifice = value.parse()?;
+                seen_sac = true;
+            } else if let Some(value) = token.strip_prefix("fail") {
+                local.high_fail_penalty = value.parse()?;
+                seen_fail = true;
+            } else if token == "plain" {
+                local.early_bond_value = 0.0;
+                local.hint_bonus = 0.0;
+                local.first_friend_click_value = 0.0;
+                local.low_friend_bond_value = 0.0;
+                local.active_friend_value = 0.0;
+                local.overflow_value = 0.0;
+                seen_mode = true;
+            } else if token == "long" {
+                seen_mode = true;
+            } else {
+                anyhow::bail!("未知矩阵变体字段: {token} ({name})");
+            }
+        }
+        if !(seen_pt && seen_sac && seen_mode && seen_fail) {
+            anyhow::bail!("矩阵变体字段不完整: {name}");
+        }
+        Ok(Self::with_configs(policy, local))
     }
 
     fn choose(outputs: &[RamenPolicyOutput]) -> usize {
@@ -164,20 +203,12 @@ impl LocalRamenTrainer {
     fn decide_ramen(&self, game: &RamenGame, actions: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (_, mut outputs) = self.policy.decide_ramen(game, actions)?;
         let stock: i32 = game.ramen.feeling_stock.iter().sum();
-        let overflow = (stock - self.config.feeling_overflow_threshold).max(0) as f32;
-        let year = (game.current_year() - 1).clamp(0, 2) as usize;
-        let gap = [1500, 3000, 3500][year] - game.ramen.scenario_pt;
+        let overflow_risk = (stock - self.config.feeling_overflow_threshold).max(0) as f32;
         for (action, output) in actions.iter().zip(outputs.iter_mut()) {
             if action.ramen.is_none() { continue; }
-            let overflow_bonus = overflow * self.config.overflow_value;
-            output.score += overflow_bonus;
-            output.add("local_stock_overflow", overflow_bonus);
-            if gap > 0 && gap <= self.config.rmj_urgency_margin {
-                let closeness = 1.0 - gap as f32 / self.config.rmj_urgency_margin as f32;
-                let urgency = self.config.rmj_urgency_bonus * (0.5 + 0.5 * closeness);
-                output.score += urgency;
-                output.add("local_rmj_urgency", urgency);
-            }
+            let bonus = overflow_risk * self.config.overflow_value;
+            output.score += bonus;
+            output.add("local_stock_pressure", bonus);
         }
         Ok((Self::choose(&outputs), outputs))
     }
