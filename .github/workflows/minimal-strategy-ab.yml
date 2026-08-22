@@ -11,68 +11,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 2
+          fetch-depth: 5
       - name: Apply source cleanup
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          path = Path("crates/umasim/src/search/flat_search.rs")
-          text = path.read_text()
-
-          old_import = "onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame},"
-          new_import = "onsen::{action::OnsenAction, game::OnsenGame},"
-          if text.count(old_import) != 1:
-              raise SystemExit(f"expected exactly one obsolete import, got {text.count(old_import)}")
-          text = text.replace(old_import, new_import)
-
-          old_debug = '''            "[回合 {}] 开始搜索: {} 个动作, search_n={}, max_depth={}, radical_factor={:.1}, ucb={}, 根种子={:#018x}",
-            game.turn(),
-            actions.len(),
-            self.config.search_n,
-            self.config.max_depth,
-            radical_factor,'''
-          new_debug = '''            "[回合 {}] 开始搜索: {} 个动作, search_n={}, max_depth={}, leaf_eval={}, radical_factor={:.1}, ucb={}, 根种子={:#018x}",
-            game.turn(),
-            actions.len(),
-            self.config.search_n,
-            self.config.max_depth,
-            self.leaf_evaluator.name(),
-            radical_factor,'''
-          if text.count(old_debug) != 1:
-              raise SystemExit(f"expected exactly one debug block, got {text.count(old_debug)}")
-          text = text.replace(old_debug, new_debug)
-
-          obsolete = '''/// 回合阶段编号（种子派生用）
-///
-/// 显式 match 而非依赖枚举判别值：`OnsenTurnStage` 的变体顺序若调整，
-/// 这里会编译报错提醒同步，而不是静默改变所有历史种子。
-fn stage_id(stage: &OnsenTurnStage) -> u64 {
-    match stage {
-        OnsenTurnStage::Begin => 0,
-        OnsenTurnStage::Distribute => 1,
-        OnsenTurnStage::Bathing => 2,
-        OnsenTurnStage::Train => 3,
-        OnsenTurnStage::AfterTrain => 4
-    }
-}
-
-'''
-          if text.count(obsolete) != 1:
-              raise SystemExit(f"expected exactly one obsolete stage_id block, got {text.count(obsolete)}")
-          text = text.replace(obsolete, "")
-          path.write_text(text)
-          PY
+        run: python3 scripts/apply_flat_search_cleanup.py
       - name: Restore normal benchmark workflow
-        shell: bash
-        run: git show HEAD~2:.github/workflows/minimal-strategy-ab.yml > .github/workflows/minimal-strategy-ab.yml
+        run: git show 5ee20705eee649928698f9eb8f7a0df6244c95f2:.github/workflows/minimal-strategy-ab.yml > .github/workflows/minimal-strategy-ab.yml
       - name: Commit cleanup
-        shell: bash
         run: |
-          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add crates/umasim/src/search/flat_search.rs .github/workflows/minimal-strategy-ab.yml
+          git rm scripts/apply_flat_search_cleanup.py
           git commit -m "chore(search): remove obsolete stage helper and log leaf evaluator"
           git push
