@@ -3,11 +3,6 @@ name: Minimal ramen strategy A/B
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
-    paths:
-      - '.github/workflows/minimal-strategy-ab.yml'
-      - 'crates/umasim/src/trainer/local_ramen_trainer.rs'
-      - 'crates/umasim/src/trainer/mod.rs'
-      - 'crates/umasim/src/bin/bench_base.rs'
   workflow_dispatch:
 
 jobs:
@@ -25,30 +20,18 @@ jobs:
             ~/.cargo/git
             target
           key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Build
-        run: cargo build --release -p umasim --bin bench_base
-      - name: Upstream handwritten (10 games)
-        run: cargo run --release -p umasim --bin bench_base -- --runs 10 --trainer handwritten --out logs/handwritten | tee handwritten.txt
-      - name: Local extended (10 games)
-        run: cargo run --release -p umasim --bin bench_base -- --runs 10 --trainer local --out logs/local | tee local.txt
+      - name: Run paired A/B (10 games per strategy)
+        run: cargo run --release -p umasim --bin minimal_strategy_ab | tee minimal_strategy_ab.txt
       - name: Summary
         run: |
           {
-            echo '## 上游 handwritten（每个 build 10 局）'
+            echo '## 拉面策略最小 A/B（同一卡组、同 10 个 seed）'
             echo '```text'
-            grep -E '汇总:|整局耗时:' handwritten.txt || true
-            echo '```'
-            echo '## 本地扩展 local（每个 build 10 局）'
-            echo '```text'
-            grep -E '汇总:|整局耗时:' local.txt || true
+            grep -E '^(RESULT|DELTA)' minimal_strategy_ab.txt || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: minimal-strategy-ab
-          path: |
-            handwritten.txt
-            local.txt
-            logs/handwritten/bench_base_results.csv
-            logs/local/bench_base_results.csv
+          path: minimal_strategy_ab.txt
           if-no-files-found: error
