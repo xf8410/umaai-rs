@@ -1,4 +1,4 @@
-//! 最小策略 A/B：同一马娘、卡组、继承和固定 seed 比较原策略与本地策略。
+//! 策略 A/B：同一马娘、卡组、继承和固定 seed 比较原策略与本地策略。
 
 use anyhow::{Result, ensure};
 use umasim::{
@@ -10,7 +10,7 @@ use umasim::{
     utils::{get_workspace_root, load_game_config}
 };
 
-const RUNS: usize = 10;
+const RUNS: usize = 1000;
 const BASE_SEED: u64 = 61444;
 const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
