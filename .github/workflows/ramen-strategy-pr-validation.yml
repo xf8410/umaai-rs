@@ -10,8 +10,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
       - uses: actions/cache@v5
         with:
           path: |
@@ -19,10 +17,6 @@ jobs:
             ~/.cargo/git
             target
           key: ramen-pr-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Record formatting diff
-        shell: bash
-        run: |
-          rustfmt --edition 2024 --check crates/umasim/src/trainer/local_ramen_trainer.rs 2>&1 | tee rustfmt-diff.txt || true
       - name: Compile
         run: cargo check -p umasim
       - name: Library tests
@@ -40,7 +34,7 @@ jobs:
           test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
           test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
           test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
-          test -s logs/A_upstream_decisions.csv
+          test -s logs/A_existing_decisions.csv
           test -s logs/B_local_decisions.csv
           test -s logs/first_divergence.tsv
       - name: Summary
@@ -58,9 +52,8 @@ jobs:
         with:
           name: clean-ramen-strategy-validation
           path: |
-            rustfmt-diff.txt
             minimal_strategy_ab.txt
-            logs/A_upstream_decisions.csv
+            logs/A_existing_decisions.csv
             logs/B_local_decisions.csv
             logs/first_divergence.tsv
           if-no-files-found: ignore
