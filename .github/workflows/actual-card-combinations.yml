@@ -1,0 +1,37 @@
+name: Validate actual card combinations
+
+on:
+  push:
+    branches: ['workbench/actual-card-combinations']
+    paths:
+      - '.github/workflows/actual-card-combinations.yml'
+      - 'crates/umasim/src/bin/bench_card_combinations.rs'
+      - 'crates/umasim/src/bench.rs'
+      - 'crates/umasim/Cargo.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: actual-card-combinations-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: actual-card-combinations-${{ runner.os }}-
+      - name: Release compile
+        run: cargo check --release -p umasim --bin bench_card_combinations
+      - name: Release unit tests
+        run: cargo test --release -p umasim --bin bench_card_combinations -- --nocapture
+      - name: Validate live selected-card enumeration
+        run: cargo run --release -p umasim --bin bench_card_combinations -- --enumerate-only
