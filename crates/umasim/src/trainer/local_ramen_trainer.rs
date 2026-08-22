@@ -17,12 +17,14 @@ pub struct LocalRamenConfig{
  /// 本次吃面首次跨过当年 RMJ 成功线时的一次性价值。
  pub rmj_cross_bonus:f32,
  /// 第三年本次吃面首次跨过 5000 大成功线时的一次性价值。
- pub great_cross_bonus:f32
+ pub great_cross_bonus:f32,
+ /// 当前拉面效果与本回合可用训练窗口的耦合价值。
+ pub ramen_alignment_weight:f32
 }
 impl Default for LocalRamenConfig{fn default()->Self{Self{
  early_bond_value:8.,hint_bonus:6.,first_friend_click_value:75.,low_friend_bond_value:35.,active_friend_value:8.,high_fail_penalty:0.,
  feeling_overflow_threshold:8,overflow_value:8.,max_base_score_sacrifice:140.,status_reserve_max:0.,dynamic_vital:false,
- probabilistic_hint:false,expected_fail:false,checkpoint_scale:0.,rmj_cross_bonus:0.,great_cross_bonus:0.
+ probabilistic_hint:false,expected_fail:false,checkpoint_scale:0.,rmj_cross_bonus:0.,great_cross_bonus:0.,ramen_alignment_weight:0.0
 }}}
 pub struct LocalRamenTrainer{policy:RamenPolicy,config:LocalRamenConfig,last_breakdown:Mutex<Option<String>>}
 impl Default for LocalRamenTrainer{fn default()->Self{Self::with_configs(RamenPolicyConfig::default(),LocalRamenConfig::default())}}
@@ -45,6 +47,8 @@ impl LocalRamenTrainer{
    else if let Some(v)=token.strip_prefix("ck"){local.checkpoint_scale=v.parse::<f32>()?/100.}
    else if let Some(v)=token.strip_prefix("rmj"){local.rmj_cross_bonus=v.parse()?}
    else if let Some(v)=token.strip_prefix("great"){local.great_cross_bonus=v.parse()?}
+   else if let Some(v)=token.strip_prefix("rpt"){policy.ramen_pt_weight=v.parse::<f32>()?/100.0}
+   else if let Some(v)=token.strip_prefix("align"){local.ramen_alignment_weight=v.parse::<f32>()?/100.0}
    else{anyhow::bail!("未知矩阵变体字段: {token} ({name})")}
   }
   if !(p&&s&&m&&f){anyhow::bail!("矩阵变体字段不完整: {name}")}Ok(Self::with_configs(policy,local))
@@ -79,9 +83,24 @@ impl LocalRamenTrainer{
   let rmj=if cur<threshold&&post>=threshold{self.config.rmj_cross_bonus}else{0.};
   let great=if year==2&&cur<5000&&post>=5000{self.config.great_cross_bonus}else{0.};Ok((checkpoint,rmj,great))
  }
+ fn ramen_alignment(&self,g:&RamenGame,region_id:usize)->Result<f32>{
+  if self.config.ramen_alignment_weight<=0.0{return Ok(0.0)}
+  let d=RAMENDATA.get().ok_or_else(||anyhow::anyhow!("RAMENDATA 未初始化"))?;
+  let region=d.ramen_region_effect.get(region_id).ok_or_else(||anyhow::anyhow!("地区效果缺失: {region_id}"))?;
+  let mut best=0.0f32;
+  for &t in &region.at_trains{
+   if !(0..5).contains(&t){continue}let tr=t as usize;let buffs=g.calc_training_buff(tr)?;let v=g.calc_training_value(&buffs,tr)?;
+   let raw=v.status_pt[..5].iter().sum::<i32>()as f32+v.status_pt[5]as f32*2.0;
+   let people=g.distribution().get(tr).map(|x|x.len()).unwrap_or(0)as f32;
+   let shining=g.shining_count(tr)as f32;
+   best=best.max(raw+people*8.0+shining*35.0);
+  }
+  let effect=(region.xunlian+region.youqing+region.pt_bonus)as f32+region.hint_count as f32*10.0;
+  Ok(best*effect*self.config.ramen_alignment_weight/100.0)
+ }
  fn decide_ramen(&self,g:&RamenGame,a:&[RamenAction])->Result<(usize,Vec<RamenPolicyOutput>)>{
   let(_,mut out)=self.policy.decide_ramen(g,a)?;let risk=(g.ramen.feeling_stock.iter().sum::<i32>()-self.config.feeling_overflow_threshold).max(0)as f32;
-  for(act,o)in a.iter().zip(out.iter_mut()){if act.ramen.is_some(){let pressure=risk*self.config.overflow_value;o.score+=pressure;o.add("local_stock_pressure",pressure);let y=(g.current_year()-1)as usize;let post=g.ramen.scenario_pt+calc_ramen_pt_gain(y,g.ramen.eat_count)?;let(ck,rmj,great)=self.scenario_threshold_value(g,post)?;o.score+=ck+rmj+great;o.add("scenario_checkpoint",ck);o.add("rmj_cross",rmj);o.add("great_cross",great)}}Ok((Self::choose(&out),out))
+  for(act,o)in a.iter().zip(out.iter_mut()){if let Some(region_id)=act.ramen{let pressure=risk*self.config.overflow_value;o.score+=pressure;o.add("local_stock_pressure",pressure);let y=(g.current_year()-1)as usize;let post=g.ramen.scenario_pt+calc_ramen_pt_gain(y,g.ramen.eat_count)?;let(ck,rmj,great)=self.scenario_threshold_value(g,post)?;let align=self.ramen_alignment(g,region_id)?;o.score+=ck+rmj+great+align;o.add("scenario_checkpoint",ck);o.add("rmj_cross",rmj);o.add("great_cross",great);o.add("ramen_alignment",align)}}Ok((Self::choose(&out),out))
  }
 }
 impl Trainer<RamenGame> for LocalRamenTrainer{
