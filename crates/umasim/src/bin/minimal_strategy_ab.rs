@@ -1,4 +1,4 @@
-//! 策略 A/B：同一马娘、卡组、继承和固定 seed 比较原策略与本地策略。
+//! 1000 组配对测试：上游手写基准策略与优化后的本地手写修正策略。
 
 use anyhow::{Result, ensure};
 use umasim::{
@@ -19,34 +19,31 @@ const INHERIT: InheritInfo = InheritInfo {
     extra_count: [10, 10, 20, 20, 20, 40]
 };
 
-/// `scenario_pt` 和 `eat_count` 会在年度 RMJ 结算后归零，因此根据每次真实吃面
-/// 决策重建三个年度合计的 RMJ 剧本点和吃面碗数。
-/// RMJ 剧本点用于年度 RMJ 判定/剧本加成；`skill_pt` 是购买技能用的技能点。
 fn apply_cumulative_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLogRow]) -> Result<()> {
     let mut yearly_eat = [0_i32; 3];
     let mut total_pt = 0_i32;
-
     for row in rows {
         if row.stage != "RamenSelect" || !row.action_desc.starts_with("吃面/") {
             continue;
         }
-        let year_idx = if row.turn < 24 {
-            0
-        } else if row.turn < 48 {
-            1
-        } else {
-            2
-        };
+        let year_idx = if row.turn < 24 { 0 } else if row.turn < 48 { 1 } else { 2 };
         total_pt += calc_ramen_pt_gain(year_idx, yearly_eat[year_idx])?;
         yearly_eat[year_idx] += 1;
     }
-
     let total_eat = yearly_eat.iter().sum();
-    ensure!(total_eat > 0, "seed={} 未记录到任何吃面决策，累计指标无效", outcome.seed);
+    ensure!(total_eat > 0, "seed={} 未记录到任何吃面决策", outcome.seed);
     ensure!(total_pt > 0, "seed={} 累计 RMJ 剧本点异常为 0", outcome.seed);
     outcome.scenario_pt = total_pt;
     outcome.eat_count = total_eat;
     Ok(())
+}
+
+fn score_comparison(a: i32, b: i32) -> String {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => format!("A比B少{}分", b - a),
+        std::cmp::Ordering::Greater => format!("B比A少{}分", a - b),
+        std::cmp::Ordering::Equal => "A与B同分".to_string()
+    }
 }
 
 fn print_summary(label: &str, outcomes: &[GameOutcome]) {
@@ -67,46 +64,39 @@ fn main() -> Result<()> {
     std::env::set_current_dir(root)?;
     init_global_with_config(&load_game_config()?)?;
 
-    println!("A=原上游手写策略；B=本地修改策略；每行比较同一个随机种子下的 A 与 B。");
-    println!("RMJ剧本点=吃面获得，用于年度RMJ判定和剧本加成；技能点=训练/比赛/事件等获得，用于购买技能。两者不是同一种点数。");
-    println!("RMJ成功=三个年度中成功的年度数；吃面=一整局三个年度合计吃面碗数。");
+    println!("A=上游手写基准策略（RamenPolicy默认配置）。");
+    println!("B=同一上游手写基准策略 + 优化后的本地长期收益修正；不是另外两套隐藏策略。");
+    println!("RMJ剧本点用于年度RMJ判定/剧本加成；技能点用于购买技能；二者不是同一种点数。");
 
     let mut a_results = Vec::with_capacity(RUNS);
     let mut b_results = Vec::with_capacity(RUNS);
-
     println!("开始 A/B：每套策略 {RUNS} 局，随机种子 {BASE_SEED}..{}", BASE_SEED + RUNS as u64 - 1);
+
     for i in 0..RUNS {
         let seed = BASE_SEED + i as u64;
         let trainer_a = LoggingTrainer::new(RamenHandwrittenTrainer::new(), seed);
         let trainer_b = LoggingTrainer::new(LocalRamenTrainer::new(), seed);
-
         let mut a = bench::run_seeded(UMA, &DECK, &INHERIT, seed, &trainer_a)?;
         let mut b = bench::run_seeded(UMA, &DECK, &INHERIT, seed, &trainer_b)?;
         apply_cumulative_ramen_metrics(&mut a, &trainer_a.take_records().rows)?;
         apply_cumulative_ramen_metrics(&mut b, &trainer_b.take_records().rows)?;
+        let comparison = score_comparison(a.score, b.score);
 
         println!(
-            "seed={seed} | A(原策略)[评分={}，RMJ成功={}/3年，累计RMJ剧本点={}，最终技能点={}，全局吃面={}碗] | B(本地策略)[评分={}，RMJ成功={}/3年，累计RMJ剧本点={}，最终技能点={}，全局吃面={}碗] | B-A评分差={}",
-            a.score,
-            a.rmj_ok,
-            a.scenario_pt,
-            a.skill_pt,
-            a.eat_count,
-            b.score,
-            b.rmj_ok,
-            b.scenario_pt,
-            b.skill_pt,
-            b.eat_count,
-            b.score - a.score
+            "seed={seed} | A(上游手写基准)[评分={}，RMJ成功={}/3年，累计RMJ剧本点={}，最终技能点={}，全局吃面={}碗] | B(基准+优化本地修正)[评分={}，RMJ成功={}/3年，累计RMJ剧本点={}，最终技能点={}，全局吃面={}碗] | {comparison}",
+            a.score, a.rmj_ok, a.scenario_pt, a.skill_pt, a.eat_count,
+            b.score, b.rmj_ok, b.scenario_pt, b.skill_pt, b.eat_count
         );
         a_results.push(a);
         b_results.push(b);
     }
 
-    print_summary("A(原策略)", &a_results);
-    print_summary("B(本地策略)", &b_results);
+    print_summary("A(上游手写基准)", &a_results);
+    print_summary("B(基准+优化本地修正)", &b_results);
     let mean_a = a_results.iter().map(|x| x.score as f64).sum::<f64>() / RUNS as f64;
     let mean_b = b_results.iter().map(|x| x.score as f64).sum::<f64>() / RUNS as f64;
-    println!("DELTA B平均评分-A平均评分={:.0}（正数表示B本地策略更高）", mean_b - mean_a);
+    let rounded_a = mean_a.round() as i32;
+    let rounded_b = mean_b.round() as i32;
+    println!("DELTA 平均评分比较：{}", score_comparison(rounded_a, rounded_b));
     Ok(())
 }
