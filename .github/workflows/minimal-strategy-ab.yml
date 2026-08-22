@@ -21,13 +21,17 @@ jobs:
             target
           key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Run paired A/B (10 games per strategy)
-        run: cargo run --release -p umasim --bin minimal_strategy_ab | tee minimal_strategy_ab.txt
-      - name: Summary
+        run: cargo run --quiet --release -p umasim --bin minimal_strategy_ab | tee minimal_strategy_ab.txt
+      - name: Publish all 10 paired results
         run: |
           {
-            echo '## 拉面策略最小 A/B（同一卡组、同 10 个 seed）'
+            echo '## 拉面策略最小 A/B'
+            echo ''
+            echo '- 同一卡组、同一继承、相同的 10 个 seed'
+            echo '- 每个 seed 分别运行 upstream 和 local，共 20 局'
+            echo ''
             echo '```text'
-            grep -E '^(RESULT|DELTA)' minimal_strategy_ab.txt || true
+            cat minimal_strategy_ab.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
