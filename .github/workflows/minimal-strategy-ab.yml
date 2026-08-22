@@ -1,62 +1,38 @@
-name: Minimal ramen strategy A/B
+name: Publish clean flat search cleanup branch
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
-  compare:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Cache cargo
-        uses: actions/cache@v5
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Run paired A/B
+          ref: workbench/flat-search-warning-cleanup
+      - name: Apply cleanup
         shell: bash
         run: |
-          set -o pipefail
-          cargo run --quiet --release -p umasim --bin minimal_strategy_ab 2>&1 | tee minimal_strategy_ab.txt
-      - name: Verify results and diagnostic logs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/umasim/src/search/flat_search.rs')
+          s = p.read_text()
+          s = s.replace('onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame},', 'onsen::{action::OnsenAction, game::OnsenGame},')
+          s = s.replace('max_depth={}, radical_factor={:.1}', 'max_depth={}, leaf_eval={}, radical_factor={:.1}')
+          s = s.replace('            self.config.max_depth,\n            radical_factor,', '            self.config.max_depth,\n            self.leaf_evaluator.name(),\n            radical_factor,')
+          start = s.index('/// 回合阶段编号（种子派生用）')
+          end = s.index('#[cfg(feature = "onnx")]', start)
+          s = s[:start] + s[end:]
+          p.write_text(s)
+          PY
+      - name: Commit source-only change
         shell: bash
         run: |
           set -euo pipefail
-          runs="$(sed -n 's/^开始 A\/B：每套策略 \([0-9][0-9]*\) 局.*/\1/p' minimal_strategy_ab.txt)"
-          test -n "$runs"
-          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq "$runs"
-          test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
-          test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
-          test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
-          test -s logs/A_upstream_decisions.csv
-          test -s logs/B_local_decisions.csv
-          test "$(($(wc -l < logs/first_divergence.tsv)-1))" -eq "$runs"
-      - name: Publish summary
-        run: |
-          {
-            echo '## 拉面策略 A/B（1000组配对）'
-            echo ''
-            echo '- A：上游手写基准'
-            echo '- B：基准 + 受限本地修正（最多牺牲120点基础训练分）'
-            echo '- 完整逐回合日志请在本页面底部 Artifacts 下载 `ramen-ab-full-logs`'
-            echo ''
-            echo '```text'
-            grep -E '^(RESULT|PAIRED|DELTA)' minimal_strategy_ab.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload full logs
-        uses: actions/upload-artifact@v4
-        with:
-          name: ramen-ab-full-logs
-          path: |
-            minimal_strategy_ab.txt
-            logs/A_upstream_decisions.csv
-            logs/B_local_decisions.csv
-            logs/first_divergence.tsv
-          if-no-files-found: error
-          retention-days: 30
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/search/flat_search.rs
+          git commit -m "chore(search): remove obsolete stage helper and log leaf evaluator"
+          git push origin HEAD:workbench/flat-search-warning-cleanup
