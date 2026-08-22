@@ -51,9 +51,9 @@ impl LocalRamenTrainer{
  }
  fn choose(o:&[RamenPolicyOutput])->usize{o.iter().enumerate().max_by(|(li,l),(ri,r)|l.score.total_cmp(&r.score).then_with(||ri.cmp(li))).map(|x|x.0).unwrap_or(0)}
  fn stash(&self,o:&[RamenPolicyOutput]){let t=o.iter().enumerate().map(|(i,x)|format!("#{i} {:.0}[{}]",x.score,x.reason)).collect::<Vec<_>>().join(" | ");if let Ok(mut b)=self.last_breakdown.lock(){*b=Some(t)}}
- fn phase(turn:i32)->f32{if turn<24{1.}else if turn<48{.55}else{.15}}
+ fn phase(turn:i32)->f32{if turn<24{1.}else if turn<48{0.55}else{0.15}}
  fn reserve_penalty(&self,g:&RamenGame,gain:&[i32;6])->f32{if self.config.status_reserve_max<=0.{return 0.}let rem=(76-g.turn()).max(0)as f32;let r=self.config.status_reserve_max*rem/76.;let mut p=0.;for i in 0..5{let h=(g.uma.five_status_limit[i]-g.uma.five_status[i]).max(0)as f32;let b=(r-h).max(0.);let a=(r-(h-gain[i]as f32)).max(0.);p+=(a*a-b*b)/(2.*r.max(1.));}p*6.}
- fn vital_factor(t:i32)->f32{if t>=72{.25}else{3.5+(t as f32/72.)*2.}}
+ fn vital_factor(t:i32)->f32{if t>=72{0.25}else{3.5+(t as f32/72.)*2.}}
  fn decide_train(&self,g:&RamenGame,a:&[RamenAction])->Result<(usize,Vec<RamenPolicyOutput>)>{
   let(guard,mut out)=self.policy.decide_train(g,a)?;if out.len()!=a.len(){return Ok((guard,out))}let base=out.iter().map(|x|x.score).collect::<Vec<_>>();let bb=Self::choose(&out);let ph=Self::phase(g.turn());
   for(act,o)in a.iter().zip(out.iter_mut()){
@@ -72,7 +72,7 @@ impl LocalRamenTrainer{
  fn scenario_threshold_value(&self,g:&RamenGame,post:i32)->Result<(f32,f32,f32)>{
   let cur=g.ramen.scenario_pt;let rem=(Self::year_end(g)-g.turn()).max(0)as f32;let(a,b)= (Self::pt_effect(cur)?,Self::pt_effect(post)?);
   // 训练加成最直接，得意率与 Hint 使用较低近似权重；乘年度剩余回合表达提前跨档的持续价值。
-  let delta=((b.0-a.0)as f32*4.+(b.1-a.1)as f32*.8+(b.2-a.2)as f32*.4).max(0.);
+  let delta=((b.0-a.0)as f32*4.+(b.1-a.1)as f32*0.8+(b.2-a.2)as f32*0.4).max(0.);
   let region_delta=(calc_region_bonus(post)-calc_region_bonus(cur)).max(0)as f32*8.;
   let checkpoint=(delta+region_delta)*rem*self.config.checkpoint_scale;
   let year=(g.current_year()-1)as usize;let d=RAMENDATA.get().unwrap();let threshold=*d.ramen_success_pt.get(year).unwrap_or(&i32::MAX);
