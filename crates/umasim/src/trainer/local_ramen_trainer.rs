@@ -89,7 +89,6 @@ impl LocalRamenTrainer {
     }
 
     fn decide_train(&self, game: &RamenGame, actions: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
-        // 先让上游策略执行自选比赛/生病/低体力/低干劲硬守门。
         let (guard_idx, mut outputs) = self.policy.decide_train(game, actions)?;
         if outputs.len() != actions.len() {
             return Ok((guard_idx, outputs));
@@ -126,7 +125,7 @@ impl LocalRamenTrainer {
                         };
                     }
                     PersonType::Card if person.friendship() < 80 => {
-                        let mut gain = if game.uma.flags.aijiao { 9.0 } else { 7.0 };
+                        let mut gain: f32 = if game.uma.flags.aijiao { 9.0 } else { 7.0 };
                         if person.hint() { gain += 5.0; }
                         gain = gain.min((80 - person.friendship()) as f32);
                         bond_score += gain * self.config.jiban_value;
@@ -142,7 +141,6 @@ impl LocalRamenTrainer {
             out.score += bond_score;
             out.add("local_bond_friend_hint", bond_score);
 
-            // 原策略区分普通失败和大失败；上游已有线性失败期望，这里只补 >20% 的尾部风险。
             let buffs = game.calc_training_buff(train)?;
             let fail_rate = game.calc_training_failure_rate(&buffs, train);
             if fail_rate > 20.0 {
