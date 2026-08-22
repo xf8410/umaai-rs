@@ -5,7 +5,7 @@ use umasim::{
     bench::{self, GameOutcome},
     game::InheritInfo,
     gamedata::init_global_with_config,
-    trainer::{LocalRamenTrainer, RamenHandwrittenTrainer},
+    trainer::{LocalRamenTrainer, LoggingTrainer, RamenHandwrittenTrainer},
     utils::{get_workspace_root, load_game_config}
 };
 
@@ -35,14 +35,17 @@ fn main() -> Result<()> {
     std::env::set_current_dir(root)?;
     init_global_with_config(&load_game_config()?)?;
 
-    let upstream = RamenHandwrittenTrainer::new();
-    let local = LocalRamenTrainer::new();
     let mut upstream_results = Vec::with_capacity(RUNS);
     let mut local_results = Vec::with_capacity(RUNS);
 
     println!("Minimal A/B: {RUNS} games/strategy, seeds {BASE_SEED}..{}", BASE_SEED + RUNS as u64 - 1);
     for i in 0..RUNS {
         let seed = BASE_SEED + i as u64;
+        let mut upstream = LoggingTrainer::new(RamenHandwrittenTrainer::new(), seed);
+        let mut local = LoggingTrainer::new(LocalRamenTrainer::new(), seed);
+        upstream.set_logging(false);
+        local.set_logging(false);
+
         let a = bench::run_seeded(UMA, &DECK, &INHERIT, seed, &upstream)?;
         let b = bench::run_seeded(UMA, &DECK, &INHERIT, seed, &local)?;
         println!(
