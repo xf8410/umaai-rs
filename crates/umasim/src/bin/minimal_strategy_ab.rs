@@ -21,7 +21,10 @@ const INHERIT: InheritInfo = InheritInfo {
 
 /// `RamenState::scenario_pt` 和 `eat_count` 都会在年度 RMJ 结算后归零，不能在整局
 /// 结束时直接当累计值读取。决策日志完整记录了每次 RamenSelect 的实际选择；据此按
-/// 年份和当年吃面序号，用游戏规则本身重建整局累计 PT 与吃面次数。
+/// 年份和当年吃面序号，用游戏规则本身重建整局累计 RMJ 剧本 PT 与吃面次数。
+///
+/// 注意：这里的 RMJ 剧本 PT 是“吃面获得、用于年度 RMJ 判定和剧本常驻加成”的点数，
+/// 与训练等途径获得、最终用于购买技能的 `Uma::skill_pt` 完全不是同一种资源。
 fn apply_cumulative_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLogRow]) -> Result<()> {
     let mut yearly_eat = [0_i32; 3];
     let mut total_pt = 0_i32;
@@ -43,7 +46,7 @@ fn apply_cumulative_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLog
 
     let total_eat = yearly_eat.iter().sum();
     ensure!(total_eat > 0, "seed={} 未记录到任何吃面决策，累计指标无效", outcome.seed);
-    ensure!(total_pt > 0, "seed={} 累计剧本 PT 异常为 0", outcome.seed);
+    ensure!(total_pt > 0, "seed={} 累计 RMJ 剧本 PT 异常为 0", outcome.seed);
     outcome.scenario_pt = total_pt;
     outcome.eat_count = total_eat;
     Ok(())
@@ -53,11 +56,12 @@ fn print_summary(name: &str, outcomes: &[GameOutcome]) {
     let scores = outcomes.iter().map(|x| x.score as f64).collect::<Vec<_>>();
     let stats = bench::summarize(&scores);
     let rmj = outcomes.iter().map(|x| x.rmj_ok as f64).sum::<f64>() / outcomes.len() as f64;
-    let pt = outcomes.iter().map(|x| x.scenario_pt as f64).sum::<f64>() / outcomes.len() as f64;
+    let rmj_pt = outcomes.iter().map(|x| x.scenario_pt as f64).sum::<f64>() / outcomes.len() as f64;
+    let skill_pt = outcomes.iter().map(|x| x.skill_pt as f64).sum::<f64>() / outcomes.len() as f64;
     let eat = outcomes.iter().map(|x| x.eat_count as f64).sum::<f64>() / outcomes.len() as f64;
     println!(
-        "RESULT {name}: n={} mean={:.0} median={:.0} min={:.0} max={:.0} std={:.0} RMJ_success_years={:.2}/3 cumulative_PT={:.0} total_eat={:.1}",
-        outcomes.len(), stats.mean, stats.median, stats.min, stats.max, stats.std, rmj, pt, eat
+        "RESULT {name}: n={} mean={:.0} median={:.0} min={:.0} max={:.0} std={:.0} RMJ_success_years={:.2}/3 RMJ_scenario_PT={:.0} skill_PT={:.0} total_eat={:.1}",
+        outcomes.len(), stats.mean, stats.median, stats.min, stats.max, stats.std, rmj, rmj_pt, skill_pt, eat
     );
 }
 
@@ -65,6 +69,8 @@ fn main() -> Result<()> {
     let root = get_workspace_root()?;
     std::env::set_current_dir(root)?;
     init_global_with_config(&load_game_config()?)?;
+
+    println!("NOTE RMJ_scenario_PT=吃面获得、用于年度RMJ判定/剧本加成；skill_PT=训练等获得、用于购买技能。两者不是同一种PT。");
 
     let mut upstream_results = Vec::with_capacity(RUNS);
     let mut local_results = Vec::with_capacity(RUNS);
@@ -82,7 +88,7 @@ fn main() -> Result<()> {
         apply_cumulative_ramen_metrics(&mut b, &local.take_records().rows)?;
 
         println!(
-            "seed={seed} upstream_score={} local_score={} delta={} RMJ_upstream={}/3 RMJ_local={}/3 PT_upstream={} PT_local={} eat_upstream={} eat_local={}",
+            "seed={seed} upstream_score={} local_score={} delta={} RMJ_upstream={}/3 RMJ_local={}/3 RMJ_PT_upstream={} RMJ_PT_local={} skill_PT_upstream={} skill_PT_local={} eat_upstream={} eat_local={}",
             a.score,
             b.score,
             b.score - a.score,
@@ -90,6 +96,8 @@ fn main() -> Result<()> {
             b.rmj_ok,
             a.scenario_pt,
             b.scenario_pt,
+            a.skill_pt,
+            b.skill_pt,
             a.eat_count,
             b.eat_count
         );
