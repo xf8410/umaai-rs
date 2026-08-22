@@ -19,9 +19,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: |
-          cargo test -p umasim --no-default-features matrix_variant_parses_failmodel_before_numeric_fail
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - name: Smoke test failmodel parser through production binary
+        env:
+          VARIANT: smoke-failmodel
+          PT1: 16
+          PT2: 64
+          PT3: 64
+          SAC: 140
+          STRUCTURE: failmodel
+          SHARD: 0
+          RUNS_PER_SHARD: 0
+        run: cargo run -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - name: Smoke test combined failmodel parser
+        env:
+          VARIANT: smoke-vital-failmodel
+          PT1: 64
+          PT2: 80
+          PT3: 96
+          SAC: 200
+          STRUCTURE: vital-failmodel
+          SHARD: 0
+          RUNS_PER_SHARD: 0
+        run: cargo run -p umasim --bin skill_pt_phase_matrix --no-default-features
 
   repair:
     needs: prep
@@ -64,7 +84,7 @@ jobs:
           retention-days: 7
 
   summary:
-    if: always()
+    if: always() && needs.repair.result == 'success'
     needs: [prep, repair]
     runs-on: ubuntu-latest
     steps:
