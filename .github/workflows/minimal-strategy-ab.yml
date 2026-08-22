@@ -1,12 +1,12 @@
-name: Validate flat search warning cleanup
+name: Minimal ramen strategy A/B
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
   workflow_dispatch:
 jobs:
-  validate:
+  compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -17,8 +17,46 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: flat-search-cleanup-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Check umasim all targets
-        run: cargo check -p umasim --all-targets
-      - name: Test umasim library
-        run: cargo test -p umasim --lib
+          key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run paired A/B
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --quiet --release -p umasim --bin minimal_strategy_ab 2>&1 | tee minimal_strategy_ab.txt
+      - name: Verify results and diagnostic logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          runs="$(sed -n 's/^开始 A\/B：每套策略 \([0-9][0-9]*\) 局.*/\1/p' minimal_strategy_ab.txt)"
+          test -n "$runs"
+          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq "$runs"
+          test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
+          test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
+          test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
+          test -s logs/A_upstream_decisions.csv
+          test -s logs/B_local_decisions.csv
+          test "$(($(wc -l < logs/first_divergence.tsv)-1))" -eq "$runs"
+      - name: Publish summary
+        run: |
+          {
+            echo '## 拉面策略 A/B（1000组配对）'
+            echo ''
+            echo '- A：上游手写基准'
+            echo '- B：基准 + 受限本地修正（最多牺牲120点基础训练分）'
+            echo '- 完整逐回合日志请在本页面底部 Artifacts 下载 `ramen-ab-full-logs`'
+            echo ''
+            echo '```text'
+            grep -E '^(RESULT|PAIRED|DELTA)' minimal_strategy_ab.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload full logs
+        uses: actions/upload-artifact@v4
+        with:
+          name: ramen-ab-full-logs
+          path: |
+            minimal_strategy_ab.txt
+            logs/A_upstream_decisions.csv
+            logs/B_local_decisions.csv
+            logs/first_divergence.tsv
+          if-no-files-found: error
+          retention-days: 30
