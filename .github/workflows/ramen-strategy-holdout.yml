@@ -1,0 +1,47 @@
+name: Ramen strategy holdout validation
+on:
+  push:
+    branches: ['workbench/ramen-strategy-consolidated']
+    paths: ['.github/workflows/ramen-strategy-holdout.yml']
+  workflow_dispatch:
+jobs:
+  validate:
+    name: holdout (${{ matrix.variant }})
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        variant: [baseline, friend75, friend105, sac80]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ramen-holdout-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run holdout validation
+        env:
+          VARIANT: ${{ matrix.variant }}
+          BASE_SEED: '62444'
+          RUNS: '1000'
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --quiet --release -p umasim --bin ramen_strategy_sweep 2>compile-warnings.txt | tee result.txt
+          {
+            echo '## Holdout: ${{ matrix.variant }}'
+            echo
+            echo 'Seeds: 62444..63443 (not used for parameter selection)'
+            echo
+            echo '```text'
+            cat result.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show compiler warnings
+        if: always()
+        run: cat compile-warnings.txt || true
