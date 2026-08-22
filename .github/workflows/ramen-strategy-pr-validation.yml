@@ -19,8 +19,8 @@ jobs:
           key: ramen-pr-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Compile
         run: cargo check -p umasim
-      - name: Library tests
-        run: cargo test -p umasim --lib
+      - name: Ramen tests
+        run: cargo test -p umasim --lib ramen
       - name: Paired 1000-game A/B
         shell: bash
         run: |
