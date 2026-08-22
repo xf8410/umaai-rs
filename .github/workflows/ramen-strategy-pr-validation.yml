@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq 1000
+          test "$(grep -c '^run=' minimal_strategy_ab.txt)" -eq 1000
           test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
           test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
           test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
