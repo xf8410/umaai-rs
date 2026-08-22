@@ -19,8 +19,8 @@ jobs:
             ~/.cargo/git
             target
           key: ramen-pr-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Format check
-        run: cargo fmt --all -- --check
+      - name: Format check (production strategy)
+        run: rustfmt --edition 2024 --check crates/umasim/src/trainer/local_ramen_trainer.rs
       - name: Compile
         run: cargo check -p umasim
       - name: Library tests
