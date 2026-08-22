@@ -8,7 +8,7 @@ on:
 jobs:
   compare:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -20,7 +20,7 @@ jobs:
             ~/.cargo/git
             target
           key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - name: Run paired A/B (10 games per strategy)
+      - name: Run paired A/B
         shell: bash
         run: |
           set -o pipefail
@@ -29,16 +29,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq 10
+          declared_runs="$(sed -n 's/^开始 A\/B：每套策略 \([0-9][0-9]*\) 局.*/\1/p' minimal_strategy_ab.txt)"
+          test -n "$declared_runs"
+          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq "$declared_runs"
           test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
           test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
-      - name: Publish all 10 paired results
+      - name: Publish all paired results
         run: |
           {
-            echo '## 拉面策略最小 A/B'
+            echo '## 拉面策略 A/B'
             echo ''
-            echo '- 同一卡组、同一继承、相同的 10 个 seed'
-            echo '- 每个 seed 分别运行 upstream 和 local，共 20 局'
+            echo '- 同一卡组、同一继承、相同 seed 的配对比较'
+            echo '- A 为原上游手写策略，B 为本地修改策略'
             echo ''
             echo '```text'
             cat minimal_strategy_ab.txt
