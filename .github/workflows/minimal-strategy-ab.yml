@@ -12,9 +12,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 2
-      - name: Apply source cleanup and restore benchmark workflow
-        shell: python
+      - name: Apply source cleanup
+        shell: bash
         run: |
+          python3 <<'PY'
           from pathlib import Path
 
           path = Path("crates/umasim/src/search/flat_search.rs")
@@ -62,9 +63,10 @@ fn stage_id(stage: &OnsenTurnStage) -> u64 {
               raise SystemExit(f"expected exactly one obsolete stage_id block, got {text.count(obsolete)}")
           text = text.replace(obsolete, "")
           path.write_text(text)
+          PY
       - name: Restore normal benchmark workflow
         shell: bash
-        run: git show HEAD^:.github/workflows/minimal-strategy-ab.yml > .github/workflows/minimal-strategy-ab.yml
+        run: git show HEAD~2:.github/workflows/minimal-strategy-ab.yml > .github/workflows/minimal-strategy-ab.yml
       - name: Commit cleanup
         shell: bash
         run: |
