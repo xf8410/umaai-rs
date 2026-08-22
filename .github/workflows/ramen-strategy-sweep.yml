@@ -1,0 +1,39 @@
+name: Ramen strategy parameter sweep
+on:
+  push:
+    branches: ['workbench/ramen-strategy-consolidated']
+    paths:
+      - 'crates/umasim/src/bin/ramen_strategy_sweep.rs'
+      - 'crates/umasim/src/trainer/local_ramen_trainer.rs'
+      - '.github/workflows/ramen-strategy-sweep.yml'
+  workflow_dispatch:
+jobs:
+  sweep:
+    strategy:
+      fail-fast: false
+      max-parallel: 14
+      matrix:
+        variant: [baseline, sac80, sac100, sac140, fail500, fail900, bond7, bond9, friend75, friend105, no_overflow, no_urgency, hint4, hint8]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ramen-sweep-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Run ${{ matrix.variant }}
+        env:
+          VARIANT: ${{ matrix.variant }}
+          BASE_SEED: '61444'
+          RUNS: '1000'
+        run: cargo run --quiet --release -p umasim --bin ramen_strategy_sweep | tee result-${{ matrix.variant }}.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result-${{ matrix.variant }}
+          path: result-${{ matrix.variant }}.txt
+          retention-days: 7
