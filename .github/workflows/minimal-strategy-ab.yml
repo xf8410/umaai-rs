@@ -21,7 +21,17 @@ jobs:
             target
           key: minimal-strategy-ab-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Run paired A/B (10 games per strategy)
-        run: cargo run --quiet --release -p umasim --bin minimal_strategy_ab | tee minimal_strategy_ab.txt
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --quiet --release -p umasim --bin minimal_strategy_ab 2>&1 | tee minimal_strategy_ab.txt
+      - name: Verify all paired results exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq 10
+          test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
+          test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
       - name: Publish all 10 paired results
         run: |
           {
