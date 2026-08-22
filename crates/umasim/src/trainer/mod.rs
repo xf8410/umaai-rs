@@ -11,7 +11,7 @@ pub mod logging_trainer;
 pub mod mcts_trainer;
 pub mod ramen_handwritten_trainer;
 pub use handwritten_trainer::HandwrittenTrainer;
-pub use local_ramen_trainer::LocalRamenTrainer;
+pub use local_ramen_trainer::{LocalRamenConfig, LocalRamenTrainer};
 pub use logging_trainer::LoggingTrainer;
 pub use mcts_trainer::MctsTrainer;
 pub use ramen_handwritten_trainer::RamenHandwrittenTrainer;
