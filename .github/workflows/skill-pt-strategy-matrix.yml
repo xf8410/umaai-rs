@@ -1,4 +1,4 @@
-name: Skill PT handwritten strategy matrix
+name: Skill PT handwritten strategy matrix (legacy)
 
 on:
   workflow_dispatch:
@@ -7,98 +7,12 @@ on:
         description: Paired seeds per matrix shard
         required: false
         default: "50"
-  push:
-    branches:
-      - workbench/skill-pt-matrix-distill
-    paths:
-      - ".github/workflows/skill-pt-strategy-matrix.yml"
-      - "crates/umasim/src/bin/skill_pt_matrix.rs"
-      - "crates/umasim/src/trainer/local_ramen_trainer.rs"
-      - "scripts/summarize_skill_pt_matrix.py"
 
 permissions:
   contents: read
 
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-
 jobs:
-  prep:
-    name: prep
-    runs-on: ubuntu-latest
-    outputs:
-      runs_per_shard: ${{ steps.config.outputs.runs }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: config
-        shell: bash
-        run: |
-          runs="${{ github.event.inputs.runs_per_shard }}"
-          if [[ -z "$runs" ]]; then runs=50; fi
-          echo "runs=$runs" >> "$GITHUB_OUTPUT"
-          {
-            echo "# 技能 PT 策略矩阵"
-            echo
-            echo "本次展开 **240 个原生矩阵 job**：5 个 PT 权重 × 4 个属性保护档 × 2 个长期逻辑档 × 3 个失败惩罚档 × 2 个 seed 分片。"
-            echo
-            echo "每个矩阵单元运行 **$runs** 组 A/B 配对 seed；PT 口径为 Uma.skill_pt，不是 RMJ/scenario PT。"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Compile check
-        run: cargo check -p umasim --bin skill_pt_matrix --no-default-features
-
-  experiment:
-    name: pt${{ matrix.pt }}-sac${{ matrix.sac }}-${{ matrix.mode }}-fail${{ matrix.fail }} / shard ${{ matrix.shard }}
-    needs: prep
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        pt: [6, 8, 10, 12, 14]
-        sac: [0, 10, 25, 60]
-        mode: [plain, long]
-        fail: [0, 350, 700]
-        shard: [0, 1]
-    env:
-      VARIANT: pt${{ matrix.pt }}-sac${{ matrix.sac }}-${{ matrix.mode }}-fail${{ matrix.fail }}
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: ${{ needs.prep.outputs.runs_per_shard }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: skill-pt-matrix
-          cache-on-failure: true
-      - name: Run paired matrix cell
-        run: cargo run -p umasim --bin skill_pt_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: result-${{ env.VARIANT }}-shard${{ matrix.shard }}
-          path: matrix-result.csv
-          if-no-files-found: error
-          retention-days: 7
-
-  final-summary:
-    name: final summary
-    if: always()
-    needs: [prep, experiment]
+  note:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: result-*
-          path: matrix-results
-      - name: Publish complete result table to Actions Summary
-        run: python3 scripts/summarize_skill_pt_matrix.py
-      - name: Preserve merged CSV inputs for audit
-        uses: actions/upload-artifact@v4
-        with:
-          name: skill-pt-matrix-raw-results
-          path: matrix-results
-          retention-days: 7
+      - run: echo 'Legacy v1 matrix is dispatch-only; use the structural policy workflows for new experiments.' >> "$GITHUB_STEP_SUMMARY"
