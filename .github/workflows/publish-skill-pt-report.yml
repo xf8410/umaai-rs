@@ -1,0 +1,42 @@
+name: Publish completed skill PT matrix report
+
+on:
+  workflow_dispatch:
+    inputs:
+      artifact_id:
+        description: Aggregated raw-results artifact ID
+        required: true
+        default: "9480254377"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - name: Download aggregated results from completed run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          mkdir -p matrix-results benchmark-results
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > result.zip
+          unzip -q result.zip -d matrix-results
+      - name: Generate readable Markdown report
+        env:
+          GITHUB_STEP_SUMMARY: benchmark-results/skill-pt-matrix-run-32590349220.md
+        run: python3 scripts/summarize_skill_pt_matrix.py
+      - name: Show report in this run Summary
+        run: cat benchmark-results/skill-pt-matrix-run-32590349220.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit report to experiment branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/skill-pt-matrix-run-32590349220.md
+          git commit -m "bench: publish skill PT matrix run 32590349220 report"
+          git push origin HEAD:workbench/skill-pt-matrix-distill
