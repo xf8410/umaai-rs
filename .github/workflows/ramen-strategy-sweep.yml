@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 jobs:
   sweep:
+    name: sweep (${{ matrix.variant }})
     strategy:
       fail-fast: false
       max-parallel: 14
@@ -27,13 +28,22 @@ jobs:
             target
           key: ramen-sweep-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
       - name: Run ${{ matrix.variant }}
+        id: run
         env:
           VARIANT: ${{ matrix.variant }}
           BASE_SEED: '61444'
           RUNS: '1000'
-        run: cargo run --quiet --release -p umasim --bin ramen_strategy_sweep | tee result-${{ matrix.variant }}.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: result-${{ matrix.variant }}
-          path: result-${{ matrix.variant }}.txt
-          retention-days: 7
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --quiet --release -p umasim --bin ramen_strategy_sweep 2>compile-warnings.txt | tee result.txt
+          {
+            echo '## ${{ matrix.variant }}'
+            echo
+            echo '```text'
+            cat result.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Show compiler warnings
+        if: always()
+        run: cat compile-warnings.txt || true
