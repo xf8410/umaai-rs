@@ -1,10 +1,8 @@
 name: Minimal ramen strategy A/B
-
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
   workflow_dispatch:
-
 jobs:
   compare:
     runs-on: ubuntu-latest
@@ -25,29 +23,40 @@ jobs:
         run: |
           set -o pipefail
           cargo run --quiet --release -p umasim --bin minimal_strategy_ab 2>&1 | tee minimal_strategy_ab.txt
-      - name: Verify all paired results exist
+      - name: Verify results and diagnostic logs
         shell: bash
         run: |
           set -euo pipefail
-          declared_runs="$(sed -n 's/^开始 A\/B：每套策略 \([0-9][0-9]*\) 局.*/\1/p' minimal_strategy_ab.txt)"
-          test -n "$declared_runs"
-          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq "$declared_runs"
+          runs="$(sed -n 's/^开始 A\/B：每套策略 \([0-9][0-9]*\) 局.*/\1/p' minimal_strategy_ab.txt)"
+          test -n "$runs"
+          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq "$runs"
           test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
+          test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
           test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
-      - name: Publish all paired results
+          test -s logs/A_upstream_decisions.csv
+          test -s logs/B_local_decisions.csv
+          test "$(($(wc -l < logs/first_divergence.tsv)-1))" -eq "$runs"
+      - name: Publish summary
         run: |
           {
-            echo '## 拉面策略 A/B'
+            echo '## 拉面策略 A/B（1000组配对）'
             echo ''
-            echo '- 同一卡组、同一继承、相同 seed 的配对比较'
-            echo '- A 为原上游手写策略，B 为本地修改策略'
+            echo '- A：上游手写基准'
+            echo '- B：基准 + 受限本地修正（最多牺牲120点基础训练分）'
+            echo '- 完整逐回合日志请在本页面底部 Artifacts 下载 `ramen-ab-full-logs`'
             echo ''
             echo '```text'
-            cat minimal_strategy_ab.txt
+            grep -E '^(RESULT|PAIRED|DELTA)' minimal_strategy_ab.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - name: Upload full logs
+        uses: actions/upload-artifact@v4
         with:
-          name: minimal-strategy-ab
-          path: minimal_strategy_ab.txt
+          name: ramen-ab-full-logs
+          path: |
+            minimal_strategy_ab.txt
+            logs/A_upstream_decisions.csv
+            logs/B_local_decisions.csv
+            logs/first_divergence.tsv
           if-no-files-found: error
+          retention-days: 30
