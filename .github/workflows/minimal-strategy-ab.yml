@@ -1,19 +1,24 @@
-name: Remove temporary cleanup script
+name: Validate flat search warning cleanup
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
   workflow_dispatch:
-permissions:
-  contents: write
 jobs:
-  cleanup:
+  validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
-      - name: Remove temporary script
-        run: |
-          git rm scripts/apply_flat_search_cleanup.py
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m "chore: remove temporary cleanup script"
-          git push
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: flat-search-cleanup-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Check umasim all targets
+        run: cargo check -p umasim --all-targets
+      - name: Test umasim library
+        run: cargo test -p umasim --lib
