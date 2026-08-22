@@ -30,6 +30,7 @@ pub struct LocalRamenTrainer { pub policy:RamenPolicy,pub config:LocalRamenConfi
 impl Default for LocalRamenTrainer { fn default()->Self{Self{policy:RamenPolicy::default(),config:LocalRamenConfig::default(),last_breakdown:Mutex::new(None)}}}
 impl LocalRamenTrainer {
     pub fn new()->Self{Self::default()}
+    pub fn with_config(config: LocalRamenConfig)->Self{Self{policy:RamenPolicy::default(),config,last_breakdown:Mutex::new(None)}}
     fn choose(o:&[RamenPolicyOutput])->usize{o.iter().enumerate().max_by(|(ia,a),(ib,b)|a.score.total_cmp(&b.score).then_with(||ib.cmp(ia))).map(|(i,_)|i).unwrap_or(0)}
     fn stash(&self,o:&[RamenPolicyOutput]){let s=o.iter().enumerate().map(|(i,x)|format!("#{i} {:.0}[{}]",x.score,x.reason)).collect::<Vec<_>>().join(" | ");if let Ok(mut x)=self.last_breakdown.lock(){*x=Some(s)}}
     fn phase(t:i32)->f32{if t<24{1.0}else if t<48{0.55}else{0.15}}
