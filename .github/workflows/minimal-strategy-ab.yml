@@ -16,7 +16,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin workbench/ramen-strategy-clean
-          git checkout workbench/ramen-strategy-clean
+          git checkout -B workbench/ramen-strategy-clean origin/workbench/ramen-strategy-clean
           for path in \
             .github/workflows/minimal-strategy-ab.yml \
             crates/umasim/src/bin/minimal_strategy_ab.rs \
