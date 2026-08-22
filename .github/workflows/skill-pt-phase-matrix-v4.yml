@@ -1,0 +1,97 @@
+name: Skill PT phased handwritten strategy v4
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/skill-pt-phase-matrix-v4.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - run: |
+          echo '# v4：分年份动态技能 PT 权重' >> "$GITHUB_STEP_SUMMARY"
+          echo '固定 long/fail0；不改变马娘、卡组、因子，也不引入支援卡分类。18 个年份权重档 × 2 个保护上限 × 4 分片。' >> "$GITHUB_STEP_SUMMARY"
+
+  phase:
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        phase:
+          - {name: p16-32-64, p1: 16, p2: 32, p3: 64}
+          - {name: p16-48-64, p1: 16, p2: 48, p3: 64}
+          - {name: p16-64-64, p1: 16, p2: 64, p3: 64}
+          - {name: p24-48-64, p1: 24, p2: 48, p3: 64}
+          - {name: p24-64-64, p1: 24, p2: 64, p3: 64}
+          - {name: p32-48-64, p1: 32, p2: 48, p3: 64}
+          - {name: p32-64-64, p1: 32, p2: 64, p3: 64}
+          - {name: p40-64-64, p1: 40, p2: 64, p3: 64}
+          - {name: p48-64-64, p1: 48, p2: 64, p3: 64}
+          - {name: p32-64-80, p1: 32, p2: 64, p3: 80}
+          - {name: p32-64-96, p1: 32, p2: 64, p3: 96}
+          - {name: p40-64-80, p1: 40, p2: 64, p3: 80}
+          - {name: p48-64-80, p1: 48, p2: 64, p3: 80}
+          - {name: p48-80-96, p1: 48, p2: 80, p3: 96}
+          - {name: p64-64-64, p1: 64, p2: 64, p3: 64}
+          - {name: p64-80-96, p1: 64, p2: 80, p3: 96}
+          - {name: p80-80-80, p1: 80, p2: 80, p3: 80}
+          - {name: p96-96-96, p1: 96, p2: 96, p3: 96}
+        sac: [140, 200]
+        shard: [0, 1, 2, 3]
+    env:
+      VARIANT: ${{ matrix.phase.name }}-sac${{ matrix.sac }}-long-fail0
+      PT1: ${{ matrix.phase.p1 }}
+      PT2: ${{ matrix.phase.p2 }}
+      PT3: ${{ matrix.phase.p3 }}
+      SAC: ${{ matrix.sac }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: skill-pt-matrix}
+      - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v4-${{ env.VARIANT }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
+          retention-days: 7
+
+  summary:
+    if: always()
+    needs: [prep, phase]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with: {pattern: v4-*, path: matrix-results}
+      - name: Generate report
+        env: {REPORT_PATH: benchmark-results/skill-pt-phase-v4-${{ github.run_id }}.md}
+        run: |
+          python3 scripts/summarize_skill_pt_matrix.py
+          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit report
+        env: {REPORT_PATH: benchmark-results/skill-pt-phase-v4-${{ github.run_id }}.md}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$REPORT_PATH"
+          git commit -m "bench: publish phased skill PT v4 run ${{ github.run_id }}"
+          git push origin HEAD:workbench/skill-pt-matrix-distill
