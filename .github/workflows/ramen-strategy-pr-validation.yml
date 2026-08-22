@@ -1,0 +1,64 @@
+name: Clean ramen strategy PR validation
+on:
+  push:
+    branches: ['workbench/ramen-strategy-pr']
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ramen-pr-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Compile
+        run: cargo check -p umasim
+      - name: Library tests
+        run: cargo test -p umasim --lib
+      - name: Paired 1000-game A/B
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo run --quiet --release -p umasim --bin minimal_strategy_ab 2>&1 | tee minimal_strategy_ab.txt
+      - name: Verify A/B output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c '^seed=' minimal_strategy_ab.txt)" -eq 1000
+          test "$(grep -c '^RESULT ' minimal_strategy_ab.txt)" -eq 2
+          test "$(grep -c '^PAIRED ' minimal_strategy_ab.txt)" -eq 1
+          test "$(grep -c '^DELTA ' minimal_strategy_ab.txt)" -eq 1
+          test -s logs/A_upstream_decisions.csv
+          test -s logs/B_local_decisions.csv
+          test -s logs/first_divergence.tsv
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## Clean branch validation'
+            echo '```text'
+            grep -E '^(RESULT|PAIRED|DELTA)' minimal_strategy_ab.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: clean-ramen-strategy-validation
+          path: |
+            minimal_strategy_ab.txt
+            logs/A_upstream_decisions.csv
+            logs/B_local_decisions.csv
+            logs/first_divergence.tsv
+          if-no-files-found: ignore
+          retention-days: 14
