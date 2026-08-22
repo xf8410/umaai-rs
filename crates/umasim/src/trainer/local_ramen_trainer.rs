@@ -20,7 +20,7 @@ pub struct LocalRamenConfig {
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self { Self {
-        early_bond_value:8.0,hint_bonus:6.0,first_friend_click_value:90.0,
+        early_bond_value:8.0,hint_bonus:6.0,first_friend_click_value:75.0,
         low_friend_bond_value:35.0,active_friend_value:8.0,high_fail_penalty:700.0,
         feeling_overflow_threshold:10,overflow_value:8.0,rmj_urgency_margin:450,
         rmj_urgency_bonus:60.0,max_base_score_sacrifice:120.0
