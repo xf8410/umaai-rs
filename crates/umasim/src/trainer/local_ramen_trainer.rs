@@ -4,6 +4,7 @@ use crate::{
         FriendOutState, Game, Person, PersonType, Trainer,
         ramen::{
             Operation, RamenAction, RamenGame, RamenStage,
+            effects::calc_ramen_training_effect,
             policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput},
             rules::{calc_ramen_pt_gain, calc_region_bonus, list_special_targets_for},
         },
@@ -263,7 +264,9 @@ impl LocalRamenTrainer {
                 o.score += z;
                 o.add("dynamic_vital", z)
             }
-            let fr = g.calc_training_failure_rate(&buffs, tr);
+            let base_fr = g.calc_training_failure_rate(&buffs, tr);
+            let ramen_effect = calc_ramen_training_effect(g, tr, g.shining_count(tr) > 0);
+            let fr = (base_fr * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0);
             if self.config.expected_fail && fr > 0. {
                 let p = fr / 100.;
                 let bp = if fr >= 20. { p } else { 0. };
