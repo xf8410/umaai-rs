@@ -1,4 +1,4 @@
-name: Apply flat search warning cleanup
+name: Finalize flat search warning cleanup
 on:
   push:
     branches: ['workbench/port-local-ramen-strategy']
@@ -6,16 +6,16 @@ on:
 permissions:
   contents: write
 jobs:
-  patch:
+  finalize:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Apply source cleanup
-        run: python3 scripts/apply_flat_search_cleanup.py
-      - name: Commit source cleanup
+      - name: Restore benchmark workflow and remove temporary script
         run: |
+          git show 5ee20705eee649928698f9eb8f7a0df6244c95f2:.github/workflows/minimal-strategy-ab.yml > .github/workflows/minimal-strategy-ab.yml
+          git rm scripts/apply_flat_search_cleanup.py
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/umasim/src/search/flat_search.rs
-          git commit -m "chore(search): remove obsolete stage helper and log leaf evaluator"
+          git add .github/workflows/minimal-strategy-ab.yml
+          git commit -m "ci: restore ramen A/B workflow after cleanup"
           git push
