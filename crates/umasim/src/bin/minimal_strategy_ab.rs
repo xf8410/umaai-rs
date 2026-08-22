@@ -52,23 +52,24 @@ fn apply_cumulative_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLog
     Ok(())
 }
 
-/// 输出所有机器字段的完整说明，避免把不同 PT、单局值和多局平均值混为一谈。
+/// 输出所有机器字段的完整说明。
+/// 每行固定以 `LEGEND ` 开头，不得占用 CI 保留的 `seed=`、`RESULT `、`DELTA ` 前缀。
 fn print_legend() {
     println!("===== 字段说明 / LEGEND =====");
-    println!("seed: 随机种子；同一 seed 下 upstream/local 使用相同初始随机条件进行配对比较。");
-    println!("upstream/local: upstream=原上游手写策略；local=本地修改后的策略。");
-    println!("*_score: 单局最终育成评分；delta=local_score-upstream_score，正数表示本地策略该局更高。");
-    println!("RMJ_*: 单局三个年度 RMJ 中成功的年度数；3/3 表示三个年度全部成功。");
-    println!("RMJ_cumulative_scenario_PT_*: 单局三个年度吃面所得 RMJ 剧本 PT 的累计和；用于年度 RMJ 判定/剧本加成，每年结算后游戏状态会清零。");
-    println!("skill_PT_*: 单局结束时技能点；来自训练/比赛/事件等，用于购买技能；与 RMJ 剧本 PT 不是同一种资源。");
-    println!("ramen_eaten_*: 单局三个年度合计吃面碗数；不是当年剩余值，也不是平均值。");
-    println!("n: 每个策略完成的局数。");
-    println!("mean/median/min/max/std: 最终育成评分的平均值/中位数/最小值/最大值/总体标准差。");
-    println!("avg_RMJ_success_years: 每局 RMJ 成功年度数的平均值，满值为 3。");
-    println!("avg_RMJ_cumulative_scenario_PT: 每局累计 RMJ 剧本 PT 的平均值。");
-    println!("avg_skill_PT: 每局结束技能点的平均值。");
-    println!("avg_ramen_eaten_per_game: 每局三个年度合计吃面碗数的平均值；例如 25.7 表示平均每局吃 25.7 碗。");
-    println!("DELTA local_mean_score-upstream_mean_score: 两策略平均最终评分之差；正数表示本地策略平均分更高。");
+    println!("LEGEND seed: 随机种子；同一 seed 下 upstream/local 使用相同初始随机条件进行配对比较。");
+    println!("LEGEND upstream/local: upstream=原上游手写策略；local=本地修改后的策略。");
+    println!("LEGEND *_score: 单局最终育成评分；delta=local_score-upstream_score，正数表示本地策略该局更高。");
+    println!("LEGEND RMJ_*: 单局三个年度 RMJ 中成功的年度数；3/3 表示三个年度全部成功。");
+    println!("LEGEND RMJ_cumulative_scenario_PT_*: 单局三个年度吃面所得 RMJ 剧本 PT 的累计和；用于年度 RMJ 判定/剧本加成，每年结算后游戏状态会清零。");
+    println!("LEGEND skill_PT_*: 单局结束时技能点；来自训练/比赛/事件等，用于购买技能；与 RMJ 剧本 PT 不是同一种资源。");
+    println!("LEGEND ramen_eaten_*: 单局三个年度合计吃面碗数；不是当年剩余值，也不是平均值。");
+    println!("LEGEND n: 每个策略完成的局数。");
+    println!("LEGEND mean/median/min/max/std: 最终育成评分的平均值/中位数/最小值/最大值/总体标准差。");
+    println!("LEGEND avg_RMJ_success_years: 每局 RMJ 成功年度数的平均值，满值为 3。");
+    println!("LEGEND avg_RMJ_cumulative_scenario_PT: 每局累计 RMJ 剧本 PT 的平均值。");
+    println!("LEGEND avg_skill_PT: 每局结束技能点的平均值。");
+    println!("LEGEND avg_ramen_eaten_per_game: 每局三个年度合计吃面碗数的平均值；例如 25.7 表示平均每局吃 25.7 碗。");
+    println!("LEGEND final_delta: local_mean_score-upstream_mean_score，即两策略平均最终评分之差；正数表示本地策略平均分更高。");
     println!("=============================");
 }
 
