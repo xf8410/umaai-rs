@@ -7,7 +7,7 @@ use rand::prelude::StdRng;
 use umasim::{
     bench::{self, CardPickOpts, DeckComposition},
     game::{
-        Game, InheritInfo, Person, PersonType, Trainer,
+        Game, InheritInfo, PersonType, Trainer,
         ramen::{Operation, RamenAction, RamenGame, RamenStage}
     },
     gamedata::{EventChoice, EventData, init_global_with_config},
@@ -55,16 +55,13 @@ impl Trainer<RamenGame> for DiagnosticTrainer {
             let operation = actions.get(index).map(|action| action.operation).unwrap_or(Operation::Rest);
             let (hint_cards, shining) = if let Operation::Train(training) = operation {
                 let train = training as usize;
-                let hints = game
-                    .distribution()
-                    .get(train)
-                    .into_iter()
-                    .flatten()
+                let hints = game.base.distribution[train]
+                    .iter()
                     .filter_map(|&person| usize::try_from(person).ok())
                     .filter(|&person| {
-                        game.persons()
+                        game.persons
                             .get(person)
-                            .is_some_and(|p| p.hint() && matches!(p.person_type(), PersonType::Card))
+                            .is_some_and(|p| p.is_hint && p.person_type == PersonType::Card)
                     })
                     .count();
                 (hints, game.shining_count(train))
