@@ -1,13 +1,10 @@
-name: Ramen neural dimension training matrix v32
+name: Ramen neural feature schema matrix v31
 on:
   workflow_dispatch:
 permissions:
-  contents: write
-concurrency:
-  group: ramen-neural-dimension-v32
-  cancel-in-progress: false
+  contents: read
 jobs:
-  data:
+  dataset:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -25,38 +22,31 @@ jobs:
       ROLLOUTS: 32
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
+      - uses: dtolnay/rust-toolchain@nightly
+        with: {components: rustfmt}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: ramen-neural-v32
-      - run: cargo fmt --all -- --check
+        with: {shared-key: ramen-neural-schema-v31}
+      - run: cargo +nightly fmt --all -- --check
       - run: cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: ramen-neural-v32-${{ matrix.shard }}
+          name: ramen-schema-v31-${{ matrix.shard }}
           path: ramen-feature-dataset.jsonl
-  train:
-    needs: data
+          retention-days: 7
+  matrix:
+    needs: dataset
     runs-on: ubuntu-latest
-    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
       - uses: actions/download-artifact@v4
-        with:
-          pattern: ramen-neural-v32-*
-          path: data
+        with: {pattern: ramen-schema-v31-*, path: data}
       - run: python3 -m pip install --user numpy
-      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_dimension_matrix_v32.py > benchmark-results/ramen-neural-dimension-training-v32.md
-      - run: cat benchmark-results/ramen-neural-dimension-training-v32.md
-      - name: Commit report
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-neural-dimension-training-v32.md
-          git commit -m 'bench: publish trained neural dimension matrix v32'
-          git pull --rebase origin workbench/skill-pt-matrix-distill
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+      - name: Train schema and width matrix
+        run: python3 scripts/ramen/train_ramen_dimension_matrix_v32.py data | tee ramen-feature-schema-matrix-v31.md
+      - run: cat ramen-feature-schema-matrix-v31.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-feature-schema-matrix-v31
+          path: ramen-feature-schema-matrix-v31.md
+          retention-days: 14
