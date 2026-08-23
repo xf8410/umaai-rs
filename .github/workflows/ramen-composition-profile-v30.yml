@@ -1,4 +1,4 @@
-name: Ramen neural dimension training matrix v32
+name: Ramen neural dimension confirmation v33
 on:
   workflow_dispatch:
 permissions:
@@ -6,14 +6,14 @@ permissions:
 jobs:
   data:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4]
     env:
-      COUNT: 150
-      ROLLOUTS: 32
+      COUNT: 200
+      ROLLOUTS: 64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,34 +21,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ramen-neural-v32
+          shared-key: ramen-neural-v33
       - run: cargo fmt --all -- --check
-      - name: Generate teacher labels
-        run: START=$((1000 + ${{ matrix.shard }} * 150)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
+      - name: Generate confirmed labels
+        run: START=$((2000 + ${{ matrix.shard }} * 200)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: ramen-neural-v32-${{ matrix.shard }}
+          name: ramen-neural-v33-${{ matrix.shard }}
           path: ramen-feature-dataset.jsonl
   train:
     needs: data
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/skill-pt-matrix-distill
       - uses: actions/download-artifact@v4
         with:
-          pattern: ramen-neural-v32-*
+          pattern: ramen-neural-v33-*
           path: data
       - run: python3 -m pip install --user numpy
-      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_dimension_matrix_v32.py > benchmark-results/ramen-neural-dimension-training-v32.md
-      - run: cat benchmark-results/ramen-neural-dimension-training-v32.md
+      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_dimension_confirm_v33.py > benchmark-results/ramen-neural-dimension-confirm-v33.md
+      - run: cat benchmark-results/ramen-neural-dimension-confirm-v33.md
       - name: Commit report
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-neural-dimension-training-v32.md
-          git commit -m 'bench: publish trained neural dimension matrix v32'
+          git add benchmark-results/ramen-neural-dimension-confirm-v33.md
+          git commit -m 'bench: publish neural dimension confirmation v33'
           git pull --rebase origin workbench/skill-pt-matrix-distill
           git push origin HEAD:workbench/skill-pt-matrix-distill
