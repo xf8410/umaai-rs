@@ -1,0 +1,27 @@
+name: 读取绝对阈值复赛报告
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/read-threshold-report-once.yml']
+permissions: {actions: read, contents: write}
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with:
+          name: 正式策略精确隔离复赛报告
+          path: /tmp/report
+          repository: xf8410/umaai-rs
+          run-id: 32662739780
+          github-token: ${{ github.token }}
+      - run: |
+          cp /tmp/report/exact-recommended-weight-confirm.md .trae/exports/exact-recommended-weight-thresholds.md
+          rm .github/workflows/read-threshold-report-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '保存正式策略绝对阈值复赛报告'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
