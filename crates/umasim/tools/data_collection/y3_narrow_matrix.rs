@@ -12,7 +12,7 @@ use umasim::{
     utils::{get_workspace_root, load_game_config}
 };
 
-const BASE_SEED: u64 = 995_100;
+const DEFAULT_BASE_SEED: u64 = 995_100;
 const UMA: u32 = 102601;
 const FRIEND: u32 = 303054;
 const INHERIT: InheritInfo = InheritInfo {
@@ -78,25 +78,27 @@ fn main() -> Result<()> {
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
     let name = env::var("候选方案")?;
+    let base_seed: u64 = env::var("基础种子")
+        .map_or(Ok(DEFAULT_BASE_SEED), |value| value.parse())?;
     let shard: u64 = env::var("分片序号")?.parse()?;
     let runs: u64 = env::var("每分片局数")?.parse()?;
     let deck = deck()?;
     let mut rows = Vec::with_capacity(runs as usize);
     for offset in 0..runs {
         let run_index = shard * runs + offset;
-        let (mut rng, rule_master) = bench::seeded_rngs(BASE_SEED, run_index);
+        let (mut rng, rule_master) = bench::seeded_rngs(base_seed, run_index);
         let mut game = RamenGame::newgame(UMA, &deck, INHERIT.clone())?;
         game.set_rule_master(rule_master);
         game.run_full_game(&PhaseTrainer::candidate(&name)?, &mut rng)?;
         rows.push(vec![
-            name.clone(), run_index.to_string(), game.uma.calc_score().to_string(),
+            name.clone(), base_seed.to_string(), run_index.to_string(), game.uma.calc_score().to_string(),
             game.uma.skill_pt.to_string(), game.ramen.scenario_pt.to_string(),
             game.ramen.rmj_results.iter().filter(|&&ok| ok).count().to_string()
         ]);
     }
     bench::write_csv(
         Path::new("第三年窄邻域.csv"),
-        &["方案", "局序号", "总分", "技能点", "最终拉面点", "RMJ成功年数"],
+        &["方案", "基础种子", "局序号", "总分", "技能点", "最终拉面点", "RMJ成功年数"],
         &rows
     )
 }
