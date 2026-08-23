@@ -1292,7 +1292,6 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::RecommendedRamenTrainer;
