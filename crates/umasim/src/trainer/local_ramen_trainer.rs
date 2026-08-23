@@ -183,6 +183,17 @@ pub struct LocalRamenConfig {
     /// 不应再为训练后低体力付费。更早回合若低体力会影响至少一个普通训练回合，
     /// 才计入崩盘成本。
     pub y3_recovery_horizon: bool,
+
+    /// 当体力守门或正常打分原本选择休息时，是否优先用尚未完成的友人外出替代。
+    ///
+    /// 友人外出同样恢复体力，同时提供属性、干劲、Hint、隐藏风味和事件链进度；
+    /// 仅替换本来就会消耗的休息回合，不为了赶链强行覆盖高价值训练。
+    pub friend_outing_replaces_rest: bool,
+
+    /// 友人第三次外出时，当前体力低于该值就选择恢复 50 体力的选项。
+    ///
+    /// 否则保留事件通用评分，可选无回复的属性/PT选项。`0` 表示关闭该低体力保护。
+    pub friend_outing3_recovery_vital: i32,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -218,6 +229,8 @@ impl Default for LocalRamenConfig {
             y3_vital_shortfall_weight: 0.0,
             y3_post_train_hard_floor: 0,
             y3_recovery_horizon: false,
+            friend_outing_replaces_rest: false,
+            friend_outing3_recovery_vital: 0,
         }
     }
 }
@@ -272,6 +285,10 @@ impl LocalRamenTrainer {
                 local.y3_post_train_hard_floor = v.parse()?
             } else if token == "y3horizon" {
                 local.y3_recovery_horizon = true
+            } else if token == "friendrest" {
+                local.friend_outing_replaces_rest = true
+            } else if let Some(v) = token.strip_prefix("friend3v") {
+                local.friend_outing3_recovery_vital = v.parse()?
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -378,6 +395,23 @@ impl LocalRamenTrainer {
     }
     fn decide_train(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (mut guard, mut out) = self.policy.decide_train(g, a)?;
+        if self.config.friend_outing_replaces_rest
+            && a.get(guard).is_some_and(|x| x.operation == Operation::Rest)
+            && let Some(friend_idx) = a.iter().position(|x| x.operation == Operation::FriendOuting)
+        {
+            // 不新增恢复回合，只把已经决定的纯休息换成收益更完整的友人外出。
+            guard = friend_idx;
+            if out.len() == a.len() {
+                out[friend_idx].reason = "友人出行：替代原定休息并推进事件链".to_string();
+                out[friend_idx].score = out.iter().map(|x| x.score).fold(f32::NEG_INFINITY, f32::max) + 1.0;
+            } else {
+                out = vec![RamenPolicyOutput {
+                    score: f32::MAX,
+                    reason: "守门: 友人出行替代低体力休息".to_string(),
+                    ..Default::default()
+                }];
+            }
+        }
         if out.len() != a.len() {
             let ate_this_turn = self.config.eat_requires_training && g.ramen.current_ramen.is_some();
             let selected_is_train = a
@@ -883,7 +917,8 @@ impl LocalRamenTrainer {
 /// - 关闭随机分身 lookahead；
 /// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
-/// - 第三年只在体力崩盘会损失后续普通训练回合时收费；有马前可控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管。
+/// - 第三年终盘允许有马前把体力控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管；
+/// - 本来要休息且友人外出可用时，以友人外出替代纯休息；第三次外出低于 45 体力时选择回 50 体。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -919,10 +954,12 @@ impl RecommendedRamenTrainer {
             local.cook2_stock_weight = 40.0;
             local.eat_requires_training = true;
             local.y3_pre_train_vital_target = 0;
-            local.y3_post_train_vital_target = 10;
-            local.y3_vital_shortfall_weight = 8.0;
+            local.y3_post_train_vital_target = 0;
+            local.y3_vital_shortfall_weight = 0.0;
             local.y3_post_train_hard_floor = 0;
             local.y3_recovery_horizon = true;
+            local.friend_outing_replaces_rest = true;
+            local.friend_outing3_recovery_vital = 45;
             LocalRamenTrainer::with_configs(policy, local)
         }
 
@@ -1011,8 +1048,16 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
         Ok(i)
     }
     fn select_event_choice(
-        &self, g: &RamenGame, _e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng,
+        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng,
     ) -> Result<usize> {
+        if e.id == 830305113
+            && self.config.friend_outing3_recovery_vital > 0
+            && g.uma.vital < self.config.friend_outing3_recovery_vital
+            && !c.is_empty()
+        {
+            // 友人外出3选项1固定恢复50体；在低体力恢复场景中不能被高PT权重误选成无回复选项。
+            return Ok(0);
+        }
         self.select_choice(g, c, r)
     }
     fn last_breakdown(&self) -> Option<String> {
