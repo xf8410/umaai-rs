@@ -63,6 +63,11 @@ name = "vital_transition_matrix"
 path = "tools/data_collection/vital_transition_matrix.rs"
 required-features = ["experiment-tools"]
 
+[[bin]]
+name = "vital_transition_diagnostic"
+path = "tools/data_collection/vital_transition_diagnostic.rs"
+required-features = ["experiment-tools"]
+
 [features]
 default = ["cli", "diag"]
 diag = []
