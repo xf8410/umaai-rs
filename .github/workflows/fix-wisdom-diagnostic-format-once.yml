@@ -22,7 +22,8 @@ jobs:
               raise SystemExit(f'格式串匹配数量错误: {s.count(old)}')
           p.write_text(s.replace(old,new))
           PY
-      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - name: 确保专项参数入口存在（脚本可重复执行）
+        run: python3 scripts/ramen/add_exact_recommended_weight_override.py
       - uses: dtolnay/rust-toolchain@stable
       - name: 提交前单独编译诊断工具
         run: cargo check -p umasim --bin wisdom_structure_diagnostic --features experiment-tools --no-default-features
