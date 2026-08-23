@@ -1,0 +1,47 @@
+name: Reorganize upstream PR and format with nightly
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  reorganize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
+      - run: python3 scripts/reorganize_upstream_pr.py
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: Nightly formatting
+        run: cargo +nightly fmt --all
+      - name: Core-only library tests
+        run: cargo test -p umasim --lib --no-default-features
+      - name: Default workspace check
+        run: cargo check --workspace
+      - name: Verify requested layout
+        shell: bash
+        run: |
+          test ! -d benchmark-results
+          grep -qx '/benchmark-results/' .gitignore
+          test -f crates/umasim/tools/data_collection/ramen_feature_dataset.rs
+          test ! -f crates/umasim/src/bin/ramen_feature_dataset.rs
+          test -f scripts/ramen/train_ramen_stage_heads_v34.py
+          test ! -d docs
+          test ! -d exports
+          test -f .trae/documents/legacy-ai-gap-audit.md
+          test -f .trae/exports/ramen-strategy-snapshot-v29.txt
+          if find scripts -maxdepth 1 -type f -name '*.py' | grep -q .; then
+            echo 'loose Python scripts remain under scripts/' >&2
+            exit 1
+          fi
+      - name: Commit reorganized tree
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'chore: reorganize experiment tools and generated outputs'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
