@@ -21,15 +21,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: ramen-y3-pt-trace-v27}
       - name: Trace 100 games
-        env:
-          START: ${{ matrix.shard * 100 }}
-          RUNS: 100
-        run: cargo run -p umasim --bin y3_train_pt_trace --release --no-default-features
+        env: {SHARD: '${{ matrix.shard }}', RUNS: '100'}
+        run: START=$((SHARD * RUNS)) cargo run -p umasim --bin y3_train_pt_trace --release --no-default-features
       - uses: actions/upload-artifact@v4
-        with:
-          name: y3-pt-trace-shard${{ matrix.shard }}
-          path: y3-train-pt.csv
-          retention-days: 14
+        with: {name: 'y3-pt-trace-shard${{ matrix.shard }}', path: y3-train-pt.csv, retention-days: 14}
   summary:
     needs: trace
     runs-on: ubuntu-latest
@@ -61,9 +56,9 @@ jobs:
           turns=collections.defaultdict(list)
           for r in rows: turns[r['turn']].append(r['pt_gain'])
           for t,v in sorted(turns.items()): lines.append(f'|{t}|{len(v)}|{statistics.mean(v):.1f}|{pct(v,.1)}/{pct(v,.9)}|{max(v)}|')
-          lines += ['', '## 原始逐次记录', '', '`y3-train-pt.csv` 每一行包含 run、回合、训练类型、成功与否、训练前后PT、实际PT增量、体力和是否吃面。']
+          lines += ['', '## 原始逐次记录', '', '`all-y3-train-pt.csv` 每一行包含 run、回合、训练类型、成功与否、训练前后PT、实际PT增量、体力和是否吃面。']
           out='\n'.join(lines)+'\n'; print(out)
-          path=pathlib.Path('benchmark-results/ramen-y3-train-pt-v27-${{ github.run_id }}.md'); path.write_text(out)
+          pathlib.Path('benchmark-results/ramen-y3-train-pt-v27-${{ github.run_id }}.md').write_text(out)
           with open('all-y3-train-pt.csv','w',newline='') as f:
             w=csv.DictWriter(f,fieldnames=rows[0].keys());w.writeheader();w.writerows(rows)
           PY
