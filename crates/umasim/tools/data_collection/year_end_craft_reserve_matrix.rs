@@ -5,7 +5,7 @@ use umasim::{bench::{self,CardPickOpts,DeckComposition},game::{Game,InheritInfo,
 const UMA:u32=102601;const FRIEND:u32=303054;
 const INHERIT:InheritInfo=InheritInfo{blue_count:[15,0,0,0,3],extra_count:[10,10,20,20,20,40]};
 fn candidate(name:&str)->Result<RecommendedRamenTrainer>{
- let (w,p)=match name{"保线关"=>(0,0.),"W2P80"=>(2,80.),"W2P160"=>(2,160.),"W3P80"=>(3,80.),"W3P160"=>(3,160.),"W4P80"=>(4,80.),"W4P160"=>(4,160.),"W5P160"=>(5,160.),_=>anyhow::bail!("未知候选:{name}")};
+ let (w,p)=match name{"保线关"=>(0,0.),"W2P80"=>(2,80.),"W2P160"=>(2,160.),"W3P80"=>(3,80.),"W3P160"=>(3,160.),"W4P80"=>(4,80.),"W4P160"=>(4,160.),"W5P160"=>(5,160.),"W3硬保线"=>(3,1_000_000.),"W5硬保线"=>(5,1_000_000.),_=>anyhow::bail!("未知候选:{name}")};
  Ok(RecommendedRamenTrainer::with_year_end_craft_reserve_override(w,p))
 }
 fn deck()->Result<[u32;6]>{let c=DeckComposition{counts:[3,1,0,0,1],name:String::new()};let r=bench::select_representatives(&CardPickOpts::default())?;c.build_deck(&r.picked,FRIEND)}
