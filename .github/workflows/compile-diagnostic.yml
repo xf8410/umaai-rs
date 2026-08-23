@@ -1,71 +1,100 @@
-name: Ramen all 101 deck compositions screen v38
+name: Ramen dynamic status balance matrix v39
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  screen:
+  matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant:
+          - control
+          - gap50
+          - overflow50
+          - gap30-over30
+          - gap50-over50
+          - gap75-over50
+          - gap100-over75
+        shard: [0, 1, 2]
     env:
-      OUT: results/ramen-deck-compositions-v38.csv
+      VARIANT: ${{ matrix.variant }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
+      STRUCTURE_Y1: vrest30
+      STRUCTURE_Y2: vrest30
+      STRUCTURE_Y3: vrest30
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - name: Apply dynamic status balance experiment
+        run: python3 scripts/ramen/add_dynamic_status_balance_v39.py
+      - name: Select dynamic balance parameters
+        shell: bash
+        run: |
+          case "${{ matrix.variant }}" in
+            control)        ;;
+            gap50)          echo 'STRUCTURE_Y3=statusdyn-gap50-over0-vrest30' >> "$GITHUB_ENV" ;;
+            overflow50)     echo 'STRUCTURE_Y3=statusdyn-gap0-over50-vrest30' >> "$GITHUB_ENV" ;;
+            gap30-over30)   echo 'STRUCTURE_Y3=statusdyn-gap30-over30-vrest30' >> "$GITHUB_ENV" ;;
+            gap50-over50)   echo 'STRUCTURE_Y3=statusdyn-gap50-over50-vrest30' >> "$GITHUB_ENV" ;;
+            gap75-over50)   echo 'STRUCTURE_Y3=statusdyn-gap75-over50-vrest30' >> "$GITHUB_ENV" ;;
+            gap100-over75)  echo 'STRUCTURE_Y3=statusdyn-gap100-over75-vrest30' >> "$GITHUB_ENV" ;;
+          esac
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-deck-screen-v38}
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-      - name: Screen all 101 compositions with 50 same seeds
+        with: {shared-key: ramen-dynamic-status-v39}
+      - name: Format and compile patched source
         run: |
-          mkdir -p results
-          cargo run -p umasim --bin bench_compositions --release --no-default-features -- \
-            --runs 50 --seed 61444 --trainer handwritten --friend 303054 --out "$OUT"
-      - name: Build multi-objective report
-        run: |
-          python3 - <<'PY' | tee results/ramen-deck-compositions-v38.md
-          import csv
-          path='results/ramen-deck-compositions-v38.csv'
-          rows=[]
-          with open(path,newline='') as f:
-            for r in csv.DictReader(f):
-              x=dict(r)
-              for k in ['completed','failed']:
-                x[k]=int(x[k])
-              for k in ['score_mean','score_median','score_p10','speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean','skill_pt_mean','rmj_all_rate','friend_all_rate']:
-                x[k]=float(x[k])
-              x['status_sum']=sum(x[k] for k in ['speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean'])
-              rows.append(x)
-          if len(rows)!=101 or any(r['completed']!=50 or r['failed']!=0 for r in rows):
-            raise SystemExit(f'incomplete screen: rows={len(rows)}, bad={[(r["composition"],r["completed"],r["failed"]) for r in rows if r["completed"]!=50 or r["failed"]]}')
-          score_min=min(r['score_mean'] for r in rows); score_span=max(r['score_mean'] for r in rows)-score_min or 1
-          pt_min=min(r['skill_pt_mean'] for r in rows); pt_span=max(r['skill_pt_mean'] for r in rows)-pt_min or 1
-          status_min=min(r['status_sum'] for r in rows); status_span=max(r['status_sum'] for r in rows)-status_min or 1
-          p10_min=min(r['score_p10'] for r in rows); p10_span=max(r['score_p10'] for r in rows)-p10_min or 1
-          for r in rows:
-            # 总评分权重最高，同时要求 PT、五维与低分尾部均衡；仅用于筛选，不替代 300 局确认。
-            r['joint']=.40*(r['score_mean']-score_min)/score_span + .20*(r['skill_pt_mean']-pt_min)/pt_span + .20*(r['status_sum']-status_min)/status_span + .20*(r['score_p10']-p10_min)/p10_span
-          def table(title, selected):
-            print(f'## {title}\n')
-            print('|排名|构成|六卡 ID|平均分|P10|中位数|平均PT|五维均值和|RMJ全通|友人全出行|联合指标|')
-            print('|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-            for i,r in enumerate(selected,1):
-              print(f'|{i}|{r["composition"]}|`{r["deck"]}`|{r["score_mean"]:.1f}|{r["score_p10"]:.1f}|{r["score_median"]:.1f}|{r["skill_pt_mean"]:.1f}|{r["status_sum"]:.1f}|{r["rmj_all_rate"]:.1%}|{r["friend_all_rate"]:.1%}|{r["joint"]:.4f}|')
-            print()
-          print('# 拉面杯全部 101 种支援卡构成筛选 v38\n')
-          print('> 每种构成 50 个相同 seed，共 5050 局。第一阶段用于筛选；代表卡由确定性规则选择，不等于完整单卡强度排名。\n')
-          table('按平均总评分前十', sorted(rows,key=lambda r:(r['score_mean'],r['score_p10']),reverse=True)[:10])
-          table('按平均技能 PT 前十', sorted(rows,key=lambda r:(r['skill_pt_mean'],r['score_mean']),reverse=True)[:10])
-          table('按总评分/PT/五维/P10联合指标前十', sorted(rows,key=lambda r:r['joint'],reverse=True)[:10])
-          PY
-          cat results/ramen-deck-compositions-v38.md >> "$GITHUB_STEP_SUMMARY"
+          cargo fmt --all
+          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - name: Run paired 3-speed matrix
+        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: ramen-deck-compositions-v38
-          path: |
-            results/ramen-deck-compositions-v38.csv
-            results/ramen-deck-compositions-v38.md
+          name: v39-${{ matrix.variant }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
           if-no-files-found: error
+          retention-days: 14
+  summary:
+    if: always()
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: v39-*, path: results}
+      - name: Build joint score/PT/status report
+        run: |
+          python3 - <<'PY' | tee dynamic-status-balance-v39.md
+          import csv,glob,collections,statistics
+          d=collections.defaultdict(list)
+          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
+            with open(p,newline='') as f:
+              for r in csv.DictReader(f): d[r['variant']].append({k:int(r[k]) for k in ['b_score','b_skill_pt','b_status_score','b_status_sum']})
+          if len(d)!=7 or any(len(x)!=300 for x in d.values()): raise SystemExit(f'incomplete: {[(k,len(v)) for k,v in d.items()]}')
+          mean=lambda rs,k:statistics.mean(x[k] for x in rs)
+          pct=lambda xs,p:sorted(xs)[round((len(xs)-1)*p)]
+          b=d['control']; bs,bp,ba=mean(b,'b_score'),mean(b,'b_skill_pt'),mean(b,'b_status_score')
+          print('# 3速卡组动态属性平衡矩阵 v39\n')
+          print('> 每变体 300 局同种子；动态权重只在第三年启用。基线为 PT 16/64/64、sac140、体力门30/30/30。\n')
+          print('|变体|平均分|Δ分|P10/P50/P90|平均PT|ΔPT|属性评分|Δ属性|五维和|联合提升|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|:---:|')
+          for n,rs in sorted(d.items(),key=lambda z:mean(z[1],'b_score'),reverse=True):
+            sc=[x['b_score'] for x in rs]; s,pt,a=mean(rs,'b_score'),mean(rs,'b_skill_pt'),mean(rs,'b_status_score')
+            joint=s>bs and pt>bp and a>ba
+            print(f'|{n}|{s:.1f}|{s-bs:+.1f}|{pct(sc,.1)}/{pct(sc,.5)}/{pct(sc,.9)}|{pt:.1f}|{pt-bp:+.1f}|{a:.1f}|{a-ba:+.1f}|{mean(rs,"b_status_sum"):.1f}|{"✅" if joint else "❌"}|')
+          PY
+          cat dynamic-status-balance-v39.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dynamic-status-balance-v39-summary
+          path: dynamic-status-balance-v39.md
           retention-days: 30
