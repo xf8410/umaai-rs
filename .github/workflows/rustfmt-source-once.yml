@@ -1,0 +1,41 @@
+name: Format committed Rust sources once
+on:
+  workflow_dispatch:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/rustfmt-source-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format the checked-in Rust source
+        run: cargo fmt --all
+      - name: Verify formatter is now clean
+        run: cargo fmt --all -- --check
+      - name: Commit formatting only when needed
+        run: |
+          if git diff --quiet -- '*.rs'; then
+            echo 'Rust sources already formatted.'
+            exit 0
+          fi
+          if test -n "$(git diff --name-only -- . ':(exclude)**/*.rs')"; then
+            echo 'cargo fmt unexpectedly changed a non-Rust file:' >&2
+            git diff --name-only -- . ':(exclude)**/*.rs' >&2
+            exit 1
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -- '*.rs'
+          git commit -m 'style: format committed Rust sources'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
