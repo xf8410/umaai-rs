@@ -23,10 +23,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p /tmp/ramen-report
-          gh run download 32658372240 --name 超级拉面多权重矩阵总报告 --dir /tmp/ramen-report
-          test -s /tmp/ramen-report/超级拉面多权重矩阵报告.md
-          cat /tmp/ramen-report/超级拉面多权重矩阵报告.md
-          cp /tmp/ramen-report/超级拉面多权重矩阵报告.md .trae/exports/super-ramen-partner-weight-matrix.md
+          gh api repos/xf8410/umaai-rs/actions/artifacts/9498088231/zip > /tmp/ramen-report.zip
+          unzip -o /tmp/ramen-report.zip -d /tmp/ramen-report
+          report=$(find /tmp/ramen-report -type f -name '*.md' -print -quit)
+          test -n "$report"
+          test -s "$report"
+          cat "$report"
+          cp "$report" .trae/exports/super-ramen-partner-weight-matrix.md
       - name: 提交评分报告
         run: |
           git config user.name github-actions[bot]
