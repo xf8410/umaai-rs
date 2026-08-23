@@ -1,54 +1,18 @@
-name: Skill PT strategy refinement v2
-
+name: Skill PT paired strategy refinement v2
 on:
-  push:
-    branches: [workbench/skill-pt-matrix-distill]
-    paths: [.github/workflows/skill-pt-strategy-matrix-v2.yml]
   workflow_dispatch:
     inputs:
       runs_per_shard:
         description: Paired seeds per shard
         required: false
-        default: "100"
-
+        default: '100'
 permissions:
-  actions: read
-  contents: write
-
+  contents: read
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
-
 jobs:
-  prep:
-    name: prep refinement
-    runs-on: ubuntu-latest
-    outputs:
-      runs: ${{ steps.config.outputs.runs }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: config
-        shell: bash
-        run: |
-          runs="${{ github.event.inputs.runs_per_shard }}"
-          if [[ -z "$runs" ]]; then runs=100; fi
-          echo "runs=$runs" >> "$GITHUB_OUTPUT"
-          {
-            echo "# 技能 PT 手写策略第二轮细化"
-            echo
-            echo "第一轮确认高 PT 权重、长期判断和较宽保护上限同时提高 PT、属性与最终评分。"
-            echo
-            echo "本轮展开 **168 个矩阵 job**：7 个 PT 权重 × 6 个保护上限 × 4 个 seed 分片。"
-            echo "每个手写策略参数变体共 **$((runs * 4))** 组相同 seed A/B 配对。"
-            echo "已移除第一轮中完全不影响结果的 fail 维度，固定 long。"
-          } >> "$GITHUB_STEP_SUMMARY"
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Compile check
-        run: cargo check -p umasim --bin skill_pt_matrix --no-default-features
-
-  refinement:
-    name: pt${{ matrix.pt }}-sac${{ matrix.sac }}-long / shard ${{ matrix.shard }}
-    needs: prep
+  matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -61,58 +25,33 @@ jobs:
     env:
       VARIANT: pt${{ matrix.pt }}-sac${{ matrix.sac }}-long-fail0
       SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: ${{ needs.prep.outputs.runs }}
+      RUNS_PER_SHARD: ${{ inputs.runs_per_shard }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: skill-pt-matrix
-          cache-on-failure: true
-      - name: Run paired refinement cell
-        run: cargo run -p umasim --bin skill_pt_matrix --release --no-default-features
+        with: {shared-key: skill-pt-matrix}
+      - run: cargo run -p umasim --bin skill_pt_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: v2-${{ env.VARIANT }}-shard${{ matrix.shard }}
           path: matrix-result.csv
           if-no-files-found: error
           retention-days: 7
-
-  final-summary:
-    name: final refinement summary
+  summary:
     if: always()
-    needs: [prep, refinement]
+    needs: matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
       - uses: actions/download-artifact@v4
-        with:
-          pattern: v2-*
-          path: matrix-results
-      - name: Generate readable report and Actions Summary
+        with: {pattern: v2-*, path: matrix-results}
+      - name: Generate summary
         env:
-          REPORT_PATH: benchmark-results/skill-pt-matrix-v2-${{ github.run_id }}.md
-        run: |
-          python3 scripts/summarize_skill_pt_matrix.py
-          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
-      - name: Commit report to experiment branch
-        if: success()
-        env:
-          REPORT_PATH: benchmark-results/skill-pt-matrix-v2-${{ github.run_id }}.md
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add "$REPORT_PATH"
-          git commit -m "bench: publish skill PT refinement v2 run ${{ github.run_id }}"
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          REPORT_PATH: skill-pt-matrix-v2.md
+        run: python3 scripts/ramen/summarize_skill_pt_matrix.py && cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: skill-pt-refinement-v2-results
-          path: |
-            matrix-results
-            benchmark-results/skill-pt-matrix-v2-${{ github.run_id }}.md
-          retention-days: 7
+          name: skill-pt-refinement-v2-summary
+          path: skill-pt-matrix-v2.md
+          retention-days: 14
