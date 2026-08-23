@@ -44,6 +44,8 @@ pub struct LocalRamenConfig {
     pub eager_eat: bool,
     /// v8 诊断：吃面前，候选地区覆盖的当前训练窗口价值。
     pub ramen_window_weight: f32,
+    /// Match the canonical policy switch for the local expected-failure layer.
+    pub effective_ramen_failure: bool,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -68,6 +70,7 @@ impl Default for LocalRamenConfig {
             ramen_lookahead_samples: 12,
             eager_eat: false,
             ramen_window_weight: 0.0,
+            effective_ramen_failure: true,
         }
     }
 }
@@ -97,7 +100,10 @@ impl LocalRamenTrainer {
         let mut local = LocalRamenConfig::default();
         let (mut p, mut s, mut m, mut f) = (false, false, false, false);
         for token in name.split('-') {
-            if token == "failmodel" {
+            if token == "rawfail" {
+                policy.effective_ramen_failure = false;
+                local.effective_ramen_failure = false
+            } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
                 local.dynamic_vital = true
@@ -271,7 +277,11 @@ impl LocalRamenTrainer {
             }
             let base_fr = g.calc_training_failure_rate(&buffs, tr);
             let ramen_effect = calc_ramen_training_effect(g, tr, g.shining_count(tr) > 0);
-            let fr = (base_fr * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0);
+            let fr = if self.config.effective_ramen_failure {
+                (base_fr * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0)
+            } else {
+                base_fr
+            };
             if self.config.expected_fail && fr > 0. {
                 let p = fr / 100.;
                 let bp = if fr >= 20. { p } else { 0. };

@@ -47,6 +47,8 @@ pub struct RamenPolicyConfig {
     pub pt_rate: f32,
     /// 训练失败惩罚（期望值中被扣减的固定分）
     pub failure_penalty: f32,
+    /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
+    pub effective_ramen_failure: bool,
     /// 彩圈（友情训练）加成：每个彩圈附加分
     pub shining_bonus: f32,
     /// 训练体力消耗的折算（负值即当前消耗的体力价值；纳入后训练会自减肥力成本）
@@ -117,6 +119,7 @@ impl Default for RamenPolicyConfig {
             status_rate: 1.0,
             pt_rate: 8.0,
             failure_penalty: 60.0,
+            effective_ramen_failure: true,
             shining_bonus: 60.0,
             train_vital_value: 1.8,
             rest_base: 20.0,
@@ -492,8 +495,11 @@ impl RamenPolicy {
                 let ramen_effect = calc_ramen_training_effect(game, train, game.shining_count(train) > 0);
                 // fail_rate_drop is a relative percentage reduction shared by every training
                 // while eating: Y1 30%, Y2 50%, Y3 100%.
-                let fail_rate =
-                    (base_fail_rate * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0);
+                let fail_rate = if self.config.effective_ramen_failure {
+                    (base_fail_rate * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0)
+                } else {
+                    base_fail_rate
+                };
                 // 属性增益（five_status_final_score 差分，与 calc_score 一致）
                 let mut attr_gain = 0.0;
                 for i in 0..5 {
