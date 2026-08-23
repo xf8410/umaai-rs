@@ -1,97 +1,31 @@
-name: Ramen yearly x dynamic status weights v40
+name: Publish yearly dynamic status v40 report
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  matrix:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 110
-    strategy:
-      fail-fast: false
-      max-parallel: 12
-      matrix:
-        fixed: [neutral, mild, medium, strong]
-        dynamic: [none, overflow50, gap100-over75]
-        shard: [0, 1, 2]
-    env:
-      VARIANT: ${{ matrix.fixed }}-x-${{ matrix.dynamic }}
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 100
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - name: Apply fixed and dynamic status experiment
-        run: python3 scripts/ramen/add_yearly_status_weights_v40.py
-      - name: Configure crossed yearly weights
-        shell: bash
+        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
+      - name: Download v40 summary
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh run download 32638645128 --repo xf8410/umaai-rs --name yearly-dynamic-status-v40-summary --dir report
+      - name: Validate report
         run: |
-          case '${{ matrix.fixed }}' in
-            neutral) y2='statusw100_100_100_100_100'; y3='statusw100_100_100_100_100' ;;
-            mild)    y2='statusw98_100_103_103_100'; y3='statusw90_105_110_110_105' ;;
-            medium)  y2='statusw95_102_105_105_102'; y3='statusw80_108_115_115_108' ;;
-            strong)  y2='statusw90_105_110_110_105'; y3='statusw65_110_125_125_110' ;;
-          esac
-          case '${{ matrix.dynamic }}' in
-            none) dyn='' ;;
-            overflow50) dyn='-statusdyn-gap0-over50' ;;
-            gap100-over75) dyn='-statusdyn-gap100-over75' ;;
-          esac
-          echo 'STRUCTURE_Y1=statusw100_100_100_100_100-vrest30' >> "$GITHUB_ENV"
-          echo "STRUCTURE_Y2=${y2}-vrest30" >> "$GITHUB_ENV"
-          echo "STRUCTURE_Y3=${y3}${dyn}-vrest30" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-status-cross-v40}
-      - name: Format and compile patched source
+          test -s report/yearly-dynamic-status-v40.md
+          test "$(grep -c '^|' report/yearly-dynamic-status-v40.md)" -ge 14
+          grep -q '晋级' report/yearly-dynamic-status-v40.md
+          mkdir -p .trae/exports
+          cp report/yearly-dynamic-status-v40.md .trae/exports/yearly-dynamic-status-v40.md
+      - name: Commit report
         run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-      - name: Run paired matrix
-        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v40-${{ matrix.fixed }}-${{ matrix.dynamic }}-shard${{ matrix.shard }}
-          path: matrix-result.csv
-          if-no-files-found: error
-          retention-days: 14
-  summary:
-    if: always()
-    needs: matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: {pattern: v40-*, path: results}
-      - name: Build promotion report
-        run: |
-          python3 - <<'PY' | tee yearly-dynamic-status-v40.md
-          import csv,glob,collections,statistics
-          d=collections.defaultdict(list)
-          keys=['b_score','b_skill_pt','b_status_score','b_status_sum']
-          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
-            with open(p,newline='') as f:
-              for r in csv.DictReader(f): d[r['variant']].append({k:int(r[k]) for k in keys})
-          if len(d)!=12 or any(len(v)!=300 for v in d.values()): raise SystemExit(f'incomplete: {[(k,len(v)) for k,v in d.items()]}')
-          mean=lambda rs,k:statistics.mean(x[k] for x in rs)
-          pct=lambda xs,p:sorted(xs)[round((len(xs)-1)*p)]
-          base=d['neutral-x-none']; bs,bp,ba=mean(base,'b_score'),mean(base,'b_skill_pt'),mean(base,'b_status_score'); b10=pct([x['b_score'] for x in base],.1)
-          print('# 分年份固定权重 × 有效动态权重交叉矩阵 v40\n')
-          print('> 12 变体各 300 局同种子，共 3600 局。只交叉 v39 已联合提升的动态档。\n')
-          print('|变体|平均分|Δ分|P10/P50/P90|ΔP10|平均PT|ΔPT|属性评分|Δ属性|五维和|晋级|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|')
-          for n,rs in sorted(d.items(),key=lambda z:mean(z[1],'b_score'),reverse=True):
-            sc=[x['b_score'] for x in rs]; s,pt,a=mean(rs,'b_score'),mean(rs,'b_skill_pt'),mean(rs,'b_status_score'); p10=pct(sc,.1)
-            promote=s>bs and pt>bp and a>ba and p10>=b10
-            print(f'|{n}|{s:.1f}|{s-bs:+.1f}|{p10}/{pct(sc,.5)}/{pct(sc,.9)}|{p10-b10:+d}|{pt:.1f}|{pt-bp:+.1f}|{a:.1f}|{a-ba:+.1f}|{mean(rs,"b_status_sum"):.1f}|{"✅" if promote else "❌"}|')
-          PY
-          cat yearly-dynamic-status-v40.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: yearly-dynamic-status-v40-summary
-          path: yearly-dynamic-status-v40.md
-          retention-days: 30
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/yearly-dynamic-status-v40.md
+          git commit -m 'docs(ramen): 记录 v40 年度与动态权重交叉矩阵' \
+            -m '固化 run 32638645128 的 12 个交叉变体、每变体 300 局同种子结果。报告联合比较总评分、PT、属性评分和 P10；本提交不修改正式策略。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
