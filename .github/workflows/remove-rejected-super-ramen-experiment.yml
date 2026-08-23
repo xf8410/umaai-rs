@@ -1,0 +1,35 @@
+name: 删除未通过评分的超级拉面人头实验
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/remove-rejected-super-ramen-experiment.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  remove:
+    name: 删除候选补丁、临时工作流与报告
+    runs-on: ubuntu-latest
+    steps:
+      - name: 读取仓库源码
+        uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - name: 删除未保留的实验文件
+        run: |
+          rm -f \
+            scripts/ramen/experiment_super_ramen_partner_assignment.py \
+            .github/workflows/super-ramen-partner-assignment-ab.yml \
+            .github/workflows/read-super-ramen-report-once.yml \
+            .github/workflows/fix-local-ramen-format-once.yml \
+            .trae/exports/super-ramen-partner-weight-matrix.md \
+            .github/workflows/remove-rejected-super-ramen-experiment.yml
+      - name: 提交删除结果
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '删除评分下降的超级拉面额外人头实验'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
