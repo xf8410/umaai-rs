@@ -29,15 +29,19 @@ struct PhaseTrainer {
     last: Mutex<Option<usize>>
 }
 impl PhaseTrainer {
-    fn new(pt: [u32; 3], sac: u32, extra: &str) -> Result<Self> {
-        let suffix = if extra.is_empty() {
-            String::new()
-        } else {
-            format!("-{extra}")
+    fn new(pt: [u32; 3], sac: u32, common: &str, yearly: [&str; 3]) -> Result<Self> {
+        let make = |year: usize| {
+            let mut tokens = vec![format!("pt{}-sac{sac}-long-fail0", pt[year])];
+            if !common.is_empty() {
+                tokens.push(common.to_string());
+            }
+            if !yearly[year].is_empty() {
+                tokens.push(yearly[year].to_string());
+            }
+            LocalRamenTrainer::matrix_variant(&tokens.join("-"))
         };
-        let make = |p| LocalRamenTrainer::matrix_variant(&format!("pt{p}-sac{sac}-long-fail0{suffix}"));
         Ok(Self {
-            years: [make(pt[0])?, make(pt[1])?, make(pt[2])?],
+            years: [make(0)?, make(1)?, make(2)?],
             last: Mutex::new(None)
         })
     }
@@ -92,13 +96,19 @@ fn main() -> Result<()> {
     ];
     let sac = env::var("SAC")?.parse()?;
     let extra = env::var("STRUCTURE").unwrap_or_default();
+    let yearly = [
+        env::var("STRUCTURE_Y1").unwrap_or_default(),
+        env::var("STRUCTURE_Y2").unwrap_or_default(),
+        env::var("STRUCTURE_Y3").unwrap_or_default()
+    ];
     let shard: u64 = env::var("SHARD").unwrap_or_else(|_| "0".into()).parse()?;
     let runs: u64 = env::var("RUNS_PER_SHARD").unwrap_or_else(|_| "100".into()).parse()?;
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
     // Parse and construct all three yearly policies even for a zero-run smoke test. This gives CI a
     // targeted parser check without compiling every unrelated #[cfg(test)] module in the library.
-    let validation = PhaseTrainer::new(pt, sac, &extra).context("分阶段策略参数验证失败")?;
+    let yearly_refs = [yearly[0].as_str(), yearly[1].as_str(), yearly[2].as_str()];
+    let validation = PhaseTrainer::new(pt, sac, &extra, yearly_refs).context("分阶段策略参数验证失败")?;
     drop(validation);
     let mut f = File::create("matrix-result.csv")?;
     writeln!(
@@ -108,7 +118,7 @@ fn main() -> Result<()> {
     for off in 0..runs {
         let i = shard * runs + off;
         let a = run(RamenHandwrittenTrainer::new(), i)?;
-        let b = run(PhaseTrainer::new(pt, sac, &extra)?, i)?;
+        let b = run(PhaseTrainer::new(pt, sac, &extra, yearly_refs)?, i)?;
         writeln!(
             f,
             "{variant},{shard},{i},{},{},{},{},{},{},{},{}",
