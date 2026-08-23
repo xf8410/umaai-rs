@@ -16,8 +16,6 @@ on:
       - 'gamedata/scenario_ramen.json'
   workflow_dispatch:
 
-# Upstream-facing validation deliberately does not execute scripts that rewrite source.
-# A clean checkout must compile and test exactly as submitted.
 permissions:
   contents: read
 
@@ -43,6 +41,16 @@ jobs:
       - name: Core compile without diagnostic logging
         run: cargo check --workspace --no-default-features
       - name: Core tests without diagnostic logging
-        run: cargo test -p umasim --lib --no-default-features
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p umasim --lib --no-default-features -- --nocapture 2>&1 | tee upstream-test.log
+      - name: Upload core test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-core-test-log
+          path: upstream-test.log
+          if-no-files-found: warn
       - name: Default-feature compile
         run: cargo check --workspace
