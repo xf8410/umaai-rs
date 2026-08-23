@@ -1,0 +1,92 @@
+name: 第三年PT最终边界独立复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/y3-pt-final-boundary-v52.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.variant }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [PT16对盘12, PT20对盘12, PT22对盘12, PT23对盘12, PT24对盘12, PT25对盘12, PT26对盘12]
+        seed: [314159, 926531]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - name: 注入本轮下界候选
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/tools/data_collection/y3_narrow_matrix.rs')
+          s=p.read_text()
+          old='            "PT24对盘12" => (24.0, 0.12),'
+          new='''            "PT16对盘12" => (16.0, 0.12),
+                      "PT20对盘12" => (20.0, 0.12),
+                      "PT22对盘12" => (22.0, 0.12),
+                      "PT23对盘12" => (23.0, 0.12),
+                      "PT24对盘12" => (24.0, 0.12),
+                      "PT25对盘12" => (25.0, 0.12),'''
+          if s.count(old)!=1: raise SystemExit(f'匹配数量错误: {s.count(old)}')
+          p.write_text(s.replace(old,new))
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三年PT最终边界}
+      - run: cargo run -p umasim --bin y3_narrow_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 第三年窄邻域.csv
+          retention-days: 30
+  summary:
+    name: 汇总第三年PT最终边界
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三年PT最终边界报告.md
+          import csv,glob,collections,statistics
+          allg=collections.defaultdict(list); byseed=collections.defaultdict(list)
+          for p in glob.glob('results/**/第三年窄邻域.csv',recursive=True):
+            for r in csv.DictReader(open(p)):
+              allg[r['方案']].append(r); byseed[(r['方案'],r['基础种子'])].append(r)
+          expected={'PT16对盘12','PT20对盘12','PT22对盘12','PT23对盘12','PT24对盘12','PT25对盘12','PT26对盘12'}
+          if set(allg)!=expected or any(len(v)!=600 for v in allg.values()): raise SystemExit({k:len(v) for k,v in allg.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows); return statistics.mean(x),x[59],x[0]
+          print('# 第三年PT最终边界独立复验\n')
+          print('> 两组全新种子，每候选600局；不复用任何前序选参样本。\n')
+          print('|方案|平均总分|分P10|最低分|平均PT|PT P10|最低PT|种子A均分|种子B均分|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+          out=[]
+          for name,rows in allg.items():
+            s=st(rows,'总分'); p=st(rows,'技能点')
+            a=st(byseed[(name,'314159')],'总分')[0]; b=st(byseed[(name,'926531')],'总分')[0]
+            out.append((s[0],name,s,p,a,b))
+          for _,name,s,p,a,b in sorted(out,reverse=True):
+            print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{a:.1f}|{b:.1f}|')
+          print('\n停止规则：若最优不在16边界，直接固化；若16领先，也不继续扫，选择16与20中跨种子/P10更稳者。')
+          PY
+          cat 第三年PT最终边界报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三年PT最终边界报告
+          path: 第三年PT最终边界报告.md
+          retention-days: 30
