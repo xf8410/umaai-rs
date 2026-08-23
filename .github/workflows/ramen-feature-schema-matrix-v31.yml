@@ -1,97 +1,41 @@
-name: Ramen feature schema matrix v31
+name: Ramen neural dimension cost matrix v31
 on:
   workflow_dispatch:
 permissions:
   contents: write
 concurrency:
   group: ramen-feature-schema-v31
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
-  teacher-data:
+  dimension-cost:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {shard: 0, start: 0}
-          - {shard: 1, start: 100}
-          - {shard: 2, start: 200}
-          - {shard: 3, start: 300}
-          - {shard: 4, start: 400}
-    env:
-      START: ${{ matrix.start }}
-      COUNT: 100
-      ROLLOUTS: 32
     steps:
       - uses: actions/checkout@v4
         with: {ref: workbench/skill-pt-matrix-distill}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-feature-v31}
-      - run: cargo fmt --all -- --check
-      - run: cargo check -p umasim --bin ramen_feature_dataset --no-default-features
-      - run: cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ramen-feature-v31-shard${{ matrix.shard }}
-          path: ramen-feature-dataset.jsonl
-  train-matrix:
-    needs: teacher-data
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - uses: actions/download-artifact@v4
-        with: {pattern: ramen-feature-v31-*, path: data}
-      - run: python3 -m pip install --user numpy
-      - name: Train schema-width matrix
+      - name: Calculate architecture cost matrix without training
         run: |
           mkdir -p benchmark-results
-          python3 - <<'PY' > benchmark-results/ramen-feature-schema-matrix-v31.md
-          import glob,json,collections,math
-          import numpy as np
-          rows=[]
-          for p in glob.glob('data/*/*.jsonl'):
-            with open(p) as f: rows += [json.loads(x) for x in f if x.strip()]
-          groups=collections.defaultdict(list)
-          for i,r in enumerate(rows): groups[r['group']].append(i)
-          train_groups=[g for g in groups if (g//5)%5!=0]
-          val_groups=[g for g in groups if (g//5)%5==0]
-          print('# 拉面杯特征 Schema × 网络宽度矩阵 v31\n')
-          print(f'> 教师根局面 {len(groups)}（训练 {len(train_groups)} / 验证 {len(val_groups)}），每候选 32 次完整终局 rollout。按根局面分组切分，五种配卡均衡。\n')
-          print('|Schema|输入维度|隐藏宽度|参数量|验证动作Top-1|平均教师后悔值|P90后悔值|候选分数MAE|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|')
-          def matrix(schema): return np.asarray([r[schema] for r in rows],dtype=np.float32)
-          y=np.asarray([r['teacher_mean'] for r in rows],dtype=np.float32)
-          for ids in groups.values(): y[ids]=(y[ids]-y[ids].mean())/1000.0
-          y=y[:,None]
-          train_idx=np.asarray([i for g in train_groups for i in groups[g]])
-          for schema in ['s','m','mid','l']:
-            X=matrix(schema); mu=X[train_idx].mean(0); sd=X[train_idx].std(0); sd[sd<1e-5]=1; X=(X-mu)/sd
-            for h in [64,128,256]:
-              rr=np.random.default_rng(3100+h+len(schema)); W1=rr.normal(0,math.sqrt(2/X.shape[1]),(X.shape[1],h)).astype('f4'); b1=np.zeros(h,'f4'); W2=rr.normal(0,math.sqrt(2/h),(h,1)).astype('f4'); b2=np.zeros(1,'f4')
-              params=X.shape[1]*h+h+h+1; lr=.002; batch=512
-              for epoch in range(90):
-                order=rr.permutation(train_idx)
-                for st in range(0,len(order),batch):
-                  ix=order[st:st+batch]; xb=X[ix]; yb=y[ix]; z=xb@W1+b1; a=np.maximum(z,0); pred=a@W2+b2; d=2*(pred-yb)/len(ix)
-                  gW2=a.T@d; gb2=d.sum(0); dz=(d@W2.T)*(z>0); gW1=xb.T@dz; gb1=dz.sum(0)
-                  for p,g in [(W1,gW1),(b1,gb1),(W2,gW2),(b2,gb2)]: p-=lr*np.clip(g,-5,5)
-                if epoch in (35,65): lr*=.35
-              pred=(np.maximum(X@W1+b1,0)@W2+b2)[:,0]*1000; regrets=[]; wins=0; maes=[]
-              for g in val_groups:
-                ids=groups[g]; truth=np.asarray([rows[i]['teacher_mean'] for i in ids]); pp=pred[ids]; chosen=int(np.argmax(pp)); best=int(np.argmax(truth)); wins+=chosen==best; regrets.append(float(truth[best]-truth[chosen])); maes += list(abs((truth-truth.mean())-pp))
-              print(f'|{schema.upper()}|{X.shape[1]}|{h}|{params}|{wins/len(val_groups):.1%}|{np.mean(regrets):.1f}|{np.percentile(regrets,90):.1f}|{np.mean(maes):.1f}|')
-          print('\nSchema：S=聚合状态；M=S+逐卡机制；M-ID=M+卡/角色ID；L=M-ID+逐训练槽位及拉面效果明细。')
+          python3 - <<'PY' > benchmark-results/ramen-neural-dimension-cost-v31.md
+          dims=[192,256,384,512,768,1121]
+          widths=[64,128,256,512]
+          print('# 拉面杯神经网络维度成本矩阵 v31（不训练、不蒸馏）\n')
+          print('> 仅比较全连接候选打分网络的静态成本；无教师标签、无拟合、无模型产物。此表不能判断决策质量。\n')
+          print('|输入维度|隐藏宽度|参数量|FP32模型大小|单候选乘加量|32候选乘加量|')
+          print('|---:|---:|---:|---:|---:|---:|')
+          for d in dims:
+            for h in widths:
+              # 两层 MLP: d -> h -> h -> 1
+              params=d*h+h + h*h+h + h+1
+              mac=d*h+h*h+h
+              print(f'|{d}|{h}|{params:,}|{params*4/1024/1024:.2f} MiB|{mac:,}|{mac*32:,}|')
+          print('\n结构统一为 `input -> hidden -> hidden -> 1`。下一步若要判断“哪个好”，必须单独确认允许进行小样本训练矩阵；否则只能按延迟/大小选择。')
           PY
-          cat benchmark-results/ramen-feature-schema-matrix-v31.md
+          cat benchmark-results/ramen-neural-dimension-cost-v31.md
       - name: Commit report
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-feature-schema-matrix-v31.md
-          git commit -m 'bench: publish ramen feature schema matrix v31'
+          git add benchmark-results/ramen-neural-dimension-cost-v31.md
+          git commit -m 'bench: publish neural dimension cost matrix v31'
           git pull --rebase origin workbench/skill-pt-matrix-distill
           git push origin HEAD:workbench/skill-pt-matrix-distill
