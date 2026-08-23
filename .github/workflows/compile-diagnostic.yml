@@ -1,64 +1,30 @@
-name: Ramen strict post-eat force ablation v42
+name: Publish strict post-eat ablation v42 report
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  verify:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      VARIANT: strict-no-post-force
-      SHARD: 0
-      RUNS_PER_SHARD: 300
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest30
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - name: Apply strict paired ablation patch
-        run: python3 scripts/ramen/paired_post_eat_force_v42.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-post-eat-v42}
-      - name: Format, compile, test
+        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
+      - name: Download report
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh run download 32640258144 --repo xf8410/umaai-rs --name strict-post-eat-ablation-v42 --dir report
+      - name: Validate and stage
         run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-          cargo test -p umasim --no-default-features trainer::local_ramen_trainer --lib
-          cargo test -p umasim --no-default-features game::ramen::policy --lib
-      - name: Run strict 300-seed pair
-        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - name: Report
+          test -s report/strict-post-eat-ablation-v42.md
+          grep -q 'B 配对胜/平/负' report/strict-post-eat-ablation-v42.md
+          mkdir -p .trae/exports
+          cp report/strict-post-eat-ablation-v42.md .trae/exports/strict-post-eat-ablation-v42.md
+      - name: Commit report
         run: |
-          python3 - <<'PY' | tee strict-post-eat-ablation-v42.md
-          import csv,statistics
-          with open('matrix-result.csv',newline='') as f:r=list(csv.DictReader(f))
-          if len(r)!=300:raise SystemExit(len(r))
-          def vals(prefix,key):return [int(x[prefix+key]) for x in r]
-          def pct(x,p):return sorted(x)[round((len(x)-1)*p)]
-          print('# 严格单变量：移除吃面后强制训练 v42\n')
-          print('|指标|保留硬门 A|移除硬门 B|B-A|\n|---|---:|---:|---:|')
-          for title,key in [('平均总评分','score'),('平均PT','skill_pt'),('平均属性评分','status_score'),('平均五维和','status_sum')]:
-            a,b=vals('a_',key),vals('b_',key); av,bv=statistics.mean(a),statistics.mean(b); print(f'|{title}|{av:.1f}|{bv:.1f}|{bv-av:+.1f}|')
-          a,b=vals('a_','score'),vals('b_','score')
-          for title,p in [('P10',.1),('P50',.5),('P90',.9)]:
-            av,bv=pct(a,p),pct(b,p); print(f'|{title}|{av}|{bv}|{bv-av:+d}|')
-          w,t,l=sum(y>x for x,y in zip(a,b)),sum(y==x for x,y in zip(a,b)),sum(y<x for x,y in zip(a,b))
-          print(f'\nB 配对胜/平/负：{w}/{t}/{l}')
-          print('\n结论门槛：若平均总评分降低，则不删除；持平或提高时再检查 PT、属性和 P10。')
-          PY
-          cat strict-post-eat-ablation-v42.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: strict-post-eat-ablation-v42
-          path: |
-            matrix-result.csv
-            strict-post-eat-ablation-v42.md
-          retention-days: 30
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/strict-post-eat-ablation-v42.md
+          git commit -m 'docs(ramen): 记录 v42 严格吃面后硬门消融' \
+            -m '固化 A/B 仅差 post_eat_force_training 的 300 局配对结果；v41 错误对照不用于结论。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
