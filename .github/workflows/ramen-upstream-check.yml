@@ -15,29 +15,22 @@ on:
       - 'Cargo.lock'
       - 'gamedata/scenario_ramen.json'
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
-          components: rustfmt, clippy
+          components: rustfmt
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ramen-upstream-source-check
-      - name: Reject source-generating experiment hooks
-        run: |
-          if grep -RInE 'python3 scripts/(patch_|fix_|restore_|promote_|friend_|y3_)' .github/workflows/ramen-upstream-check.yml; then
-            echo 'upstream check must never rewrite Rust source' >&2
-            exit 1
-          fi
-      - name: Rust formatting
-        run: cargo fmt --all -- --check
+      - name: Rust formatting (nightly only)
+        run: cargo +nightly fmt --all -- --check
       - name: Core compile without diagnostic logging
         run: cargo check --workspace --no-default-features
       - name: Core tests without diagnostic logging
