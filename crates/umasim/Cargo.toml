@@ -48,6 +48,11 @@ name = "wisdom_structure_diagnostic"
 path = "tools/data_collection/wisdom_structure_diagnostic.rs"
 required-features = ["experiment-tools"]
 
+[[bin]]
+name = "y3_local_matrix"
+path = "tools/data_collection/y3_local_matrix.rs"
+required-features = ["experiment-tools"]
+
 [features]
 default = ["cli", "diag"]
 diag = []
