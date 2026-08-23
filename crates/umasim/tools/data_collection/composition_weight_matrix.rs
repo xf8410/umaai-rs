@@ -114,6 +114,27 @@ fn status_score(status: &[i32; 5]) -> i32 {
         .sum()
 }
 
+/// 把第一个同种子样本的完整决策轨迹直接写入 Actions 日志。
+///
+/// 每种权重只展示一局，避免把 300 局全部展开导致日志截断；统计仍严格使用完整 300 局。
+fn print_turn_trace<T>(label: &str, trainer: &LoggingTrainer<T>) {
+    let log = trainer.take_records();
+    println!("\n╔════════════════════════════════════════════════════════════");
+    println!("║ 逐回合决策样例：{label}");
+    println!("║ 共 {} 条阶段决策；以下按实际发生顺序输出", log.rows.len());
+    println!("╚════════════════════════════════════════════════════════════");
+    for row in log.rows {
+        println!(
+            "回合{:02}｜{:13}｜候选{:02}｜选择#{:02}｜{}",
+            row.turn + 1,
+            row.stage,
+            row.candidates,
+            row.action_index + 1,
+            row.action_desc
+        );
+    }
+}
+
 fn main() -> Result<()> {
     let composition_index: usize = env::var("COMPOSITION_INDEX")
         .context("缺少 COMPOSITION_INDEX")?
@@ -133,10 +154,20 @@ fn main() -> Result<()> {
     let deck = composition.build_deck(&representatives.picked, FRIEND)?;
     let composition_name = composition.name();
 
+    println!("配卡索引：{composition_index}");
+    println!("配卡构成：{composition_name}");
+    println!("实体卡组：{}", deck.iter().map(u32::to_string).collect::<Vec<_>>().join("/"));
+    println!("每个方案：{runs} 局同种子；逐回合日志展示每个方案的第 1 局");
+
     let mut baseline = Vec::with_capacity(runs as usize);
     for run_index in 0..runs {
-        let trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_index);
-        baseline.push(bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &trainer)?);
+        let mut trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_index);
+        trainer.set_logging(run_index == 0);
+        let outcome = bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &trainer)?;
+        if run_index == 0 {
+            print_turn_trace("当前正式基线", &trainer);
+        }
+        baseline.push(outcome);
     }
 
     let mut file = File::create("composition-weight-result.csv")?;
@@ -150,8 +181,15 @@ fn main() -> Result<()> {
         for overflow in WEIGHTS {
             for pt in PT_WEIGHTS {
                 for run_index in 0..runs {
-                    let trainer = LoggingTrainer::new(CandidateTrainer::new(pt, gap, overflow)?, run_index);
+                    let mut trainer = LoggingTrainer::new(CandidateTrainer::new(pt, gap, overflow)?, run_index);
+                    trainer.set_logging(run_index == 0);
                     let candidate = bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &trainer)?;
+                    if run_index == 0 {
+                        print_turn_trace(
+                            &format!("缺口{gap}%-溢出{overflow}%-技能点权重{pt}"),
+                            &trainer
+                        );
+                    }
                     let base = &baseline[run_index as usize];
                     writeln!(
                         file,
