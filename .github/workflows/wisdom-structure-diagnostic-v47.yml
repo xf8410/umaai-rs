@@ -1,0 +1,90 @@
+name: 3速1耐1智候选结构诊断
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/wisdom-structure-diagnostic-v47.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    name: ${{ matrix.variant }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        variant: [均值候选, 稳健候选]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      诊断方案: ${{ matrix.variant }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 3速1耐1智结构诊断}
+      - name: 采集100局分年结构
+        run: cargo run -p umasim --bin wisdom_structure_diagnostic --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-结构诊断-第${{ matrix.shard.human }}片
+          path: 3速1耐1智结构诊断.csv
+          retention-days: 30
+
+  summary:
+    name: 汇总高低PT局结构差异
+    needs: collect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-结构诊断-第*片', path: results}
+      - name: 生成结构诊断报告
+        run: |
+          python3 - <<'PY' | tee 3速1耐1智结构诊断报告.md
+          import csv,glob,collections,statistics
+          groups=collections.defaultdict(list)
+          for path in glob.glob('results/**/3速1耐1智结构诊断.csv',recursive=True):
+            for row in csv.DictReader(open(path)):
+              groups[row['方案']].append(row)
+          if set(groups)!={'均值候选','稳健候选'} or any(len(v)!=300 for v in groups.values()):
+            raise SystemExit({k:len(v) for k,v in groups.items()})
+          metrics=['总分','技能点','第一年技能点','第二年技能点','第三年技能点','第一年拉面点','第二年拉面点','第三年拉面点','速度训练','耐力训练','智力训练','智力彩圈训练','Hint训练','Hint卡人次','吃面训练','休息','友人外出','比赛','RMJ成功年数']
+          def mean(rows,key): return statistics.mean(float(r[key]) for r in rows)
+          print('# 3速1耐1智候选结构诊断\n')
+          print('> 每候选300局同种子。低PT/高PT分别取本候选最低/最高30局。\n')
+          print('## 候选总体结构\n')
+          print('|指标|均值候选|稳健候选|稳健-均值|')
+          print('|---|---:|---:|---:|')
+          for key in metrics:
+            a=mean(groups['均值候选'],key); b=mean(groups['稳健候选'],key)
+            print(f'|{key}|{a:.2f}|{b:.2f}|{b-a:+.2f}|')
+          for name,rows in groups.items():
+            ranked=sorted(rows,key=lambda r:int(r['技能点']))
+            low=ranked[:30]; high=ranked[-30:]
+            print(f'\n## {name}：高低PT局差异\n')
+            print('|指标|低PT 30局|高PT 30局|高-低|')
+            print('|---|---:|---:|---:|')
+            for key in metrics:
+              a=mean(low,key); b=mean(high,key)
+              print(f'|{key}|{a:.2f}|{b:.2f}|{b-a:+.2f}|')
+          print('\n## 解释原则\n')
+          print('- 若差异集中在第三年技能点、吃面训练与智力彩圈，下一轮优化第三年吃面对盘和智力训练价值。')
+          print('- 若差异集中在第一年Hint与羁绊，优化前期点卡门槛，但不再提高全局点卡权重。')
+          print('- 若休息/友人外出明显挤占训练，才调整恢复动作；否则保持0/2/5节奏。')
+          PY
+          cat 3速1耐1智结构诊断报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3速1耐1智结构诊断报告
+          path: 3速1耐1智结构诊断报告.md
+          retention-days: 30
