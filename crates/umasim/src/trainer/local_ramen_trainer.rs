@@ -207,6 +207,12 @@ pub struct LocalRamenConfig {
     /// 外出固定获得 2 个万能材料且上限为 4；设为 2 可避免替代路径产生材料溢出。
     /// 原策略主动选择友人外出不受此门控，只受总次数配额约束。`4` 表示关闭。
     pub friend_rest_max_special: i32,
+
+    /// RMJ/第三年5000目标在截止前的可达性紧迫度。
+    pub deadline_urgency_scale: f32,
+
+    /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
+    pub dynamic_special_targets: bool,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -246,6 +252,8 @@ impl Default for LocalRamenConfig {
             friend_outing3_recovery_vital: 0,
             friend_outing_cumulative_caps: [5, 5, 5],
             friend_rest_max_special: 4,
+            deadline_urgency_scale: 0.0,
+            dynamic_special_targets: false,
         }
     }
 }
@@ -320,6 +328,10 @@ impl LocalRamenTrainer {
                 }
             } else if let Some(v) = token.strip_prefix("friendspecial") {
                 local.friend_rest_max_special = v.parse()?
+            } else if let Some(v) = token.strip_prefix("deadline") {
+                local.deadline_urgency_scale = v.parse::<f32>()? / 100.0
+            } else if token == "specialdynamic" {
+                local.dynamic_special_targets = true
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -490,7 +502,6 @@ impl LocalRamenTrainer {
                 adjust -= (requested_motivation - realized_motivation) as f32
                     * self.policy.config.event_motivation_weight
                     * prob;
-                adjust += c.value.max_vital as f32 * self.policy.config.event_vital_weight * prob;
             }
             values.push(out.score + adjust);
         }
@@ -505,23 +516,13 @@ impl LocalRamenTrainer {
 
     fn decide_train(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (mut guard, mut out) = self.policy.decide_train(g, a)?;
-        if self.config.friend_outing_replaces_rest
-            && self.friend_outing_within_pacing(g)
+        let recovery_guard = self.config.friend_outing_replaces_rest
             && a.get(guard).is_some_and(|x| x.operation == Operation::Rest)
-            && let Some(friend_idx) = a.iter().position(|x| x.operation == Operation::FriendOuting)
-        {
-            // 不新增恢复回合，只把已经决定的纯休息换成收益更完整的友人外出。
-            guard = friend_idx;
-            if out.len() == a.len() {
-                out[friend_idx].reason = "友人出行：替代原定休息并推进事件链".to_string();
-                out[friend_idx].score = out.iter().map(|x| x.score).fold(f32::NEG_INFINITY, f32::max) + 1.0;
-            } else {
-                out = vec![RamenPolicyOutput {
-                    score: f32::MAX,
-                    reason: "守门: 友人出行替代低体力休息".to_string(),
-                    ..Default::default()
-                }];
-            }
+            && out.len() != a.len();
+        if recovery_guard && a.iter().any(|x| x.operation == Operation::FriendOuting) {
+            // 展开完整候选以便真正执行五段动态估值；最终仍只允许休息/友人恢复动作获胜。
+            out = self.policy.score_train_actions(g, a)?;
+            guard = a.iter().position(|x| x.operation == Operation::Rest).unwrap_or(guard);
         }
         if out.len() != a.len() {
             let ate_this_turn = self.config.eat_requires_training && g.ramen.current_ramen.is_some();
@@ -571,7 +572,8 @@ impl LocalRamenTrainer {
                 .iter()
                 .filter(|&&i| g.persons()[i].hint() && matches!(g.persons()[i].person_type(), PersonType::Card))
                 .count();
-            let hp = if self.config.probabilistic_hint && hn > 0 {
+            let all_hint = g.is_hint_special_active_for_train(tr);
+            let hp = if self.config.probabilistic_hint && hn > 0 && !all_hint {
                 1. / hn as f32
             } else {
                 1.
@@ -595,10 +597,22 @@ impl LocalRamenTrainer {
                         b = b.min((80 - x.friendship()) as f32);
                         lt += b * self.config.early_bond_value * ph;
                         if x.hint() {
-                            lt += self.config.hint_bonus * hp
+                            let repeats = if all_hint && i < g.deck().len() {
+                                1 + g.deck()[i].effect.hint_count_bonus
+                            } else {
+                                1
+                            };
+                            lt += self.config.hint_bonus * hp * repeats as f32
                         }
                     }
-                    PersonType::Card if x.hint() => lt += self.config.hint_bonus * hp,
+                    PersonType::Card if x.hint() => {
+                        let repeats = if all_hint && i < g.deck().len() {
+                            1 + g.deck()[i].effect.hint_count_bonus
+                        } else {
+                            1
+                        };
+                        lt += self.config.hint_bonus * hp * repeats as f32
+                    }
                     _ => {}
                 }
             }
@@ -639,6 +653,20 @@ impl LocalRamenTrainer {
         } else {
             bb
         };
+        if recovery_guard {
+            c = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| {
+                    a.get(*i).is_some_and(|x| {
+                        x.operation == Operation::Rest
+                            || (x.operation == Operation::FriendOuting && self.friend_outing_within_pacing(g))
+                    })
+                })
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| anyhow::anyhow!("低体力守门没有合法恢复动作"))?;
+        }
         if !self.friend_outing_within_pacing(g) && a.get(c).is_some_and(|x| x.operation == Operation::FriendOuting) {
             // 配额约束的是所有友人外出，而不只是“替代休息”路径。
             c = out
@@ -935,9 +963,59 @@ impl LocalRamenTrainer {
         Ok(gain - (lost + used) * self.config.safety_bridge_stock_cost)
     }
 
+    fn deadline_urgency(&self, g: &RamenGame, post: i32) -> Result<f32> {
+        if self.config.deadline_urgency_scale <= 0.0 {
+            return Ok(0.0);
+        }
+        let year = (g.current_year() - 1) as usize;
+        let data = RAMENDATA.get().ok_or_else(|| anyhow::anyhow!("RAMENDATA 未初始化"))?;
+        let normal = *data.ramen_success_pt.get(year).unwrap_or(&i32::MAX);
+        let target = if year == 2 { 5000 } else { normal };
+        if post >= target {
+            return Ok(0.0);
+        }
+        let turns = (Self::year_end(g) - g.turn() + 1).max(1) as f32;
+        let gain = calc_ramen_pt_gain(year, g.ramen.eat_count + 1)?.max(1) as f32;
+        let bowls_needed = ((target - post) as f32 / gain).ceil();
+        let pressure = (bowls_needed / turns).clamp(0.0, 1.5);
+        Ok(pressure * (target - post) as f32 * self.config.deadline_urgency_scale)
+    }
+
+    fn decide_special_dynamic(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
+        let (_, mut out) = self.policy.decide_special(g, a)?;
+        for (act, score) in a.iter().zip(out.iter_mut()) {
+            let Some(targets) = act.special_targets else { continue };
+            let Some(region) = act.ramen else { continue };
+            let mut post = g.ramen.clone();
+            consume_for_ramen(&mut post, region, &targets)?;
+            let craftable = g
+                .ramen
+                .selected_regions
+                .iter()
+                .filter(|&&rid| {
+                    list_special_targets_for(&post, rid)
+                        .map(|x| !x.is_empty())
+                        .unwrap_or(false)
+                })
+                .count() as f32;
+            let balance = post.feeling_stock.iter().map(|&x| (x as f32 + 2.0).sqrt()).sum::<f32>();
+            let year_left = (Self::year_end(g) - g.turn()).max(0) as f32 / 21.0;
+            let future = (craftable * 18.0 + balance * 4.0) * year_left;
+            score.score += future;
+            score.add("future_craftability", future);
+            score.reason = format!("隐藏方案{:?} 后续可做{}种", targets, craftable as i32);
+        }
+        Ok((Self::choose(&out), out))
+    }
+
     fn decide_ramen(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (_, mut out) = self.policy.decide_ramen(g, a)?;
-        if self.config.eat_requires_training && !matches!(self.pre_eat_action(g)?, Operation::Train(_)) {
+        let pre_action = self.pre_eat_action(g)?;
+        let year = (g.current_year() - 1) as usize;
+        let eat_post = g.ramen.scenario_pt + calc_ramen_pt_gain(year, g.ramen.eat_count)?;
+        let deadline_exception = self.deadline_urgency(g, eat_post)? > 0.0
+            && matches!(pre_action, Operation::Race | Operation::Rest | Operation::FriendOuting);
+        if self.config.eat_requires_training && !matches!(pre_action, Operation::Train(_)) && !deadline_exception {
             let no_eat = a
                 .iter()
                 .position(|action| action.ramen.is_none())
@@ -995,6 +1073,7 @@ impl LocalRamenTrainer {
                 let y = (g.current_year() - 1) as usize;
                 let post = g.ramen.scenario_pt + calc_ramen_pt_gain(y, g.ramen.eat_count)?;
                 let (ck, rmj, great) = self.scenario_threshold_value(g, post)?;
+                let deadline = self.deadline_urgency(g, post)?;
                 let window = self.ramen_window_alignment(g, region_id)?;
                 let cook2_cost = self.cook2_ramen_stock_cost(g, region_id)?;
                 let safety = if let Some((_, gain)) = bridge {
@@ -1003,10 +1082,11 @@ impl LocalRamenTrainer {
                     0.0
                 };
                 let look = self.ramen_lookahead(g, region_id)?;
-                o.score += ck + rmj + great + window + safety + look - cook2_cost;
+                o.score += ck + rmj + great + deadline + window + safety + look - cook2_cost;
                 o.add("scenario_checkpoint", ck);
                 o.add("rmj_cross", rmj);
                 o.add("great_cross", great);
+                o.add("deadline_urgency", deadline);
                 o.add("ramen_window", window);
                 o.add("cook2_stock_cost", -cook2_cost);
                 o.add("safety_bridge", safety);
@@ -1092,6 +1172,8 @@ impl RecommendedRamenTrainer {
             local.friend_outing3_recovery_vital = 0;
             local.friend_outing_cumulative_caps = [1, 3, 5];
             local.friend_rest_max_special = 4;
+            local.deadline_urgency_scale = 0.35;
+            local.dynamic_special_targets = true;
             LocalRamenTrainer::with_configs(policy, local)
         }
 
@@ -1159,7 +1241,13 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
         let (c, o) = match g.stage {
             RamenStage::Train => self.decide_train(g, a)?,
             RamenStage::RamenSelect => self.decide_ramen(g, a)?,
-            RamenStage::SpecialSelect => self.policy.decide_special(g, a)?,
+            RamenStage::SpecialSelect => {
+                if self.config.dynamic_special_targets {
+                    self.decide_special_dynamic(g, a)?
+                } else {
+                    self.policy.decide_special(g, a)?
+                }
+            }
             RamenStage::RegionSelect => {
                 let y = match g.turn() {
                     2 => 0,

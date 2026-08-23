@@ -656,6 +656,10 @@ impl RamenPolicy {
         val += c.value.status_pt[5] as f32 * self.config.pt_rate;
         val += c.value.vital as f32 * self.config.event_vital_weight;
         val += c.value.motivation as f32 * self.config.event_motivation_weight;
+        // 旧简化器漏掉了 Hint、羁绊和永久最大体力，导致友人/支援事件被系统性低估。
+        val += c.value.hint_level as f32 * global!(GAMECONSTANTS).hint_pt_rate * self.config.pt_rate;
+        val += c.value.friendship as f32 * 5.0;
+        val += c.value.max_vital as f32 * self.config.event_vital_weight * 2.0;
         // flags：ill/bad_trainer 是坏状态，获得惩罚、移除奖励
         if let Some(flags) = &c.add_flags {
             if flags.ill || flags.bad_trainer {
