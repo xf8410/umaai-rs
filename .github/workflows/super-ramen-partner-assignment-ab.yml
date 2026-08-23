@@ -1,0 +1,79 @@
+name: Super ramen partner assignment paired A/B
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Runs per player build and variant
+        required: false
+        default: '500'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  paired-ab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: super-ramen-partner-assignment-ab
+      - name: Compile baseline
+        run: cargo check -p umasim --bin bench_base --no-default-features
+      - name: Run baseline
+        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "${{ inputs.runs }}" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
+      - name: Apply protocol-derived candidate
+        run: python3 scripts/ramen/experiment_super_ramen_partner_assignment.py
+      - name: Compile and test candidate
+        run: |
+          cargo check -p umasim --bin bench_base --no-default-features
+          cargo test -p umasim --lib --no-default-features test_ramen_game_full_loop -- --nocapture
+      - name: Run candidate with identical seeds
+        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "${{ inputs.runs }}" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/candidate
+      - name: Summarize paired score matrix
+        run: |
+          python3 - <<'PY'
+          import csv, pathlib, statistics
+          root = pathlib.Path('benchmark-results/super-ramen-ab')
+          def load(name):
+              p = root/name/'bench_base_results.csv'
+              with p.open() as f:
+                  rows = list(csv.DictReader(f))
+              return {(r['build'], r['seed']): r for r in rows}
+          a, b = load('baseline'), load('candidate')
+          keys = sorted(a.keys() & b.keys())
+          if not keys or len(keys) != len(a) or len(keys) != len(b):
+              raise SystemExit(f'unpaired results baseline={len(a)} candidate={len(b)} paired={len(keys)}')
+          deltas = [int(b[k]['score']) - int(a[k]['score']) for k in keys]
+          wins = sum(x > 0 for x in deltas); losses = sum(x < 0 for x in deltas)
+          report = [
+              '# 超级拉面额外人头协议修正 A/B', '',
+              f'- 配对局数：{len(keys)}',
+              f'- 候选平均分变化：{statistics.mean(deltas):+.2f}',
+              f'- 中位变化：{statistics.median(deltas):+.2f}',
+              f'- 候选胜/平/负：{wins}/{len(keys)-wins-losses}/{losses}', '',
+              '| build | 局数 | 平均变化 | 胜/平/负 |', '|---|---:|---:|---:|'
+          ]
+          for build in sorted({k[0] for k in keys}):
+              ds = [int(b[k]['score'])-int(a[k]['score']) for k in keys if k[0] == build]
+              w=sum(x>0 for x in ds); l=sum(x<0 for x in ds)
+              report.append(f'| {build} | {len(ds)} | {statistics.mean(ds):+.2f} | {w}/{len(ds)-w-l}/{l} |')
+          keep = statistics.mean(deltas) > 0 and wins > losses
+          report += ['', f'**判定：{"保留候选" if keep else "不保留候选"}**',
+                     '', '候选只在工作区临时应用；本 workflow 不提交机制改动。']
+          text='\n'.join(report)+'\n'
+          (root/'report.md').write_text(text)
+          print(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: super-ramen-partner-assignment-ab-${{ github.run_id }}
+          path: benchmark-results/super-ramen-ab
+          retention-days: 14
