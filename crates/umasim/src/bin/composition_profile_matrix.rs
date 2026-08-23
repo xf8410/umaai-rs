@@ -21,11 +21,26 @@ const INHERIT: InheritInfo = InheritInfo {
 
 fn builds() -> [DeckComposition; 5] {
     [
-        DeckComposition { name: "3speed-1stamina-1wisdom".into(), counts: [3, 1, 0, 0, 1] },
-        DeckComposition { name: "2speed-2stamina-1wisdom".into(), counts: [2, 2, 0, 0, 1] },
-        DeckComposition { name: "2power-3wisdom".into(), counts: [0, 0, 2, 0, 3] },
-        DeckComposition { name: "2speed-1stamina-2wisdom".into(), counts: [2, 1, 0, 0, 2] },
-        DeckComposition { name: "1speed-1stamina-3wisdom".into(), counts: [1, 1, 0, 0, 3] },
+        DeckComposition {
+            name: "3speed-1stamina-1wisdom".into(),
+            counts: [3, 1, 0, 0, 1],
+        },
+        DeckComposition {
+            name: "2speed-2stamina-1wisdom".into(),
+            counts: [2, 2, 0, 0, 1],
+        },
+        DeckComposition {
+            name: "2power-3wisdom".into(),
+            counts: [0, 0, 2, 0, 3],
+        },
+        DeckComposition {
+            name: "2speed-1stamina-2wisdom".into(),
+            counts: [2, 1, 0, 0, 2],
+        },
+        DeckComposition {
+            name: "1speed-1stamina-3wisdom".into(),
+            counts: [1, 1, 0, 0, 3],
+        },
     ]
 }
 
@@ -36,7 +51,10 @@ fn main() -> Result<()> {
     let runs: u64 = env::var("RUNS_PER_SHARD").unwrap_or_else(|_| "100".into()).parse()?;
     let reps = bench::select_representatives(&CardPickOpts::default())?;
     let mut out = File::create("composition-profile-result.csv")?;
-    writeln!(out, "build,deck,run_idx,baseline_score,profile_score,baseline_pt,profile_pt,baseline_rmj,profile_rmj")?;
+    writeln!(
+        out,
+        "build,deck,run_idx,baseline_score,profile_score,baseline_pt,profile_pt,baseline_rmj,profile_rmj"
+    )?;
     for build in builds() {
         let deck = build.build_deck(&reps.picked, FRIEND)?;
         let deck_text = deck.iter().map(u32::to_string).collect::<Vec<_>>().join("/");
@@ -61,8 +79,15 @@ fn main() -> Result<()> {
             writeln!(
                 out,
                 "{},{},{},{},{},{},{},{},{}",
-                build.name(), deck_text, run_idx, baseline.score, profile.score,
-                baseline.skill_pt, profile.skill_pt, baseline.rmj_ok, profile.rmj_ok
+                build.name(),
+                deck_text,
+                run_idx,
+                baseline.score,
+                profile.score,
+                baseline.skill_pt,
+                profile.skill_pt,
+                baseline.rmj_ok,
+                profile.rmj_ok
             )?;
         }
     }

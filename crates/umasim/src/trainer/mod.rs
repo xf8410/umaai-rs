@@ -35,17 +35,30 @@ impl<G: Game> Trainer<G> for RandomTrainer {
         random_index.shuffle(rng);
         for i in &random_index {
             if game.uma().vital < 45 {
-                if actions[*i].as_base_action() == Some(BaseAction::Sleep) { ret = Some(*i); break; }
+                if actions[*i].as_base_action() == Some(BaseAction::Sleep) {
+                    ret = Some(*i);
+                    break;
+                }
             } else if game.uma().motivation < 5 {
-                if matches!(actions[*i].as_base_action(), Some(BaseAction::NormalOuting) | Some(BaseAction::FriendOuting)) { ret = Some(*i); break; }
+                if matches!(
+                    actions[*i].as_base_action(),
+                    Some(BaseAction::NormalOuting) | Some(BaseAction::FriendOuting)
+                ) {
+                    ret = Some(*i);
+                    break;
+                }
             } else if matches!(actions[*i].as_base_action(), Some(BaseAction::Train(_))) {
-                ret = Some(*i); break;
+                ret = Some(*i);
+                break;
             }
         }
         if ret.is_none() {
             for i in &random_index {
                 if let Some(ra) = any_ramen_action(&actions[*i]) {
-                    if ra.ramen.is_some() || ra.special_targets.is_some_and(|t| t.iter().any(|&x| x > 0)) { ret = Some(*i); break; }
+                    if ra.ramen.is_some() || ra.special_targets.is_some_and(|t| t.iter().any(|&x| x > 0)) {
+                        ret = Some(*i);
+                        break;
+                    }
                 }
             }
         }
@@ -56,13 +69,18 @@ impl<G: Game> Trainer<G> for RandomTrainer {
 
     fn select_choice(&self, _game: &G, choices: &[Vec<EventChoice>], rng: &mut StdRng) -> Result<usize> {
         let ret = rng.random_range(0..choices.len());
-        let explain: Vec<String> = choices.iter().map(|x| x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ")).collect();
+        let explain: Vec<String> = choices
+            .iter()
+            .map(|x| x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | "))
+            .collect();
         info!("当前选项: {}, 随机选择选项 {}", explain.join(" / "), ret + 1);
         Ok(ret)
     }
 }
 
-fn any_ramen_action<A>(_action: &A) -> Option<&crate::game::ramen::RamenAction> { None }
+fn any_ramen_action<A>(_action: &A) -> Option<&crate::game::ramen::RamenAction> {
+    None
+}
 
 pub struct ManualTrainer {
     pub mock_inputs: Rc<RefCell<VecDeque<String>>>,
@@ -70,16 +88,37 @@ pub struct ManualTrainer {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FallbackMode { Interactive, PickFirst }
+pub enum FallbackMode {
+    Interactive,
+    PickFirst,
+}
 
-impl Default for ManualTrainer { fn default() -> Self { Self::new() } }
+impl Default for ManualTrainer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ManualTrainer {
-    pub fn new() -> Self { Self { mock_inputs: Rc::new(RefCell::new(VecDeque::new())), fallback: FallbackMode::Interactive } }
-    pub fn with_mock_inputs(inputs: Vec<String>) -> Self { Self { mock_inputs: Rc::new(RefCell::new(inputs.into_iter().collect())), fallback: FallbackMode::PickFirst } }
-    fn pop_mock_input(&self) -> Option<String> { self.mock_inputs.borrow_mut().pop_front() }
+    pub fn new() -> Self {
+        Self {
+            mock_inputs: Rc::new(RefCell::new(VecDeque::new())),
+            fallback: FallbackMode::Interactive,
+        }
+    }
+    pub fn with_mock_inputs(inputs: Vec<String>) -> Self {
+        Self {
+            mock_inputs: Rc::new(RefCell::new(inputs.into_iter().collect())),
+            fallback: FallbackMode::PickFirst,
+        }
+    }
+    fn pop_mock_input(&self) -> Option<String> {
+        self.mock_inputs.borrow_mut().pop_front()
+    }
     fn fallback_pick_first(&self, len: usize, item_desc: &str) -> Result<usize> {
-        if len == 0 { return Err(anyhow::anyhow!("{item_desc} 候选为空")); }
+        if len == 0 {
+            return Err(anyhow::anyhow!("{item_desc} 候选为空"));
+        }
         Ok(0)
     }
 }
@@ -87,34 +126,55 @@ impl ManualTrainer {
 impl<G: Game> Trainer<G> for ManualTrainer {
     fn select_action(&self, _game: &G, actions: &[<G as Game>::Action], _rng: &mut StdRng) -> Result<usize> {
         if let Some(input) = self.pop_mock_input() {
-            return actions.iter().position(|x| x.to_string() == input).ok_or_else(|| anyhow::anyhow!("mock 输入未匹配到候选动作: {input}"));
+            return actions
+                .iter()
+                .position(|x| x.to_string() == input)
+                .ok_or_else(|| anyhow::anyhow!("mock 输入未匹配到候选动作: {input}"));
         }
         match self.fallback {
             FallbackMode::PickFirst => self.fallback_pick_first(actions.len(), "动作"),
             #[cfg(feature = "cli")]
             FallbackMode::Interactive => {
-                let selected = Select::new("请选择:", actions.to_vec()).with_page_size(actions.len()).prompt()?;
-                actions.iter().position(|x| *x == selected).ok_or_else(|| anyhow::anyhow!("未找到该动作: {selected}"))
+                let selected = Select::new("请选择:", actions.to_vec())
+                    .with_page_size(actions.len())
+                    .prompt()?;
+                actions
+                    .iter()
+                    .position(|x| *x == selected)
+                    .ok_or_else(|| anyhow::anyhow!("未找到该动作: {selected}"))
             }
             #[cfg(not(feature = "cli"))]
-            FallbackMode::Interactive => Err(anyhow::anyhow!("ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs")),
+            FallbackMode::Interactive => Err(anyhow::anyhow!(
+                "ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs"
+            )),
         }
     }
 
     fn select_choice(&self, _game: &G, choices: &[Vec<EventChoice>], _rng: &mut StdRng) -> Result<usize> {
-        let explain: Vec<String> = choices.iter().map(|x| x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ")).collect();
+        let explain: Vec<String> = choices
+            .iter()
+            .map(|x| x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | "))
+            .collect();
         if let Some(input) = self.pop_mock_input() {
-            return explain.iter().position(|x| x == &input).ok_or_else(|| anyhow::anyhow!("mock 输入未匹配到候选选项: {input}"));
+            return explain
+                .iter()
+                .position(|x| x == &input)
+                .ok_or_else(|| anyhow::anyhow!("mock 输入未匹配到候选选项: {input}"));
         }
         match self.fallback {
             FallbackMode::PickFirst => self.fallback_pick_first(explain.len(), "事件选项"),
             #[cfg(feature = "cli")]
             FallbackMode::Interactive => {
                 let selected = Select::new("请选择:", explain.clone()).prompt()?;
-                explain.iter().position(|x| x == &selected).ok_or_else(|| anyhow::anyhow!("未找到该选项: {selected}"))
+                explain
+                    .iter()
+                    .position(|x| x == &selected)
+                    .ok_or_else(|| anyhow::anyhow!("未找到该选项: {selected}"))
             }
             #[cfg(not(feature = "cli"))]
-            FallbackMode::Interactive => Err(anyhow::anyhow!("ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs")),
+            FallbackMode::Interactive => Err(anyhow::anyhow!(
+                "ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs"
+            )),
         }
     }
 }

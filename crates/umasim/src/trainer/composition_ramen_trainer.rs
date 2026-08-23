@@ -62,7 +62,13 @@ impl V29SpecialTrainer {
     }
 
     fn year(game: &RamenGame) -> usize {
-        if game.turn() < 24 { 0 } else if game.turn() < 48 { 1 } else { 2 }
+        if game.turn() < 24 {
+            0
+        } else if game.turn() < 48 {
+            1
+        } else {
+            2
+        }
     }
 }
 
@@ -80,11 +86,7 @@ impl Trainer<RamenGame> for V29SpecialTrainer {
     }
 
     fn select_event_choice(
-        &self,
-        game: &RamenGame,
-        event: &EventData,
-        choices: &[Vec<EventChoice>],
-        rng: &mut StdRng,
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         let year = Self::year(game);
         *self.last_year.lock().unwrap() = Some(year);
@@ -138,8 +140,16 @@ impl CompositionRamenTrainer {
         let (spd_people, spd_shining) = Self::people_and_shining(game, 0);
 
         // 三速时耐力/智力只要有两个有效人头就形成吃面窗口；彩圈是额外优先级。
-        let stamina = (sta_people >= 2).then_some((1, 100 + sta_people as i32 * 12 + sta_shining as i32 * 45, "耐力两人窗口"));
-        let wisdom = (wis_people >= 2).then_some((4, 100 + wis_people as i32 * 12 + wis_shining as i32 * 45, "智力两人窗口"));
+        let stamina = (sta_people >= 2).then_some((
+            1,
+            100 + sta_people as i32 * 12 + sta_shining as i32 * 45,
+            "耐力两人窗口",
+        ));
+        let wisdom = (wis_people >= 2).then_some((
+            4,
+            100 + wis_people as i32 * 12 + wis_shining as i32 * 45,
+            "智力两人窗口",
+        ));
 
         // 速度通常忽略。只有诀窍库存已经临近溢出，或速度双彩以上，才开放速度窗口。
         let stock_overflow = game.ramen.feeling_stock.iter().sum::<i32>() >= 8;
@@ -147,7 +157,11 @@ impl CompositionRamenTrainer {
         let speed = speed_exception.then_some((
             0,
             40 + spd_people as i32 * 8 + spd_shining as i32 * 55 + if stock_overflow { 70 } else { 0 },
-            if stock_overflow { "速度库存溢出例外" } else { "速度双彩大窗口例外" },
+            if stock_overflow {
+                "速度库存溢出例外"
+            } else {
+                "速度双彩大窗口例外"
+            },
         ));
 
         [stamina, wisdom, speed].into_iter().flatten().max_by_key(|x| x.1)
@@ -198,16 +212,16 @@ impl Trainer<RamenGame> for CompositionRamenTrainer {
     }
 
     fn select_event_choice(
-        &self,
-        game: &RamenGame,
-        event: &EventData,
-        choices: &[Vec<EventChoice>],
-        rng: &mut StdRng,
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         self.base.select_event_choice(game, event, choices, rng)
     }
 
     fn last_breakdown(&self) -> Option<String> {
-        self.last_override.lock().ok().and_then(|x| x.clone()).or_else(|| self.base.last_breakdown())
+        self.last_override
+            .lock()
+            .ok()
+            .and_then(|x| x.clone())
+            .or_else(|| self.base.last_breakdown())
     }
 }
