@@ -1,59 +1,97 @@
-name: Publish handwritten v36 experiment report
+name: Handwritten 8500 PT target matrix v37
 on:
   workflow_dispatch:
 permissions:
-  actions: read
-  contents: write
+  contents: read
 jobs:
-  publish:
+  matrix:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        variant:
+          - baseline-16-64-64-s140
+          - pt3-80-s140
+          - pt3-96-s140
+          - pt3-128-s140
+          - pt2-80-pt3-96-s140
+          - pt2-96-pt3-128-s140
+          - pt2-80-pt3-96-s180
+          - pt2-96-pt3-128-s180
+        shard: [0, 1, 2]
+    env:
+      VARIANT: ${{ matrix.variant }}
+      PT1: 16
+      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
+      STRUCTURE_Y1: vrest30
+      STRUCTURE_Y2: vrest30
+      STRUCTURE_Y3: vrest30
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
-          fetch-depth: 0
-      - name: Download v36 matrix artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download 32636482815 --repo xf8410/umaai-rs --pattern 'v36-*' --dir results
-      - name: Build reproducible report
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - name: Select PT weights and sacrifice cap
+        shell: bash
         run: |
-          mkdir -p .trae/exports
-          python3 - <<'PY' | tee .trae/exports/handwritten-phase-v36.md
+          case "${{ matrix.variant }}" in
+            baseline-16-64-64-s140) echo 'PT2=64' >> "$GITHUB_ENV"; echo 'PT3=64' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt3-80-s140)            echo 'PT2=64' >> "$GITHUB_ENV"; echo 'PT3=80' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt3-96-s140)            echo 'PT2=64' >> "$GITHUB_ENV"; echo 'PT3=96' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt3-128-s140)           echo 'PT2=64' >> "$GITHUB_ENV"; echo 'PT3=128' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt2-80-pt3-96-s140)     echo 'PT2=80' >> "$GITHUB_ENV"; echo 'PT3=96' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt2-96-pt3-128-s140)    echo 'PT2=96' >> "$GITHUB_ENV"; echo 'PT3=128' >> "$GITHUB_ENV"; echo 'SAC=140' >> "$GITHUB_ENV" ;;
+            pt2-80-pt3-96-s180)     echo 'PT2=80' >> "$GITHUB_ENV"; echo 'PT3=96' >> "$GITHUB_ENV"; echo 'SAC=180' >> "$GITHUB_ENV" ;;
+            pt2-96-pt3-128-s180)    echo 'PT2=96' >> "$GITHUB_ENV"; echo 'PT3=128' >> "$GITHUB_ENV"; echo 'SAC=180' >> "$GITHUB_ENV" ;;
+          esac
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: handwritten-8500pt-v37}
+      - name: Run 100 same-seed games
+        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v37-${{ matrix.variant }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
+          if-no-files-found: error
+          retention-days: 14
+  summary:
+    if: always()
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: v37-*, path: results}
+      - name: Summarize score and 8500 PT target
+        run: |
+          python3 - <<'PY' | tee handwritten-8500pt-v37.md
           import csv, glob, collections, statistics
           data=collections.defaultdict(list)
           for path in glob.glob('results/**/matrix-result.csv', recursive=True):
             with open(path, newline='') as f:
               for row in csv.DictReader(f):
                 data[row['variant']].append({k:int(row[k]) for k in ['b_score','b_skill_pt','b_status_score']})
-          expected={'control-v35','y1-rest45','y1-y2-rest45','y3-rest20','y3-rest30'}
-          if set(data) != expected:
-            raise SystemExit(f'variant mismatch: {sorted(data)}')
           if any(len(rows) != 300 for rows in data.values()):
             raise SystemExit(f'incomplete matrix: {[(name,len(rows)) for name,rows in data.items()]}')
           def pct(values,p):
             values=sorted(values); return values[round((len(values)-1)*p)]
-          print('# 手写策略分年份体力门控矩阵 v36\n')
-          print('> 来源：[GitHub Actions run 32636482815](https://github.com/xf8410/umaai-rs/actions/runs/32636482815)')
-          print('> 每变体 300 局；相同 seed、马娘、卡组、继承和其余 v35 参数。\n')
-          print('|变体|局数|平均分|P10|P50|P90|平均PT|PT P10|平均属性评分|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-          for name,rows in sorted(data.items(),key=lambda item:-statistics.mean(r['b_score'] for r in item[1])):
+          def order(item):
+            name,rows=item; mean_pt=statistics.mean(r['b_skill_pt'] for r in rows); mean_score=statistics.mean(r['b_score'] for r in rows)
+            return (mean_pt >= 8500, mean_score if mean_pt >= 8500 else mean_pt)
+          print('# 手写策略 8500 PT 目标矩阵 v37\n')
+          print('> 每变体 300 局；固定 v36 最佳体力门 30/30/30，使用相同 seed、马娘、卡组、继承和其余策略参数。\n')
+          print('|变体|局数|平均分|P10/P50/P90|平均PT|PT P10/P90|≥8500 PT局占比|平均属性评分|达标|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|:---:|')
+          for name,rows in sorted(data.items(), key=order, reverse=True):
             score=[r['b_score'] for r in rows]; pt=[r['b_skill_pt'] for r in rows]; status=[r['b_status_score'] for r in rows]
-            print(f'|{name}|{len(rows)}|{statistics.mean(score):.1f}|{pct(score,.1)}|{pct(score,.5)}|{pct(score,.9)}|{statistics.mean(pt):.1f}|{pct(pt,.1)}|{statistics.mean(status):.1f}|')
+            hit=sum(x>=8500 for x in pt)/len(pt)*100; mean_pt=statistics.mean(pt)
+            print(f'|{name}|{len(rows)}|{statistics.mean(score):.1f}|{pct(score,.1)}/{pct(score,.5)}/{pct(score,.9)}|{mean_pt:.1f}|{pct(pt,.1)}/{pct(pt,.9)}|{hit:.1f}%|{statistics.mean(status):.1f}|{"✅" if mean_pt>=8500 else "❌"}|')
           PY
-      - name: Commit evidence with descriptive body
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .trae/exports/handwritten-phase-v36.md
-          git commit -m 'docs(ramen): 记录 v36 分年份体力门控矩阵结果' \
-            -m '在固定 v35 其余参数的前提下，对第一、二、三年的 vital_rest 进行独立消融，避免全局门控掩盖收益来源。' \
-            -m '- 每个变体包含 3 个 shard × 100 个相同 seed，共 300 局；
-          - 固定马娘、卡组、继承、PT 16/64/64 与 sac140；
-          - 报告平均分、P10/P50/P90、平均 PT、PT P10 和属性评分；
-          - 原始数据来自 Actions run 32636482815，并在提交前校验五个变体各 300 局完整性。
-
-          本提交仅记录实验事实，不修改 RecommendedRamenTrainer；正式提升将在比较均值与低分尾部后另行提交。'
-          git pull --rebase origin workbench/skill-pt-matrix-distill
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          cat handwritten-8500pt-v37.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: handwritten-8500pt-v37-summary
+          path: handwritten-8500pt-v37.md
+          retention-days: 30
