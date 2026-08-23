@@ -201,6 +201,12 @@ pub struct LocalRamenConfig {
     /// 例如 `[1, 3, 5]` 表示第一年最多用 1 次、第二年结束前最多累计 3 次、第三年可用完。
     /// `[5, 5, 5]` 等价于不做跨年配额；仅在 `friend_outing_replaces_rest=true` 时生效。
     pub friend_outing_cumulative_caps: [usize; 3],
+
+    /// “休息→友人外出”替代时允许的最高当前万能材料数量。
+    ///
+    /// 外出固定获得 2 个万能材料且上限为 4；设为 2 可避免替代路径产生材料溢出。
+    /// 原策略主动选择友人外出不受此门控，只受总次数配额约束。`4` 表示关闭。
+    pub friend_rest_max_special: i32,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -239,6 +245,7 @@ impl Default for LocalRamenConfig {
             friend_outing_replaces_rest: false,
             friend_outing3_recovery_vital: 0,
             friend_outing_cumulative_caps: [5, 5, 5],
+            friend_rest_max_special: 4,
         }
     }
 }
@@ -311,6 +318,8 @@ impl LocalRamenTrainer {
                 if c[0] > c[1] || c[1] > c[2] || c[2] > 5 {
                     anyhow::bail!("friendcap 必须单调且不超过5: {v}");
                 }
+            } else if let Some(v) = token.strip_prefix("friendspecial") {
+                local.friend_rest_max_special = v.parse()?
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -426,6 +435,7 @@ impl LocalRamenTrainer {
         let (mut guard, mut out) = self.policy.decide_train(g, a)?;
         if self.config.friend_outing_replaces_rest
             && self.friend_outing_within_pacing(g)
+            && g.ramen.special_feeling <= self.config.friend_rest_max_special
             && a.get(guard).is_some_and(|x| x.operation == Operation::Rest)
             && let Some(friend_idx) = a.iter().position(|x| x.operation == Operation::FriendOuting)
         {
@@ -545,11 +555,21 @@ impl LocalRamenTrainer {
         }
         let lb = Self::choose(&out);
         let sacrifice = base[bb] - base[lb];
-        let c = if sacrifice <= self.config.max_base_score_sacrifice {
+        let mut c = if sacrifice <= self.config.max_base_score_sacrifice {
             lb
         } else {
             bb
         };
+        if !self.friend_outing_within_pacing(g) && a.get(c).is_some_and(|x| x.operation == Operation::FriendOuting) {
+            // 配额约束的是所有友人外出，而不只是“替代休息”路径。
+            c = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| a.get(*i).is_some_and(|x| x.operation != Operation::FriendOuting))
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| anyhow::anyhow!("友人外出达到跨年总配额后没有其他合法动作"))?;
+        }
         Ok((c, out))
     }
     fn pt_effect(pt: i32) -> Result<(i32, i32, i32)> {
