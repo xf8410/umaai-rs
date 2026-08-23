@@ -1,62 +1,30 @@
-name: Ramen remove post-eat force training v41
+name: Publish remove post-eat force v41 report
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  verify:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    env:
-      VARIANT: no-post-eat-force
-      SHARD: 0
-      RUNS_PER_SHARD: 300
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest30
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - name: Apply single hard-gate removal
-        run: python3 scripts/ramen/remove_post_eat_force_training_v41.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-post-eat-removal-v41}
-      - name: Format, compile, and run focused tests
+        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
+      - name: Download report
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh run download 32639945091 --repo xf8410/umaai-rs --name remove-post-eat-force-v41 --dir report
+      - name: Validate and stage
         run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-          cargo test -p umasim --no-default-features trainer::local_ramen_trainer --lib
-          cargo test -p umasim --no-default-features game::ramen::policy --lib
-      - name: Run 300 paired seeds
-        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - name: Summarize paired removal
+          test -s report/remove-post-eat-force-v41.md
+          grep -q '平均总评分' report/remove-post-eat-force-v41.md
+          mkdir -p .trae/exports
+          cp report/remove-post-eat-force-v41.md .trae/exports/remove-post-eat-force-v41.md
+      - name: Commit report
         run: |
-          python3 - <<'PY' | tee remove-post-eat-force-v41.md
-          import csv,statistics
-          with open('matrix-result.csv',newline='') as f:r=list(csv.DictReader(f))
-          if len(r)!=300:raise SystemExit(f'expected 300 rows, got {len(r)}')
-          gi=lambda x,k:int(x[k]); mean=lambda k,p:statistics.mean(gi(x,p+k) for x in r)
-          def pct(vals,p):return sorted(vals)[round((len(vals)-1)*p)]
-          a=[gi(x,'a_score') for x in r]; b=[gi(x,'b_score') for x in r]
-          print('# 移除吃面后强制训练硬门 v41\n')
-          print('|指标|当前正式策略|仅移除吃面后强制训练|变化|\n|---|---:|---:|---:|')
-          for title,k in [('平均总评分','score'),('平均PT','skill_pt'),('平均属性评分','status_score'),('平均五维和','status_sum')]:
-            av,bv=mean(k,'a_'),mean(k,'b_'); print(f'|{title}|{av:.1f}|{bv:.1f}|{bv-av:+.1f}|')
-          for title,p in [('P10',.1),('P50',.5),('P90',.9)]:
-            av,bv=pct(a,p),pct(b,p); print(f'|{title}|{av}|{bv}|{bv-av:+d}|')
-          print(f'\n配对胜/平/负：{sum(x>y for x,y in zip(b,a))}/{sum(x==y for x,y in zip(b,a))}/{sum(x<y for x,y in zip(b,a))}')
-          PY
-          cat remove-post-eat-force-v41.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: remove-post-eat-force-v41
-          path: |
-            matrix-result.csv
-            remove-post-eat-force-v41.md
-          retention-days: 30
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/remove-post-eat-force-v41.md
+          git commit -m 'docs(ramen): 记录 v41 吃面后强制训练消融' \
+            -m '固化 300 局同种子对照的总评分、PT、属性评分、分位数与配对胜负；不修改正式策略。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
