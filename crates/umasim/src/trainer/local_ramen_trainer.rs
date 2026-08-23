@@ -21,7 +21,8 @@ use crate::{
             rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, list_special_targets_for}
         }
     },
-    gamedata::{EventChoice, EventData, ramen::RAMENDATA}
+    gamedata::{EventChoice, EventData, GAMECONSTANTS, ramen::RAMENDATA},
+    global
 };
 
 #[derive(Debug, Clone)]
@@ -75,6 +76,18 @@ pub struct LocalRamenConfig {
     /// 预留量会随剩余回合线性缩小；训练把属性推近上限时会产生软惩罚。
     /// `0.0` 表示关闭属性溢出预留模型。
     pub status_reserve_max: f32,
+
+    /// 是否启用按五维完成度动态调整属性边际价值。
+    ///
+    /// 开启后会提高相对落后属性的精确评分边际，并在属性接近上限时降低继续堆叠的价值；
+    /// 三张及以上同类型卡会放大对应属性的近上限衰减。默认关闭，仅供配对矩阵验证。
+    pub dynamic_status_balance: bool,
+
+    /// 短板追赶强度。1.0 表示完成度每落后最高维度 10%，该维精确属性评分边际增加 10%。
+    pub status_gap_strength: f32,
+
+    /// 近上限衰减强度。属性完成度超过 70% 后按平方曲线增长，并受同类型卡过量系数放大。
+    pub status_overflow_strength: f32,
 
     /// 是否使用随回合变化的体力成本模型。
     ///
@@ -236,6 +249,9 @@ impl Default for LocalRamenConfig {
             overflow_value: 8.,
             max_base_score_sacrifice: 140.,
             status_reserve_max: 0.,
+            dynamic_status_balance: false,
+            status_gap_strength: 0.0,
+            status_overflow_strength: 0.0,
             dynamic_vital: false,
             probabilistic_hint: false,
             expected_fail: false,
@@ -341,6 +357,12 @@ impl LocalRamenTrainer {
                 local.deadline_urgency_scale = v.parse::<f32>()? / 100.0
             } else if token == "specialdynamic" {
                 local.dynamic_special_targets = true
+            } else if token == "statusdyn" {
+                local.dynamic_status_balance = true
+            } else if let Some(v) = token.strip_prefix("gap") {
+                local.status_gap_strength = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("over") {
+                local.status_overflow_strength = v.parse::<f32>()? / 100.0
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -442,6 +464,37 @@ impl LocalRamenTrainer {
         }
         p * 6.
     }
+    fn dynamic_status_adjustment(&self, g: &RamenGame, gain: &[i32; 6]) -> f32 {
+        if !self.config.dynamic_status_balance {
+            return 0.0;
+        }
+        let completion: [f32; 5] = std::array::from_fn(|i| {
+            let limit = g.uma.five_status_limit[i].max(1) as f32;
+            (g.uma.five_status[i].max(0) as f32 / limit).clamp(0.0, 1.0)
+        });
+        let leading = completion.iter().copied().fold(0.0f32, f32::max);
+        let cons = global!(GAMECONSTANTS);
+        let mut adjustment = 0.0;
+        for i in 0..5 {
+            let limit = g.uma.five_status_limit[i].max(0) as usize;
+            let cur = (g.uma.five_status[i].max(0) as usize).min(limit);
+            let next = cur.saturating_add(gain[i].max(0) as usize).min(limit);
+            let cur_score = cons.five_status_final_score.get(cur).copied().unwrap_or(0) as f32;
+            let next_score = cons.five_status_final_score.get(next).copied().unwrap_or(0) as f32;
+            let exact_margin = (next_score - cur_score) * self.policy.config.status_rate;
+            let gap_bonus = self.config.status_gap_strength * (leading - completion[i]).max(0.0);
+            let near_cap = ((completion[i] - 0.70) / 0.30).clamp(0.0, 1.0);
+            let excess_cards = (g.card_type_count[i] - 2).max(0) as f32;
+            let overflow = self.config.status_overflow_strength
+                * near_cap
+                * near_cap
+                * (1.0 + 0.5 * excess_cards);
+            let multiplier = (1.0 + gap_bonus - overflow).clamp(0.10, 2.00);
+            adjustment += exact_margin * (multiplier - 1.0);
+        }
+        adjustment
+    }
+
     fn vital_factor(t: i32) -> f32 {
         if t >= 72 { 0.25 } else { 3.5 + (t as f32 / 72.) * 2. }
     }
@@ -630,6 +683,9 @@ impl LocalRamenTrainer {
             let rp = -self.reserve_penalty(g, &val.status_pt);
             o.score += rp;
             o.add("future_status_reserve", rp);
+            let balance = self.dynamic_status_adjustment(g, &val.status_pt);
+            o.score += balance;
+            o.add("dynamic_status_balance", balance);
             if self.config.dynamic_vital {
                 let c = (-val.vital).max(0) as f32;
                 let z = -c * (Self::vital_factor(g.turn()) - self.policy.config.train_vital_value);
@@ -1150,6 +1206,35 @@ pub struct RecommendedRamenTrainer {
 }
 
 impl RecommendedRamenTrainer {
+    /// 从正式 preset 精确复制，只覆盖专项矩阵明确列出的评分参数。
+    ///
+    /// 吃面事务门、体力硬门、友人 0/2/5 节奏、动态事件、隐藏风味等结构逻辑
+    /// 均逐字继承 `new()`，防止实验候选混入未声明的策略差异。
+    pub fn with_experiment_overrides(
+        pt_rates: [f32; 3],
+        gap_strength: f32,
+        overflow_strength: f32,
+        max_base_score_sacrifice: f32,
+        ramen_window_weight: f32,
+        status_reserve_max: f32,
+        early_bond_value: f32,
+        hint_bonus: f32,
+    ) -> Self {
+        let mut trainer = Self::new();
+        for (year, pt_rate) in trainer.years.iter_mut().zip(pt_rates) {
+            year.policy.config.pt_rate = pt_rate;
+            year.config.dynamic_status_balance = gap_strength != 0.0 || overflow_strength != 0.0;
+            year.config.status_gap_strength = gap_strength;
+            year.config.status_overflow_strength = overflow_strength;
+            year.config.max_base_score_sacrifice = max_base_score_sacrifice;
+            year.config.ramen_window_weight = ramen_window_weight;
+            year.config.status_reserve_max = status_reserve_max;
+            year.config.early_bond_value = early_bond_value;
+            year.config.hint_bonus = hint_bonus;
+        }
+        trainer
+    }
+
     /// 构造当前正式推荐 preset。
     pub fn new() -> Self {
         fn make(pt_rate: f32, vital_rest: i32) -> LocalRamenTrainer {
