@@ -11,14 +11,12 @@ use crate::{
     gamedata::EventChoice,
 };
 
-pub mod composition_ramen_trainer;
 pub mod handwritten_trainer;
 pub mod local_ramen_trainer;
 pub mod logging_trainer;
 pub mod mcts_trainer;
 pub mod ramen_handwritten_trainer;
 
-pub use composition_ramen_trainer::{CompositionRamenTrainer, RamenBuildProfile, V29SpecialTrainer};
 pub use handwritten_trainer::HandwrittenTrainer;
 pub use local_ramen_trainer::{LocalRamenTrainer, RecommendedRamenTrainer};
 pub use logging_trainer::LoggingTrainer;
