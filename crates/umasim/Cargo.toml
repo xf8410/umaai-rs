@@ -58,6 +58,11 @@ name = "y3_narrow_matrix"
 path = "tools/data_collection/y3_narrow_matrix.rs"
 required-features = ["experiment-tools"]
 
+[[bin]]
+name = "vital_transition_matrix"
+path = "tools/data_collection/vital_transition_matrix.rs"
+required-features = ["experiment-tools"]
+
 [features]
 default = ["cli", "diag"]
 diag = []
