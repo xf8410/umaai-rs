@@ -1,88 +1,59 @@
-name: Handwritten phase-specific controls v36
+name: Publish handwritten v36 experiment report
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  matrix:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      max-parallel: 12
-      matrix:
-        variant:
-          - control-v35
-          - y1-rest45
-          - y1-y2-rest45
-          - y3-rest20
-          - y3-rest30
-        shard: [0, 1, 2]
-    env:
-      VARIANT: ${{ matrix.variant }}
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 100
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - name: Select phase-specific vital-rest controls
-        shell: bash
-        run: |
-          case "${{ matrix.variant }}" in
-            control-v35)    echo 'STRUCTURE_Y1=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y2=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y3=vrest0' >> "$GITHUB_ENV" ;;
-            y1-rest45)      echo 'STRUCTURE_Y1=vrest45' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y2=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y3=vrest0' >> "$GITHUB_ENV" ;;
-            y1-y2-rest45)   echo 'STRUCTURE_Y1=vrest45' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y2=vrest45' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y3=vrest0' >> "$GITHUB_ENV" ;;
-            y3-rest20)      echo 'STRUCTURE_Y1=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y2=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y3=vrest20' >> "$GITHUB_ENV" ;;
-            y3-rest30)      echo 'STRUCTURE_Y1=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y2=vrest30' >> "$GITHUB_ENV"; echo 'STRUCTURE_Y3=vrest30' >> "$GITHUB_ENV" ;;
-          esac
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: handwritten-phase-v36}
-      - name: Run 100 same-seed games
-        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
         with:
-          name: v36-${{ matrix.variant }}-shard${{ matrix.shard }}
-          path: matrix-result.csv
-          if-no-files-found: error
-          retention-days: 14
-  summary:
-    if: always()
-    needs: matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: {pattern: v36-*, path: results}
-      - name: Summarize score, PT and lower tail
+          ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
+      - name: Download v36 matrix artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run download 32636482815 --repo xf8410/umaai-rs --pattern 'v36-*' --dir results
+      - name: Build reproducible report
         run: |
-          python3 - <<'PY' | tee handwritten-phase-v36.md
+          mkdir -p .trae/exports
+          python3 - <<'PY' | tee .trae/exports/handwritten-phase-v36.md
           import csv, glob, collections, statistics
           data=collections.defaultdict(list)
           for path in glob.glob('results/**/matrix-result.csv', recursive=True):
             with open(path, newline='') as f:
               for row in csv.DictReader(f):
                 data[row['variant']].append({k:int(row[k]) for k in ['b_score','b_skill_pt','b_status_score']})
-          def pct(values, p):
-            values=sorted(values)
-            return values[round((len(values)-1)*p)]
+          expected={'control-v35','y1-rest45','y1-y2-rest45','y3-rest20','y3-rest30'}
+          if set(data) != expected:
+            raise SystemExit(f'variant mismatch: {sorted(data)}')
+          if any(len(rows) != 300 for rows in data.values()):
+            raise SystemExit(f'incomplete matrix: {[(name,len(rows)) for name,rows in data.items()]}')
+          def pct(values,p):
+            values=sorted(values); return values[round((len(values)-1)*p)]
           print('# 手写策略分年份体力门控矩阵 v36\n')
-          print('> 每变体 300 局；所有变体使用相同 seed、马娘、卡组、继承和其余 v35 参数。\n')
+          print('> 来源：[GitHub Actions run 32636482815](https://github.com/xf8410/umaai-rs/actions/runs/32636482815)')
+          print('> 每变体 300 局；相同 seed、马娘、卡组、继承和其余 v35 参数。\n')
           print('|变体|局数|平均分|P10|P50|P90|平均PT|PT P10|平均属性评分|')
           print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-          for name, rows in sorted(data.items(), key=lambda item:-statistics.mean(r['b_score'] for r in item[1])):
-            score=[r['b_score'] for r in rows]
-            pt=[r['b_skill_pt'] for r in rows]
-            status=[r['b_status_score'] for r in rows]
+          for name,rows in sorted(data.items(),key=lambda item:-statistics.mean(r['b_score'] for r in item[1])):
+            score=[r['b_score'] for r in rows]; pt=[r['b_skill_pt'] for r in rows]; status=[r['b_status_score'] for r in rows]
             print(f'|{name}|{len(rows)}|{statistics.mean(score):.1f}|{pct(score,.1)}|{pct(score,.5)}|{pct(score,.9)}|{statistics.mean(pt):.1f}|{pct(pt,.1)}|{statistics.mean(status):.1f}|')
           PY
-          cat handwritten-phase-v36.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: handwritten-phase-v36-summary
-          path: handwritten-phase-v36.md
-          retention-days: 30
+      - name: Commit evidence with descriptive body
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/handwritten-phase-v36.md
+          git commit -m 'docs(ramen): 记录 v36 分年份体力门控矩阵结果' \
+            -m '在固定 v35 其余参数的前提下，对第一、二、三年的 vital_rest 进行独立消融，避免全局门控掩盖收益来源。' \
+            -m '- 每个变体包含 3 个 shard × 100 个相同 seed，共 300 局；
+          - 固定马娘、卡组、继承、PT 16/64/64 与 sac140；
+          - 报告平均分、P10/P50/P90、平均 PT、PT P10 和属性评分；
+          - 原始数据来自 Actions run 32636482815，并在提交前校验五个变体各 300 局完整性。
+
+          本提交仅记录实验事实，不修改 RecommendedRamenTrainer；正式提升将在比较均值与低分尾部后另行提交。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
