@@ -37,8 +37,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: 3速1耐1智专项优化}
-      - run: cargo check -p umasim --bin exact_weight_confirm --no-default-features
-      - run: cargo run -p umasim --bin exact_weight_confirm --release --no-default-features
+      - run: cargo check -p umasim --bin exact_weight_confirm --features experiment-tools --no-default-features
+      - run: cargo run -p umasim --bin exact_weight_confirm --release --features experiment-tools --no-default-features
       - name: 检查300局完全一致
         run: |
           python3 - <<'PY'
@@ -100,7 +100,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: 3速1耐1智专项优化}
-      - run: cargo run -p umasim --bin exact_weight_confirm --release --no-default-features
+      - run: cargo run -p umasim --bin exact_weight_confirm --release --features experiment-tools --no-default-features
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.id }}-第${{ matrix.shard_human }}片
