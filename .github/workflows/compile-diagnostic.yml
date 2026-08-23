@@ -1,45 +1,33 @@
-name: Publish umasim test compile diagnostics
+name: Apply core-only test logger fix
 on:
   workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  diagnose:
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ramen-upstream-source-check
-      - name: Capture complete test compilation output
-        shell: bash
-        run: |
-          set +e
-          cargo test -p umasim --lib --no-default-features --no-run > /tmp/umasim-test-compile.log 2>&1
-          status=$?
-          {
-            echo '# umasim library-test compilation diagnostic'
-            echo
-            echo "Exit status: $status"
-            echo
-            echo '```text'
-            grep -E -B 3 -A 8 'error\[E[0-9]+\]|error:' /tmp/umasim-test-compile.log | head -n 1200
-            echo '```'
-            echo
-            echo '## Tail'
-            echo '```text'
-            tail -n 120 /tmp/umasim-test-compile.log
-            echo '```'
-          } > benchmark-results/umasim-test-compile-diagnostic.md
-          cat benchmark-results/umasim-test-compile-diagnostic.md
-      - name: Commit diagnostic
+      - run: python3 scripts/fix_core_test_logger_cfg.py
+      - run: cargo fmt --all
+      - name: Compile and run core-only library tests
+        run: cargo test -p umasim --lib --no-default-features
+      - name: Validate default-feature workspace
+        run: cargo check --workspace
+      - name: Commit fix
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/umasim-test-compile-diagnostic.md
-          git commit -m 'ci: publish umasim test compile diagnostic' || exit 0
+          git add crates/umasim/src/utils.rs crates/umasim/src/output/turn_flow.rs
+          git commit -m 'fix(test): support core-only library tests'
           git pull --rebase origin workbench/skill-pt-matrix-distill
           git push origin HEAD:workbench/skill-pt-matrix-distill
