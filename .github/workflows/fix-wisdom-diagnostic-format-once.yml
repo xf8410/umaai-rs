@@ -1,0 +1,38 @@
+name: 修复结构诊断CSV格式参数
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/fix-wisdom-diagnostic-format-once.yml']
+permissions: {contents: write}
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - name: 删除多余格式占位符
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/tools/data_collection/wisdom_structure_diagnostic.rs')
+          s=p.read_text()
+          old='"{variant},{run_index},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",'
+          new='"{variant},{run_index},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",'
+          if s.count(old) != 1:
+              raise SystemExit(f'格式串匹配数量错误: {s.count(old)}')
+          p.write_text(s.replace(old,new))
+          PY
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 提交前单独编译诊断工具
+        run: cargo check -p umasim --bin wisdom_structure_diagnostic --features experiment-tools --no-default-features
+      - name: 提交修复并移除一次性工作流和错误日志
+        run: |
+          rm .github/workflows/fix-wisdom-diagnostic-format-once.yml
+          rm -f .trae/exports/wisdom-structure-diagnostic-compile.txt
+          git checkout -- crates/umasim/src/trainer/local_ramen_trainer.rs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '修复结构诊断CSV格式参数'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
