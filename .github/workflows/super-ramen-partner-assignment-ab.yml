@@ -1,6 +1,11 @@
 name: Super ramen partner assignment paired A/B
 
 on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths:
+      - '.github/workflows/super-ramen-partner-assignment-ab.yml'
+      - 'scripts/ramen/experiment_super_ramen_partner_assignment.py'
   workflow_dispatch:
     inputs:
       runs:
@@ -19,6 +24,8 @@ jobs:
   paired-ab:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      AB_RUNS: ${{ inputs.runs || '500' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -28,7 +35,7 @@ jobs:
       - name: Compile baseline
         run: cargo check -p umasim --bin bench_base --no-default-features
       - name: Run baseline
-        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "${{ inputs.runs }}" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
+        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
       - name: Apply protocol-derived candidate
         run: python3 scripts/ramen/experiment_super_ramen_partner_assignment.py
       - name: Compile and test candidate
@@ -36,7 +43,7 @@ jobs:
           cargo check -p umasim --bin bench_base --no-default-features
           cargo test -p umasim --lib --no-default-features test_ramen_game_full_loop -- --nocapture
       - name: Run candidate with identical seeds
-        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "${{ inputs.runs }}" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/candidate
+        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/candidate
       - name: Summarize paired score matrix
         run: |
           python3 - <<'PY'
