@@ -1,0 +1,78 @@
+name: Ramen Y3 per-training PT trace v27
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths:
+      - .github/workflows/ramen-y3-train-pt-trace-v27.yml
+      - crates/umasim/src/bin/y3_train_pt_trace.rs
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: {shard: [0, 1, 2]}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-y3-pt-trace-v27}
+      - name: Trace 100 games
+        env:
+          START: ${{ matrix.shard * 100 }}
+          RUNS: 100
+        run: cargo run -p umasim --bin y3_train_pt_trace --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: y3-pt-trace-shard${{ matrix.shard }}
+          path: y3-train-pt.csv
+          retention-days: 14
+  summary:
+    needs: trace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with: {pattern: y3-pt-trace-*, path: traces}
+      - name: Summarize exact gains
+        run: |
+          python3 - <<'PY'
+          import csv,glob,statistics,collections,pathlib
+          rows=[]
+          for p in glob.glob('traces/*/*.csv'):
+            with open(p) as f: rows += list(csv.DictReader(f))
+          for r in rows:
+            for k in ('turn','pt_gain','vital_before','vital_after'): r[k]=int(r[k])
+          def pct(v,p):
+            v=sorted(v); return v[round((len(v)-1)*p)] if v else 0
+          lines=['# 第三年逐训练技能 PT 实收（300局）','',f'训练记录总数：**{len(rows)}**','',
+                 '|阶段/训练|次数|成功率|平均PT|中位|P10/P90|最小/最大|吃面率|',
+                 '|---|---:|---:|---:|---:|---:|---:|---:|']
+          groups=collections.defaultdict(list)
+          for r in rows: groups[(r['phase'],r['training'])].append(r)
+          for key,rs in sorted(groups.items()):
+            v=[x['pt_gain'] for x in rs]; ok=sum(x['success']=='true' for x in rs); ate=sum(x['ate_ramen']=='true' for x in rs)
+            lines.append(f'|{key[0]} {key[1]}|{len(rs)}|{ok/len(rs):.1%}|{statistics.mean(v):.1f}|{statistics.median(v):.0f}|{pct(v,.1)}/{pct(v,.9)}|{min(v)}/{max(v)}|{ate/len(rs):.1%}|')
+          lines += ['', '## 按回合', '', '|回合|训练次数|平均PT|P10/P90|最大|', '|---:|---:|---:|---:|---:|']
+          turns=collections.defaultdict(list)
+          for r in rows: turns[r['turn']].append(r['pt_gain'])
+          for t,v in sorted(turns.items()): lines.append(f'|{t}|{len(v)}|{statistics.mean(v):.1f}|{pct(v,.1)}/{pct(v,.9)}|{max(v)}|')
+          lines += ['', '## 原始逐次记录', '', '`y3-train-pt.csv` 每一行包含 run、回合、训练类型、成功与否、训练前后PT、实际PT增量、体力和是否吃面。']
+          out='\n'.join(lines)+'\n'; print(out)
+          path=pathlib.Path('benchmark-results/ramen-y3-train-pt-v27-${{ github.run_id }}.md'); path.write_text(out)
+          with open('all-y3-train-pt.csv','w',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=rows[0].keys());w.writeheader();w.writerows(rows)
+          PY
+          cat benchmark-results/ramen-y3-train-pt-v27-${{ github.run_id }}.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with: {name: y3-pt-trace-all, path: all-y3-train-pt.csv, retention-days: 30}
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/ramen-y3-train-pt-v27-${{ github.run_id }}.md
+          git commit -m 'bench: publish Y3 per-training PT trace v27'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
