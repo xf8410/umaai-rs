@@ -135,6 +135,13 @@ pub fn init_test_logger(spec: &str) -> Result<()> {
     Ok(())
 }
 
+/// Core-only 测试不携带 CLI 日志后端；保留同一公开签名，让测试无需按 feature
+/// 重复分支。`log` facade 在未安装 logger 时会安全地丢弃记录。
+#[cfg(all(test, not(feature = "cli")))]
+pub fn init_test_logger(_spec: &str) -> Result<()> {
+    Ok(())
+}
+
 /// 把当前工作目录修改为exe所在目录
 pub fn check_working_dir() -> Result<()> {
     let exe_path = std::env::current_exe()?;

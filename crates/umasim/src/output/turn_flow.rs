@@ -407,7 +407,9 @@ mod tests {
             anyhow::bail!("应停在回合 31 开始，实际 turn={} stage={:?}", game.turn(), game.stage);
         }
 
-        // 切回 info：第 31 回合的规则层 diag（效果）可见
+        // 切回 info：第 31 回合的规则层 diag（效果）可见。Core-only 测试没有
+        // flexi_logger/LOGGER，保持静默即可；测试验证的是流程与渲染，不依赖日志后端。
+        #[cfg(feature = "cli")]
         if let Some(logger) = crate::gamedata::LOGGER.get() {
             let handle = logger.lock().map_err(|_| anyhow::anyhow!("LOGGER 锁中毒"))?;
             let spec = flexi_logger::LogSpecification::try_from("info")?;
