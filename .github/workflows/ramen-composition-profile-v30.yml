@@ -1,72 +1,54 @@
-name: Ramen composition profile matrix v30
+name: Ramen neural dimension training matrix v32
 on:
   workflow_dispatch:
 permissions:
   contents: write
-concurrency:
-  group: ramen-composition-profile-v30
-  cancel-in-progress: false
 jobs:
-  matrix:
+  data:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4]
     env:
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 100
+      COUNT: 150
+      ROLLOUTS: 32
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with:
+          ref: workbench/skill-pt-matrix-distill
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-composition-v30}
+        with:
+          shared-key: ramen-neural-v32
       - run: cargo fmt --all -- --check
-      - run: cargo check -p umasim --bin composition_profile_matrix --no-default-features
-      - run: cargo run -p umasim --bin composition_profile_matrix --release --no-default-features
+      - name: Generate teacher labels
+        run: START=$((1000 + ${{ matrix.shard }} * 150)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: composition-v30-shard${{ matrix.shard }}
-          path: composition-profile-result.csv
-  summary:
-    needs: matrix
+          name: ramen-neural-v32-${{ matrix.shard }}
+          path: ramen-feature-dataset.jsonl
+  train:
+    needs: data
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with:
+          ref: workbench/skill-pt-matrix-distill
       - uses: actions/download-artifact@v4
-        with: {pattern: composition-v30-*, path: results}
-      - name: Summarize paired results
-        run: |
-          mkdir -p benchmark-results
-          python3 - <<'PY' > benchmark-results/ramen-composition-profile-v30.md
-          import csv,glob,collections,statistics
-          d=collections.defaultdict(list)
-          for p in glob.glob('results/*/*.csv'):
-            with open(p) as f:
-              for r in csv.DictReader(f): d[r['build']].append(r)
-          print('# 拉面配卡画像矩阵 v30（同 seed 配对，每配卡 300 局）\n')
-          print('> 每套均为表中五张普通卡 + 固定友人 303054。baseline=v29 special-only；profile=仅三速构成增加专用窗口。\n')
-          print('|配卡（另含固定友人303054）|实际六卡|局数|基线均分|画像均分|评分差|基线PT|画像PT|PT差|基线RMJ全通|画像RMJ全通|逐局胜/平/负|')
-          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
-          for name,rs in d.items():
-            mean=lambda k: statistics.mean(int(x[k]) for x in rs)
-            b,p=mean('baseline_score'),mean('profile_score')
-            bp,pp=mean('baseline_pt'),mean('profile_pt')
-            br=statistics.mean(int(x['baseline_rmj'])==3 for x in rs)
-            pr=statistics.mean(int(x['profile_rmj'])==3 for x in rs)
-            diffs=[int(x['profile_score'])-int(x['baseline_score']) for x in rs]
-            w=sum(x>0 for x in diffs); t=sum(x==0 for x in diffs); l=sum(x<0 for x in diffs)
-            print(f"|{name}|{rs[0]['deck']}|{len(rs)}|{b:.1f}|{p:.1f}|{p-b:+.1f}|{bp:.1f}|{pp:.1f}|{pp-bp:+.1f}|{br:.1%}|{pr:.1%}|{w}/{t}/{l}|")
-          PY
-          cat benchmark-results/ramen-composition-profile-v30.md
+        with:
+          pattern: ramen-neural-v32-*
+          path: data
+      - run: python3 -m pip install --user numpy
+      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_dimension_matrix_v32.py > benchmark-results/ramen-neural-dimension-training-v32.md
+      - run: cat benchmark-results/ramen-neural-dimension-training-v32.md
       - name: Commit report
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-composition-profile-v30.md
-          git commit -m 'bench: publish composition profile v30 results'
+          git add benchmark-results/ramen-neural-dimension-training-v32.md
+          git commit -m 'bench: publish trained neural dimension matrix v32'
           git pull --rebase origin workbench/skill-pt-matrix-distill
           git push origin HEAD:workbench/skill-pt-matrix-distill
