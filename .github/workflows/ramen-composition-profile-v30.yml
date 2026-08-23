@@ -1,4 +1,4 @@
-name: Ramen neural dimension confirmation v33
+name: Ramen stage expert architecture matrix v34
 on:
   workflow_dispatch:
 permissions:
@@ -21,13 +21,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ramen-neural-v33
+          shared-key: ramen-stage-v34
       - run: cargo fmt --all -- --check
-      - name: Generate confirmed labels
-        run: START=$((2000 + ${{ matrix.shard }} * 200)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
+      - name: Generate architecture labels
+        run: START=$((3000 + ${{ matrix.shard }} * 200)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: ramen-neural-v33-${{ matrix.shard }}
+          name: ramen-stage-v34-${{ matrix.shard }}
           path: ramen-feature-dataset.jsonl
   train:
     needs: data
@@ -39,16 +39,16 @@ jobs:
           ref: workbench/skill-pt-matrix-distill
       - uses: actions/download-artifact@v4
         with:
-          pattern: ramen-neural-v33-*
+          pattern: ramen-stage-v34-*
           path: data
       - run: python3 -m pip install --user numpy
-      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_dimension_confirm_v33.py > benchmark-results/ramen-neural-dimension-confirm-v33.md
-      - run: cat benchmark-results/ramen-neural-dimension-confirm-v33.md
+      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_stage_heads_v34.py > benchmark-results/ramen-stage-head-matrix-v34.md
+      - run: cat benchmark-results/ramen-stage-head-matrix-v34.md
       - name: Commit report
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-neural-dimension-confirm-v33.md
-          git commit -m 'bench: publish neural dimension confirmation v33'
+          git add benchmark-results/ramen-stage-head-matrix-v34.md
+          git commit -m 'bench: publish ramen stage head matrix v34'
           git pull --rebase origin workbench/skill-pt-matrix-distill
           git push origin HEAD:workbench/skill-pt-matrix-distill
