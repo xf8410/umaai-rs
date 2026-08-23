@@ -1,0 +1,27 @@
+name: 读取G39配方续航消融报告
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/read-g39-ablation-once.yml']
+permissions: {actions: read, contents: write}
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with:
+          name: G39配方续航严格消融报告
+          path: /tmp/report
+          repository: xf8410/umaai-rs
+          run-id: 32671625758
+          github-token: ${{ github.token }}
+      - run: |
+          cp /tmp/report/G39配方续航严格消融报告.md .trae/exports/G39配方续航严格消融报告.md
+          rm .github/workflows/read-g39-ablation-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '保存G39配方续航消融摘要'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
