@@ -1,0 +1,106 @@
+name: 多维小数随机权重暴力矩阵
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/random-decimal-bruteforce-v57.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  brute:
+    name: 候选${{ matrix.candidate }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+    env:
+      候选编号: C${{ matrix.candidate }}
+      基础种子: 867530
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: 确定性生成小数随机参数
+        env: {CID: '${{ matrix.candidate }}'}
+        run: |
+          python3 - <<'PY'
+          import os,random
+          i=int(os.environ['CID']); r=random.Random(20260823+i*104729)
+          # 在已知有效邻域内做联合随机，而不是继续单轴整数扫描。
+          vals={
+            'Y1_PT':r.uniform(24,40),'Y2_PT':r.uniform(24,40),'Y3_PT':r.uniform(8,24),
+            'GAP':r.uniform(.45,1.05),'OVER':r.uniform(.65,1.35),'SAC':r.uniform(180,260),
+            'Y12_WINDOW':r.uniform(.08,.20),'Y3_WINDOW':r.uniform(.06,.18),
+            'RESERVE':r.uniform(8,36),'BOND':r.uniform(7,16),'HINT':r.uniform(4,12),
+            'CONTINUITY':r.uniform(0,60),
+          }
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in vals.items(): f.write(f'{k}={v:.4f}\n')
+          print(i,{k:round(v,4) for k,v in vals.items()})
+          PY
+      - name: 注入实验入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "random_decimal_matrix"
+          path = "tools/data_collection/random_decimal_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 小数随机暴力矩阵}
+      - run: cargo run -p umasim --bin random_decimal_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: C${{ matrix.candidate }}-第${{ matrix.shard.human }}片
+          path: 随机小数权重矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总小数随机暴力矩阵
+    needs: brute
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'C*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 小数随机权重暴力矩阵报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/随机小数权重矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):g[r['候选']].append(r)
+          if len(g)!=64 or any(len(v)!=100 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def q(x,p):x=sorted(x);return x[max(0,int(len(x)*p)-1)]
+          out=[]
+          for name,rows in g.items():
+            score=[float(r['总分']) for r in rows];pt=[float(r['技能点']) for r in rows]
+            out.append((statistics.mean(score),q(score,.1),statistics.mean(pt),q(pt,.1),name,rows[0]))
+          out.sort(reverse=True)
+          print('# 多维小数随机权重暴力矩阵\n')
+          print('> 64组确定性随机小数候选，每组100局；先按均分筛选，前列再独立种子复验。\n')
+          print('|排名|候选|均分|分P10|平均PT|PT P10|Y1PT|Y2PT|Y3PT|缺口|溢出|让分|Y12对盘|Y3对盘|预留|羁绊|Hint|续航|')
+          print('|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for rank,(s,p10,pt,pt10,name,r) in enumerate(out[:20],1):
+            keys=['Y1PT','Y2PT','Y3PT','缺口','溢出','让分','前两年对盘','第三年对盘','预留','羁绊','Hint','续航']
+            print(f'|{rank}|{name}|{s:.1f}|{p10:.0f}|{pt:.1f}|{pt10:.0f}|'+ '|'.join(r[k] for k in keys)+'|')
+          print('\n后续：取均值前6、P10前2与当前手工基线，用全新种子各300局复验；不直接采用100局赢家。')
+          PY
+          cat 小数随机权重暴力矩阵报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 小数随机权重暴力矩阵报告
+          path: 小数随机权重暴力矩阵报告.md
+          retention-days: 30
