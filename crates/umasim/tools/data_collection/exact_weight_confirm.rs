@@ -40,10 +40,13 @@ fn composition(index: usize) -> Result<DeckComposition> {
 
 fn status_score(status: &[i32; 5]) -> i32 {
     let constants = global!(GAMECONSTANTS);
-    status.iter().map(|&value| {
-        constants.five_status_final_score
-            [(value.max(0) as usize).min(constants.five_status_final_score.len() - 1)]
-    }).sum()
+    status
+        .iter()
+        .map(|&value| {
+            constants.five_status_final_score
+                [(value.max(0) as usize).min(constants.five_status_final_score.len() - 1)]
+        })
+        .sum()
 }
 
 fn main() -> Result<()> {
@@ -51,7 +54,11 @@ fn main() -> Result<()> {
     let composition_index: usize = env::var("COMPOSITION_INDEX")?.parse()?;
     let gap: f32 = env::var("GAP")?.parse::<f32>()? / 100.0;
     let overflow: f32 = env::var("OVERFLOW")?.parse::<f32>()? / 100.0;
-    let pt: f32 = env::var("PT")?.parse()?;
+    let pt = [
+        env::var("PT1")?.parse::<f32>()?,
+        env::var("PT2")?.parse::<f32>()?,
+        env::var("PT3")?.parse::<f32>()?
+    ];
     let shard: u64 = env::var("SHARD")?.parse()?;
     let runs: u64 = env::var("RUNS_PER_SHARD")?.parse()?;
 
@@ -61,13 +68,16 @@ fn main() -> Result<()> {
     let reps = bench::select_representatives(&CardPickOpts::default())?;
     let deck = composition.build_deck(&reps.picked, FRIEND)?;
     let mut file = File::create("exact-weight-result.csv")?;
-    writeln!(file, "variant,composition_index,composition,gap,overflow,pt,shard,run_index,base_score,candidate_score,base_pt,candidate_pt,base_status,candidate_status,identical")?;
+    writeln!(
+        file,
+        "variant,composition_index,composition,gap,overflow,pt1,pt2,pt3,shard,run_index,base_score,candidate_score,base_pt,candidate_pt,base_status,candidate_status,identical"
+    )?;
 
     for offset in 0..runs {
         let run_index = shard * runs + offset;
         let base_trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_index);
         let candidate_trainer = LoggingTrainer::new(
-            RecommendedRamenTrainer::with_weight_overrides([pt, pt, pt], gap, overflow),
+            RecommendedRamenTrainer::with_weight_overrides(pt, gap, overflow),
             run_index
         );
         let base = bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &base_trainer)?;
@@ -75,9 +85,12 @@ fn main() -> Result<()> {
         let identical = base.score == candidate.score
             && base.skill_pt == candidate.skill_pt
             && base.five_status == candidate.five_status;
-        writeln!(file, "{variant},{composition_index},{},{gap},{overflow},{pt},{shard},{run_index},{},{},{},{},{},{},{identical}",
-            composition.name(), base.score, candidate.score, base.skill_pt, candidate.skill_pt,
-            status_score(&base.five_status), status_score(&candidate.five_status))?;
+        writeln!(
+            file,
+            "{variant},{composition_index},{},{gap},{overflow},{},{},{},{shard},{run_index},{},{},{},{},{},{},{identical}",
+            composition.name(), pt[0], pt[1], pt[2], base.score, candidate.score, base.skill_pt,
+            candidate.skill_pt, status_score(&base.five_status), status_score(&candidate.five_status)
+        )?;
     }
     ensure!(runs > 0, "每分片局数必须大于0");
     Ok(())
