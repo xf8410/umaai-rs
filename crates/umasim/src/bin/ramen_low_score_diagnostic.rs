@@ -34,6 +34,40 @@ fn main() -> Result<()> {
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
 
+    // 详细重放模式：只重跑指定局。启用 diag feature 时，规则层会把每回合状态、
+    // 训练面板、库存、拉面效果和事件直接打印到 CI 的可展开步骤中。
+    if let Ok(text) = env::var("DIAG_REPLAY_IDX") {
+        let run_idx: u64 = text.parse()?;
+        println!("================ 低分局详细重放开始 ================");
+        println!("BASE_SEED={BASE_SEED}, run_idx={run_idx}");
+        let (outcome, trainer) = run(run_idx, true)?;
+        let log = trainer.take_records();
+        println!("================ 策略逐决策摘要 ================");
+        for row in &log.rows {
+            println!(
+                "[回合 {:02}][{}] 候选={} 选择 #{}: {}",
+                row.turn, row.stage, row.candidates, row.action_index, row.action_desc
+            );
+            if let Some(breakdown) = &row.score_breakdown {
+                println!("  候选评分: {breakdown}");
+            }
+        }
+        println!("================ 详细重放终局 ================");
+        println!(
+            "最终评分={} 等级={} 五维={:?} 五维和={} 技能PT={} 剧本PT={} RMJ={}/3 吃面={} 友人完成={}",
+            outcome.score,
+            outcome.rank,
+            outcome.five_status,
+            outcome.five_status.iter().sum::<i32>(),
+            outcome.skill_pt,
+            outcome.scenario_pt,
+            outcome.rmj_ok,
+            outcome.eat_count,
+            outcome.friend_all
+        );
+        return Ok(());
+    }
+
     let runs: u64 = env::var("DIAG_RUNS").unwrap_or_else(|_| "150".into()).parse()?;
     let output_dir =
         PathBuf::from(env::var("DIAG_OUTPUT_DIR").unwrap_or_else(|_| "benchmark-results/low-score-v17".into()));

@@ -213,6 +213,8 @@ impl LocalRamenTrainer {
                 local.safety_bridge_stock_cost = v.parse()?
             } else if let Some(v) = token.strip_prefix("cook2") {
                 local.cook2_stock_weight = v.parse()?
+            } else if let Some(v) = token.strip_prefix("vrest") {
+                policy.vital_rest = v.parse()?
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -707,7 +709,8 @@ impl LocalRamenTrainer {
 /// - 当前真实训练窗口权重：0.10；
 /// - 使用基础失败率作为保守决策风险预算（游戏规则仍应用真实减失败率）；
 /// - Cook2 式诀窍边际库存权重：40；
-/// - 关闭随机分身 lookahead。
+/// - 关闭随机分身 lookahead；
+/// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -720,10 +723,13 @@ pub struct RecommendedRamenTrainer {
 impl RecommendedRamenTrainer {
     /// 构造当前正式推荐 preset。
     pub fn new() -> Self {
-        fn make(pt_rate: f32) -> LocalRamenTrainer {
+        fn make(pt_rate: f32, vital_rest: i32) -> LocalRamenTrainer {
             let mut policy = RamenPolicyConfig::default();
             policy.pt_rate = pt_rate;
             policy.ramen_pt_weight = 2.0;
+            // 只在极低体力时保留下限；第三年彻底取消硬休息门，交给连续体力、
+            // 失败期望与休息动作本身的分数比较，避免浪费终盘高价值训练回合。
+            policy.vital_rest = vital_rest;
             // 保守风险预算：只影响策略打分，不改变规则层真实失败率。
             policy.effective_ramen_failure = false;
 
@@ -742,7 +748,7 @@ impl RecommendedRamenTrainer {
         }
 
         Self {
-            years: [make(16.0), make(64.0), make(64.0)],
+            years: [make(16.0, 30), make(64.0, 30), make(64.0, 0)],
             last_year: Mutex::new(None),
         }
     }
