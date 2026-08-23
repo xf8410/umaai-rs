@@ -13,9 +13,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4]
+        include:
+          - {shard: 0, start: 0}
+          - {shard: 1, start: 100}
+          - {shard: 2, start: 200}
+          - {shard: 3, start: 300}
+          - {shard: 4, start: 400}
     env:
-      START: ${{ matrix.shard * 100 }}
+      START: ${{ matrix.start }}
       COUNT: 100
       ROLLOUTS: 32
     steps:
@@ -58,39 +63,26 @@ jobs:
           print(f'> 教师根局面 {len(groups)}（训练 {len(train_groups)} / 验证 {len(val_groups)}），每候选 32 次完整终局 rollout。按根局面分组切分，五种配卡均衡。\n')
           print('|Schema|输入维度|隐藏宽度|参数量|验证动作Top-1|平均教师后悔值|P90后悔值|候选分数MAE|')
           print('|---|---:|---:|---:|---:|---:|---:|---:|')
-          rng=np.random.default_rng(20260823)
           def matrix(schema): return np.asarray([r[schema] for r in rows],dtype=np.float32)
-          def targets():
-            y=np.asarray([r['teacher_mean'] for r in rows],dtype=np.float32)
-            for ids in groups.values():
-              m=y[ids].mean(); y[ids]=(y[ids]-m)/1000.0
-            return y[:,None]
-          y=targets()
+          y=np.asarray([r['teacher_mean'] for r in rows],dtype=np.float32)
+          for ids in groups.values(): y[ids]=(y[ids]-y[ids].mean())/1000.0
+          y=y[:,None]
           train_idx=np.asarray([i for g in train_groups for i in groups[g]])
-          val_idx=np.asarray([i for g in val_groups for i in groups[g]])
           for schema in ['s','m','mid','l']:
-            X=matrix(schema); mu=X[train_idx].mean(0); sd=X[train_idx].std(0); sd[sd<1e-5]=1
-            X=(X-mu)/sd
+            X=matrix(schema); mu=X[train_idx].mean(0); sd=X[train_idx].std(0); sd[sd<1e-5]=1; X=(X-mu)/sd
             for h in [64,128,256]:
-              rr=np.random.default_rng(3100+h+len(schema))
-              W1=rr.normal(0,math.sqrt(2/X.shape[1]),(X.shape[1],h)).astype('f4'); b1=np.zeros(h,'f4')
-              W2=rr.normal(0,math.sqrt(2/h),(h,1)).astype('f4'); b2=np.zeros(1,'f4')
-              params=X.shape[1]*h+h+h+1
-              lr=.002; batch=512
+              rr=np.random.default_rng(3100+h+len(schema)); W1=rr.normal(0,math.sqrt(2/X.shape[1]),(X.shape[1],h)).astype('f4'); b1=np.zeros(h,'f4'); W2=rr.normal(0,math.sqrt(2/h),(h,1)).astype('f4'); b2=np.zeros(1,'f4')
+              params=X.shape[1]*h+h+h+1; lr=.002; batch=512
               for epoch in range(90):
                 order=rr.permutation(train_idx)
                 for st in range(0,len(order),batch):
-                  ix=order[st:st+batch]; xb=X[ix]; yb=y[ix]
-                  z=xb@W1+b1; a=np.maximum(z,0); pred=a@W2+b2; d=2*(pred-yb)/len(ix)
+                  ix=order[st:st+batch]; xb=X[ix]; yb=y[ix]; z=xb@W1+b1; a=np.maximum(z,0); pred=a@W2+b2; d=2*(pred-yb)/len(ix)
                   gW2=a.T@d; gb2=d.sum(0); dz=(d@W2.T)*(z>0); gW1=xb.T@dz; gb1=dz.sum(0)
                   for p,g in [(W1,gW1),(b1,gb1),(W2,gW2),(b2,gb2)]: p-=lr*np.clip(g,-5,5)
                 if epoch in (35,65): lr*=.35
-              pred=(np.maximum(X@W1+b1,0)@W2+b2)[:,0]*1000
-              regrets=[]; wins=0; maes=[]
+              pred=(np.maximum(X@W1+b1,0)@W2+b2)[:,0]*1000; regrets=[]; wins=0; maes=[]
               for g in val_groups:
-                ids=groups[g]; truth=np.asarray([rows[i]['teacher_mean'] for i in ids]); pp=pred[ids]
-                chosen=int(np.argmax(pp)); best=int(np.argmax(truth)); wins+=chosen==best
-                regrets.append(float(truth[best]-truth[chosen])); maes += list(abs((truth-truth.mean())-pp))
+                ids=groups[g]; truth=np.asarray([rows[i]['teacher_mean'] for i in ids]); pp=pred[ids]; chosen=int(np.argmax(pp)); best=int(np.argmax(truth)); wins+=chosen==best; regrets.append(float(truth[best]-truth[chosen])); maes += list(abs((truth-truth.mean())-pp))
               print(f'|{schema.upper()}|{X.shape[1]}|{h}|{params}|{wins/len(val_groups):.1%}|{np.mean(regrets):.1f}|{np.percentile(regrets,90):.1f}|{np.mean(maes):.1f}|')
           print('\nSchema：S=聚合状态；M=S+逐卡机制；M-ID=M+卡/角色ID；L=M-ID+逐训练槽位及拉面效果明细。')
           PY
