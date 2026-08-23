@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VARIANT: neutral-exact-copy
-      COMPOSITION_INDEX: 98
+      COMPOSITION_INDEX: 97
       GAP: 0
       OVERFLOW: 0
       PT1: 16
@@ -40,7 +40,7 @@ jobs:
           assert len(rows)==300, len(rows)
           bad=[r for r in rows if r['identical']!='true']
           if bad: raise SystemExit(f'中性覆盖有{len(bad)}局不一致')
-          print('300/300 局中性覆盖与正式 preset 完全一致')
+          print('3速1耐1智：300/300 局中性覆盖与正式 preset 完全一致')
           PY
 
   confirm:
@@ -60,6 +60,11 @@ jobs:
           - {name: speed3-neighbor-75-50-32, composition: 98, gap: 75, overflow: 50, pt1: 32, pt2: 32, pt3: 32}
           - {name: speed3-pt48-75-100, composition: 98, gap: 75, overflow: 100, pt1: 48, pt2: 48, pt3: 48}
           - {name: speed3-formalpt-75-100, composition: 98, gap: 75, overflow: 100, pt1: 16, pt2: 64, pt3: 64}
+          # 索引97（3速1耐1智）是手写逻辑和硬门控的目标配卡，所有复赛强制包含。
+          - {name: speed3-1st1w-75-100-32, composition: 97, gap: 75, overflow: 100, pt1: 32, pt2: 32, pt3: 32}
+          - {name: speed3-1st1w-75-50-32, composition: 97, gap: 75, overflow: 50, pt1: 32, pt2: 32, pt3: 32}
+          - {name: speed3-1st1w-75-100-48, composition: 97, gap: 75, overflow: 100, pt1: 48, pt2: 48, pt3: 48}
+          - {name: speed3-1st1w-formalpt-75-100, composition: 97, gap: 75, overflow: 100, pt1: 16, pt2: 64, pt3: 64}
         shard: [0, 1, 2]
     env:
       VARIANT: ${{ matrix.variant.name }}
@@ -99,11 +104,15 @@ jobs:
           for path in glob.glob('results/**/exact-weight-result.csv',recursive=True):
             for r in csv.DictReader(open(path)):
               data[r['variant']].append(r)
-          if len(data)!=7 or any(len(v)!=300 for v in data.values()): raise SystemExit({k:len(v) for k,v in data.items()})
+          mandatory=[name for name,rows in data.items() if rows and rows[0]['composition_index']=='97']
+          if len(mandatory)!=4:
+            raise SystemExit(f'3速1耐1智必测项不完整: {mandatory}')
+          if len(data)!=11 or any(len(v)!=300 for v in data.values()):
+            raise SystemExit({k:len(v) for k,v in data.items()})
           print('# 正式拉面策略精确隔离权重复赛\n')
           print('> 候选从 RecommendedRamenTrainer::new() 精确复制，只覆盖 PT、缺口、溢出；每组300局同种子。\n')
           print('|方案|配卡|PT分年|缺口|溢出|总分Δ|属性分Δ|技能点Δ|三项通过|')
-          print('|---|---|---|---:|---:|---:|---:|---:|---:|---|')
+          print('|---|---|---|---:|---:|---:|---:|---:|---|')
           passed=[]
           for name,rows in sorted(data.items()):
             avg=lambda a,b: statistics.mean(int(r[b])-int(r[a]) for r in rows)
@@ -111,18 +120,20 @@ jobs:
             r=rows[0]; ok=score>0 and pt>0 and status>0
             if ok: passed.append((score,name))
             print(f"|{name}|{r['composition']}|{r['pt1']}/{r['pt2']}/{r['pt3']}|{float(r['gap'])*100:.0f}%|{float(r['overflow'])*100:.0f}%|{score:+.1f}|{status:+.1f}|{pt:+.1f}|{'是' if ok else '否'}|")
-          print(f"\n三项同时提升：{len(passed)}/7。")
+          print(f'\n三项同时提升：{len(passed)}/{len(data)}。')
           print(f"\n复赛最高通过项：**{max(passed)[1]}**" if passed else '\n没有方案通过，不采纳。')
           print('\n## 候选绝对值与目标命中\n')
-          print('|方案|平均总分|最高总分|≥60000|平均技能点|最高技能点|≥8000 PT|同局双达标|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|')
+          print('|方案|平均总分|最低总分|最高总分|≥60000|平均技能点|最低技能点|最高技能点|≥8000 PT|同局双达标|均值双达标|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|')
           for name,rows in sorted(data.items()):
             scores=[int(r['candidate_score']) for r in rows]
             pts=[int(r['candidate_pt']) for r in rows]
             score_hits=sum(x>=60000 for x in scores)
             pt_hits=sum(x>=8000 for x in pts)
             both=sum(s>=60000 and p>=8000 for s,p in zip(scores,pts))
-            print(f'|{name}|{statistics.mean(scores):.1f}|{max(scores)}|{score_hits}/300 ({score_hits/3:.1f}%)|{statistics.mean(pts):.1f}|{max(pts)}|{pt_hits}/300 ({pt_hits/3:.1f}%)|{both}/300 ({both/3:.1f}%)|')
+            mean_score=statistics.mean(scores); mean_pt=statistics.mean(pts)
+            mean_ok=mean_score>=60000 and mean_pt>=8000
+            print(f'|{name}|{mean_score:.1f}|{min(scores)}|{max(scores)}|{score_hits}/300 ({score_hits/3:.1f}%)|{mean_pt:.1f}|{min(pts)}|{max(pts)}|{pt_hits}/300 ({pt_hits/3:.1f}%)|{both}/300 ({both/3:.1f}%)|{"是" if mean_ok else "否"}|')
           PY
           cat exact-recommended-weight-confirm.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
