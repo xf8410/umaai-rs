@@ -1,0 +1,38 @@
+name: 将3速1耐1智设为复赛必测配卡
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/add-mandatory-3speed-stamina-wisdom-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - name: 加入必测配卡和缺席硬失败
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/workflows/exact-recommended-weight-confirm.yml')
+          s=p.read_text()
+          marker='''          - {name: speed3-formalpt-75-100, composition: 98, gap: 75, overflow: 100, pt1: 16, pt2: 64, pt3: 64}\n'''
+          add=marker+'''          # 3速1耐1智（索引97）是手写逻辑与硬门控的目标配卡，所有复赛必须包含。\n          - {name: speed3-1st1w-75-100-32, composition: 97, gap: 75, overflow: 100, pt1: 32, pt2: 32, pt3: 32}\n          - {name: speed3-1st1w-75-50-32, composition: 97, gap: 75, overflow: 50, pt1: 32, pt2: 32, pt3: 32}\n          - {name: speed3-1st1w-75-100-48, composition: 97, gap: 75, overflow: 100, pt1: 48, pt2: 48, pt3: 48}\n          - {name: speed3-1st1w-formalpt-75-100, composition: 97, gap: 75, overflow: 100, pt1: 16, pt2: 64, pt3: 64}\n'''
+          if s.count(marker)!=1: raise SystemExit('variant marker mismatch')
+          s=s.replace(marker,add)
+          old="""          if len(data)!=7 or any(len(v)!=300 for v in data.values()): raise SystemExit({k:len(v) for k,v in data.items()})\n"""
+          new="""          mandatory=[name for name,rows in data.items() if rows and rows[0]['composition_index']=='97']\n          if len(mandatory)<4: raise SystemExit(f'3速1耐1智为必测配卡，当前仅有: {mandatory}')\n          if len(data)!=11 or any(len(v)!=300 for v in data.values()): raise SystemExit({k:len(v) for k,v in data.items()})\n"""
+          if s.count(old)!=1: raise SystemExit('summary cardinality marker mismatch')
+          s=s.replace(old,new).replace("三项同时提升：{len(passed)}/7。","三项同时提升：{len(passed)}/{len(data)}。")
+          p.write_text(s)
+          PY
+          rm .github/workflows/add-mandatory-3speed-stamina-wisdom-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '复赛矩阵固定包含3速1耐1智'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
