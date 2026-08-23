@@ -1,0 +1,27 @@
+name: 读取P0第5步年末保线报告
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/read-year-end-step5-once.yml']
+permissions: {actions: read, contents: write}
+jobs:
+  read:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with:
+          name: P0第5步年末保线初筛报告
+          path: /tmp/report
+          repository: xf8410/umaai-rs
+          run-id: 32674465310
+          github-token: ${{ github.token }}
+      - run: |
+          cp /tmp/report/P0第5步年末保线初筛报告.md .trae/exports/P0第5步年末保线初筛报告.md
+          rm .github/workflows/read-year-end-step5-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '保存P0第5步年末保线初筛摘要'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
