@@ -9,7 +9,7 @@ use anyhow::Result;
 use umasim::{
     bench::{self, GameOutcome},
     game::InheritInfo,
-    gamedata::{init_global_with_config, GAMECONSTANTS},
+    gamedata::{GAMECONSTANTS, init_global_with_config},
     global,
     trainer::{LoggingTrainer, RecommendedRamenTrainer},
     utils::{get_workspace_root, load_game_config},
@@ -35,7 +35,8 @@ fn main() -> Result<()> {
     init_global_with_config(&load_game_config()?)?;
 
     let runs: u64 = env::var("DIAG_RUNS").unwrap_or_else(|_| "150".into()).parse()?;
-    let output_dir = PathBuf::from(env::var("DIAG_OUTPUT_DIR").unwrap_or_else(|_| "benchmark-results/low-score-v17".into()));
+    let output_dir =
+        PathBuf::from(env::var("DIAG_OUTPUT_DIR").unwrap_or_else(|_| "benchmark-results/low-score-v17".into()));
     fs_err::create_dir_all(&output_dir)?;
 
     let mut outcomes = Vec::with_capacity(runs as usize);
@@ -54,7 +55,9 @@ fn main() -> Result<()> {
     let mut selected_counts: BTreeMap<String, usize> = BTreeMap::new();
     for row in &log.rows {
         *stage_counts.entry(row.stage.clone()).or_default() += 1;
-        *selected_counts.entry(format!("{} :: {}", row.stage, row.action_desc)).or_default() += 1;
+        *selected_counts
+            .entry(format!("{} :: {}", row.stage, row.action_desc))
+            .or_default() += 1;
     }
 
     let scores: Vec<i32> = outcomes.iter().map(|(_, outcome)| outcome.score).collect();
@@ -90,20 +93,39 @@ fn main() -> Result<()> {
     lines.push(format!("|五维原值和|{status_sum}|\n"));
     lines.push(format!("|RMJ 成功年数|{}/3|\n", low.rmj_ok));
     lines.push(format!("|最终当年吃面次数|{}|\n", low.eat_count));
-    lines.push(format!("|友人五段全部完成|{}|\n\n", if low.friend_all { "是" } else { "否" }));
+    lines.push(format!(
+        "|友人五段全部完成|{}|\n\n",
+        if low.friend_all { "是" } else { "否" }
+    ));
 
     lines.push("## 自动风险标记\n\n".to_string());
     let mut flags = Vec::new();
-    if low.rmj_ok < 3 { flags.push(format!("- ⚠ RMJ 仅成功 {}/3 年，存在明确剧本目标损失。", low.rmj_ok)); }
-    if !low.friend_all { flags.push("- ⚠ 友人五段未全部完成，可能损失事件收益或资源。".to_string()); }
-    if low.skill_pt < 6500 { flags.push(format!("- ⚠ 技能 PT 仅 {}，明显低于当前策略约 7210 的样本均值。", low.skill_pt)); }
-    if status_sum < 9000 { flags.push(format!("- ⚠ 五维原值和仅 {status_sum}，训练产出或属性结构可能异常。")); }
-    if flags.is_empty() { flags.push("- 未命中简单终局阈值；应从逐回合窗口、失败和资源时序继续检查。".to_string()); }
+    if low.rmj_ok < 3 {
+        flags.push(format!("- ⚠ RMJ 仅成功 {}/3 年，存在明确剧本目标损失。", low.rmj_ok));
+    }
+    if !low.friend_all {
+        flags.push("- ⚠ 友人五段未全部完成，可能损失事件收益或资源。".to_string());
+    }
+    if low.skill_pt < 6500 {
+        flags.push(format!(
+            "- ⚠ 技能 PT 仅 {}，明显低于当前策略约 7210 的样本均值。",
+            low.skill_pt
+        ));
+    }
+    if status_sum < 9000 {
+        flags.push(format!("- ⚠ 五维原值和仅 {status_sum}，训练产出或属性结构可能异常。"));
+    }
+    if flags.is_empty() {
+        flags.push("- 未命中简单终局阈值；应从逐回合窗口、失败和资源时序继续检查。".to_string());
+    }
     lines.extend(flags.into_iter().map(|x| format!("{x}\n")));
     lines.push("\n".to_string());
 
     lines.push("## 最低五局\n\n".to_string());
-    lines.push("|排名|run_idx|最终评分|技能PT|五维原值和|剧本PT|RMJ|友人完成|\n|---:|---:|---:|---:|---:|---:|---:|:---:|\n".to_string());
+    lines.push(
+        "|排名|run_idx|最终评分|技能PT|五维原值和|剧本PT|RMJ|友人完成|\n|---:|---:|---:|---:|---:|---:|---:|:---:|\n"
+            .to_string(),
+    );
     for (rank, (idx, outcome)) in outcomes.iter().take(5).enumerate() {
         lines.push(format!(
             "|{}|`{}`|{}|{}|{}|{}|{}/3|{}|\n",
@@ -134,9 +156,16 @@ fn main() -> Result<()> {
 
     lines.push("\n## 人工复核入口\n\n".to_string());
     lines.push("完整逐决策 CSV：`lowest-decision-log.csv`。其中 `score_breakdown` 保存每次决策的全部候选分数与理由，可按 `turn + stage` 回放。\n\n".to_string());
-    lines.push(format!("当前评分等级表确认：最低局等级 `{}`；报告生成时全局数据已初始化。\n", global!(GAMECONSTANTS).get_rank_name(low.score)));
+    lines.push(format!(
+        "当前评分等级表确认：最低局等级 `{}`；报告生成时全局数据已初始化。\n",
+        global!(GAMECONSTANTS).get_rank_name(low.score)
+    ));
 
     fs_err::write(output_dir.join("lowest-report.md"), lines.concat())?;
-    println!("最低局 run_idx={low_idx}, score={}, 输出目录={}", low.score, output_dir.display());
+    println!(
+        "最低局 run_idx={low_idx}, score={}, 输出目录={}",
+        low.score,
+        output_dir.display()
+    );
     Ok(())
 }

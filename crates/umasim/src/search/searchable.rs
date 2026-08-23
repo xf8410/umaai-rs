@@ -16,7 +16,7 @@ use rand::rngs::StdRng;
 use crate::game::{
     Game, Trainer,
     onsen::{OnsenTurnStage, game::OnsenGame},
-    ramen::{RamenStage, RamenGame}
+    ramen::{RamenGame, RamenStage},
 };
 
 /// 一次 rollout 的两种终局评分口径
@@ -27,7 +27,7 @@ pub struct SearchScore {
     /// 结算评分
     pub score: f64,
     /// 计入 PT 偏好的评分
-    pub score_pt: f64
+    pub score_pt: f64,
 }
 
 /// 可被 [`FlatSearch`](super::FlatSearch) 驱动的剧本
@@ -38,7 +38,7 @@ pub struct SearchScore {
 /// 中重置，否则搜索层的种子控制不到它。
 pub trait FlatSearchGame: Game + Clone + Send + Sync
 where
-    Self::Action: Send + Sync + Clone
+    Self::Action: Send + Sync + Clone,
 {
     /// 本剧本 rollout 阶段使用的决策器
     ///
@@ -74,7 +74,7 @@ where
     fn search_score(&self) -> SearchScore {
         SearchScore {
             score: self.uma().calc_score() as f64,
-            score_pt: self.uma().calc_score_with_pt_favor() as f64
+            score_pt: self.uma().calc_score_with_pt_favor() as f64,
         }
     }
 }
@@ -94,7 +94,7 @@ impl FlatSearchGame for OnsenGame {
             OnsenTurnStage::Distribute => 1,
             OnsenTurnStage::Bathing => 2,
             OnsenTurnStage::Train => 3,
-            OnsenTurnStage::AfterTrain => 4
+            OnsenTurnStage::AfterTrain => 4,
         }
     }
 
@@ -106,13 +106,13 @@ impl FlatSearchGame for OnsenGame {
 }
 
 impl FlatSearchGame for RamenGame {
-    type RolloutTrainer = crate::trainer::RamenHandwrittenTrainer;
+    type RolloutTrainer = crate::trainer::RecommendedRamenTrainer;
 
     /// 拉面暂无 leaf 估值器，Phase 1 只允许跑到终局
     const SUPPORTS_TRUNCATED_LEAF: bool = false;
 
     fn default_rollout_trainer() -> Self::RolloutTrainer {
-        crate::trainer::RamenHandwrittenTrainer::new()
+        crate::trainer::RecommendedRamenTrainer::new()
     }
 
     /// 拉面 stage key（保留实现仅为满足 trait；规则层接管后不再被调用）
@@ -127,7 +127,7 @@ impl FlatSearchGame for RamenGame {
             RamenStage::NextTurn => 6,
             RamenStage::RegionSelect => 7,
             RamenStage::SuperRamenSelect => 8,
-            RamenStage::Settlement => 9
+            RamenStage::Settlement => 9,
         }
     }
 
@@ -150,7 +150,7 @@ impl FlatSearchGame for RamenGame {
 /// 该 trait 只暴露这一条最小能力，不把整套 rollout 协议开放给剧本。
 pub trait RolloutHost<G: FlatSearchGame>
 where
-    G::Action: Send + Sync + Clone
+    G::Action: Send + Sync + Clone,
 {
     /// 从给定局面跑到终局，返回终局评分
     fn rollout_to_end(&self, game: &G, rng: &mut StdRng) -> Result<SearchScore>;

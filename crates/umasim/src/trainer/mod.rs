@@ -8,7 +8,7 @@ use rand::{Rng, prelude::StdRng, seq::SliceRandom};
 
 use crate::{
     game::{ActionEnum, BaseAction, Game, Trainer},
-    gamedata::EventChoice
+    gamedata::EventChoice,
 };
 
 // 导出手写逻辑训练员、数据收集训练员、神经网络训练员和 MCTS 训练员
@@ -23,7 +23,7 @@ pub mod ramen_handwritten_trainer;
 
 //pub use collector_trainer::CollectorTrainer;
 pub use handwritten_trainer::HandwrittenTrainer;
-pub use local_ramen_trainer::LocalRamenTrainer;
+pub use local_ramen_trainer::{LocalRamenTrainer, RecommendedRamenTrainer};
 pub use logging_trainer::LoggingTrainer;
 pub use mcts_trainer::MctsTrainer;
 pub use ramen_handwritten_trainer::RamenHandwrittenTrainer;
@@ -113,7 +113,7 @@ pub struct ManualTrainer {
     /// mock 队列耗尽时的回退模式
     /// - `Interactive`（默认）：回退到 inquire（真实玩家模式）
     /// - `PickFirst`：选第一个候选（自动化测试模式，避免阻塞）
-    pub fallback: FallbackMode
+    pub fallback: FallbackMode,
 }
 
 /// mock 输入队列耗尽时的回退策略
@@ -122,7 +122,7 @@ pub enum FallbackMode {
     /// 回退到 inquire（真实玩家）
     Interactive,
     /// 自动选第一个候选（自动化测试）
-    PickFirst
+    PickFirst,
 }
 
 impl Default for ManualTrainer {
@@ -136,7 +136,7 @@ impl ManualTrainer {
     pub fn new() -> Self {
         Self {
             mock_inputs: Rc::new(RefCell::new(VecDeque::new())),
-            fallback: FallbackMode::Interactive
+            fallback: FallbackMode::Interactive,
         }
     }
 
@@ -150,7 +150,7 @@ impl ManualTrainer {
     pub fn with_mock_inputs(inputs: Vec<String>) -> Self {
         Self {
             mock_inputs: Rc::new(RefCell::new(inputs.into_iter().collect())),
-            fallback: FallbackMode::PickFirst
+            fallback: FallbackMode::PickFirst,
         }
     }
 
@@ -194,7 +194,7 @@ impl<G: Game> Trainer<G> for ManualTrainer {
             FallbackMode::Interactive => Err(anyhow::anyhow!(
                 "ManualTrainer::Interactive 需要 cli feature（inquire 终端交互）；\
                      当前编译未启用 cli，请改用 ManualTrainer::with_mock_inputs(..)"
-            ))
+            )),
         }
     }
 
@@ -224,7 +224,7 @@ impl<G: Game> Trainer<G> for ManualTrainer {
             FallbackMode::Interactive => Err(anyhow::anyhow!(
                 "ManualTrainer::Interactive 需要 cli feature（inquire 终端交互）；\
                      当前编译未启用 cli，请改用 ManualTrainer::with_mock_inputs(..)"
-            ))
+            )),
         }
     }
 }
