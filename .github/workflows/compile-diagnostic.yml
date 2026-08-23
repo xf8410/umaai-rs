@@ -1,148 +1,33 @@
-name: Ramen friend outing cap matrix and extremes v43
+name: Publish friend cap v43 reports
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  screen:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
-    strategy:
-      fail-fast: false
-      max-parallel: 21
-      matrix:
-        cap: ['005','015','025','035','045','055','115','125','135','145','155','225','235','245','255','335','345','355','445','455','555']
-        shard: [0,1,2]
-    env:
-      VARIANT: friendcap${{ matrix.cap }}
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 100
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest0
-      FRIEND_CAP_A: friendcap135
-      FRIEND_CAP_B: friendcap${{ matrix.cap }}
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - run: python3 scripts/ramen/friend_cap_matrix_v43.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-friend-cap-v43}
-      - name: Format, compile, run screen
+        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
+      - name: Download reports
+        env: {GH_TOKEN: '${{ github.token }}'}
         run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-          cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v43-${{ matrix.cap }}-${{ matrix.shard }}
-          path: matrix-result.csv
-          retention-days: 14
-  select:
-    needs: screen
-    runs-on: ubuntu-latest
-    outputs:
-      high: ${{ steps.pick.outputs.high }}
-      low: ${{ steps.pick.outputs.low }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with: {pattern: v43-*, path: results}
-      - id: pick
-        name: Rank all 21 caps
+          gh run download 32640666778 --repo xf8410/umaai-rs --name friend-cap-screen-v43 --dir report
+          gh run download 32640666778 --repo xf8410/umaai-rs --name friend-cap-extremes-v43-summary --dir report
+      - name: Stage
         run: |
-          python3 - <<'PY'
-          import csv,glob,collections,statistics,os
-          d=collections.defaultdict(list)
-          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
-            with open(p,newline='') as f:
-              for r in csv.DictReader(f):d[r['variant'].removeprefix('friendcap')].append(int(r['b_score']))
-          if len(d)!=21 or any(len(v)!=300 for v in d.values()):raise SystemExit({k:len(v) for k,v in d.items()})
-          rank=sorted(((statistics.mean(v),k) for k,v in d.items()),reverse=True)
-          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
-            print(f'high={rank[0][1]}',file=f);print(f'low={rank[-1][1]}',file=f)
-          with open('friend-cap-screen-v43.md','w') as f:
-            print('# 友人累计配额全组合初筛 v43\n',file=f)
-            print('|排名|配额 Y1/Y2/Y3|300局均分|\n|---:|---|---:|',file=f)
-            for i,(m,k) in enumerate(rank,1):print(f'|{i}|{k[0]}/{k[1]}/{k[2]}|{m:.1f}|',file=f)
-          PY
-          cat friend-cap-screen-v43.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: friend-cap-screen-v43
-          path: friend-cap-screen-v43.md
-          retention-days: 30
-  extremes:
-    needs: select
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix: {shard: [0,1,2,3,4]}
-    env:
-      VARIANT: high${{ needs.select.outputs.high }}-vs-low${{ needs.select.outputs.low }}
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 200
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest0
-      FRIEND_CAP_A: friendcap${{ needs.select.outputs.low }}
-      FRIEND_CAP_B: friendcap${{ needs.select.outputs.high }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - run: python3 scripts/ramen/friend_cap_matrix_v43.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-friend-cap-v43}
-      - run: |
-          cargo fmt --all
-          cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v43-extreme-${{ matrix.shard }}
-          path: matrix-result.csv
-          retention-days: 30
-  summary:
-    needs: [select, extremes]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: {pattern: v43-extreme-*, path: results}
-      - name: Summarize 1000 paired seeds
+          test -s report/friend-cap-screen-v43.md
+          test -s report/friend-cap-extremes-v43.md
+          mkdir -p .trae/exports
+          cp report/friend-cap-screen-v43.md .trae/exports/
+          cp report/friend-cap-extremes-v43.md .trae/exports/
+      - name: Commit
         run: |
-          python3 - <<'PY' | tee friend-cap-extremes-v43.md
-          import csv,glob,statistics
-          r=[]
-          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
-            with open(p,newline='') as f:r.extend(csv.DictReader(f))
-          if len(r)!=1000:raise SystemExit(len(r))
-          va=r[0]['variant']; high=va.split('-vs-')[0].removeprefix('high'); low=va.split('-vs-')[1].removeprefix('low')
-          def vals(pre,k):return [int(x[pre+k]) for x in r]
-          def pct(x,p):return sorted(x)[round((len(x)-1)*p)]
-          print('# 友人累计配额初筛最高 vs 最低复赛 v43\n')
-          print(f'> A=初筛最低 {low[0]}/{low[1]}/{low[2]}；B=初筛最高 {high[0]}/{high[1]}/{high[2]}；1000 局同 seed。\n')
-          print('|指标|最低 A|最高 B|B-A|\n|---|---:|---:|---:|')
-          for title,k in [('平均总评分','score'),('平均PT','skill_pt'),('平均属性评分','status_score'),('平均五维和','status_sum')]:
-            a,b=vals('a_',k),vals('b_',k); am,bm=statistics.mean(a),statistics.mean(b);print(f'|{title}|{am:.1f}|{bm:.1f}|{bm-am:+.1f}|')
-          a,b=vals('a_','score'),vals('b_','score')
-          for title,p in [('P10',.1),('P50',.5),('P90',.9)]:
-            av,bv=pct(a,p),pct(b,p);print(f'|{title}|{av}|{bv}|{bv-av:+d}|')
-          print(f'\nB 配对胜/平/负：{sum(y>x for x,y in zip(a,b))}/{sum(y==x for x,y in zip(a,b))}/{sum(y<x for x,y in zip(a,b))}')
-          PY
-          cat friend-cap-extremes-v43.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: friend-cap-extremes-v43-summary
-          path: friend-cap-extremes-v43.md
-          retention-days: 30
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/friend-cap-*-v43.md
+          git commit -m 'docs(ramen): 记录 v43 友人累计配额矩阵' \
+            -m '固化 21 套配额各 300 局排序，以及初筛最高与最低的 1000 局同种子复赛。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
