@@ -1,4 +1,4 @@
-name: 读取超级拉面多权重矩阵评分
+name: 重新汇总超级拉面多权重矩阵评分
 
 on:
   push:
@@ -11,28 +11,59 @@ permissions:
 
 jobs:
   read:
-    name: 读取并提交评分报告
+    name: 从十八个原始分片重新汇总评分
     runs-on: ubuntu-latest
     steps:
       - name: 读取仓库源码
         uses: actions/checkout@v4
         with:
           ref: workbench/skill-pt-matrix-distill
-      - name: 下载已完成矩阵总报告
+      - name: 下载十八个原始矩阵分片
         uses: actions/download-artifact@v4
         with:
-          name: 超级拉面多权重矩阵总报告
-          path: /tmp/ramen-report
+          pattern: 权重-*
+          path: /tmp/ramen-results
           repository: xf8410/umaai-rs
           run-id: 32658372240
           github-token: ${{ github.token }}
-      - name: 保存评分报告
+      - name: 重新计算并保存评分报告
         run: |
-          find /tmp/ramen-report -maxdepth 3 -type f -print -exec wc -c {} \;
-          report=$(find /tmp/ramen-report -type f -size +0c -print -quit)
-          test -n "$report"
-          cat "$report"
-          cp "$report" .trae/exports/super-ramen-partner-weight-matrix.md
+          python3 - <<'PY'
+          import csv, glob, pathlib, statistics, collections
+          grouped=collections.defaultdict(list)
+          files=glob.glob('/tmp/ramen-results/**/current.csv',recursive=True)
+          if len(files)!=18: raise SystemExit(f'应有18个当前机制分片，实际{len(files)}个')
+          for current_path in files:
+              base=pathlib.Path(current_path).parent
+              candidate_path=base/'candidate.csv'
+              with open(current_path,newline='') as f: current=list(csv.DictReader(f))
+              with open(candidate_path,newline='') as f: candidate=list(csv.DictReader(f))
+              if len(current)!=len(candidate): raise SystemExit(f'结果数量不一致：{base}')
+              for a,b in zip(current,candidate):
+                  if (a['variant'],a['shard'],a['run_idx']) != (b['variant'],b['shard'],b['run_idx']):
+                      raise SystemExit(f'种子无法配对：{base}')
+                  grouped[a['variant']].append({
+                      'score':int(b['b_score'])-int(a['b_score']),
+                      'pt':int(b['b_skill_pt'])-int(a['b_skill_pt']),
+                      'status':int(b['b_status_score'])-int(a['b_status_score'])})
+          if len(grouped)!=6: raise SystemExit(f'应有6组权重，实际{len(grouped)}组')
+          lines=['# 超级拉面额外人头多权重同种子矩阵','',
+                 '| 权重方案 | 配对局数 | 平均总分变化 | 平均技能点变化 | 平均属性分变化 | 胜/平/负 |',
+                 '|---|---:|---:|---:|---:|---:|']
+          all_rows=[]
+          for name,rows in sorted(grouped.items()):
+              ds=[r['score'] for r in rows]; w=sum(x>0 for x in ds); l=sum(x<0 for x in ds)
+              lines.append(f'| {name} | {len(rows)} | {statistics.mean(ds):+.1f} | {statistics.mean(r["pt"] for r in rows):+.1f} | {statistics.mean(r["status"] for r in rows):+.1f} | {w}/{len(ds)-w-l}/{l} |')
+              all_rows.extend(rows)
+          ds=[r['score'] for r in all_rows]; w=sum(x>0 for x in ds); l=sum(x<0 for x in ds)
+          positive=sum(statistics.mean(r['score'] for r in rows)>0 for rows in grouped.values())
+          keep=positive>=4 and statistics.mean(ds)>0 and w>l
+          lines += ['',f'总计 {len(all_rows)} 对；平均总分变化 {statistics.mean(ds):+.1f}；胜/平/负 {w}/{len(ds)-w-l}/{l}。',
+                    '',f'六组中有 {positive} 组平均分提高。','',f'**判定：{"保留候选" if keep else "不保留候选"}**']
+          text='\n'.join(lines)+'\n'
+          pathlib.Path('.trae/exports/super-ramen-partner-weight-matrix.md').write_text(text)
+          print(text)
+          PY
       - name: 提交评分报告
         run: |
           git config user.name github-actions[bot]
