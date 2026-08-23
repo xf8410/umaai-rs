@@ -1,0 +1,34 @@
+name: 读取全配卡多权重矩阵现有报告
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/publish-composition-weight-report-once.yml']
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - uses: actions/download-artifact@v4
+        with:
+          name: 全配卡多权重穷举总报告
+          path: /tmp/report
+          repository: xf8410/umaai-rs
+          run-id: 32660298757
+          github-token: ${{ github.token }}
+      - name: 保存现有CI报告并删除一次性读取器
+        run: |
+          cp /tmp/report/全配卡多权重穷举报告.md .trae/exports/composition-gap-overflow-pt-matrix.md
+          rm .github/workflows/publish-composition-weight-report-once.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m '保存全配卡缺口溢出技能点权重矩阵报告'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
