@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import shutil
 
 ROOT = Path('.')
@@ -50,15 +49,14 @@ cargo.write_text(cargo_text, encoding='utf-8')
 script_dir = Path('scripts')
 ramen_scripts = script_dir / 'ramen'
 ramen_scripts.mkdir(parents=True, exist_ok=True)
-root_python = sorted(p for p in script_dir.glob('*.py') if p.name != Path(__file__).name)
-# Include this migration script itself so scripts/ has no loose project Python files.
 this_script = Path(__file__)
+root_python = sorted(p for p in script_dir.glob('*.py') if p != this_script)
 for p in root_python:
     move(str(p), str(ramen_scripts / p.name))
 
-# Rewrite references to moved scripts in every tracked text-like source/config file.
+# Rewrite references to moved scripts in source/config files.
 moved_names = [p.name for p in root_python]
-text_suffixes = {'.yml', '.yaml', '.toml', '.md', '.txt', '.rs', '.py', '.gitignore'}
+text_suffixes = {'.yml', '.yaml', '.toml', '.md', '.txt', '.rs', '.py'}
 for p in ROOT.rglob('*'):
     if not p.is_file() or '.git' in p.parts or p == this_script:
         continue
@@ -73,8 +71,6 @@ for p in ROOT.rglob('*'):
         new = new.replace(f'scripts/{name}', f'scripts/ramen/{name}')
     if new != old:
         p.write_text(new, encoding='utf-8')
-
-# Move the migration script after reference rewriting; it is retained for auditability.
 move(str(this_script), str(ramen_scripts / this_script.name))
 
 # 4. Project notes and snapshots live under .trae.
@@ -87,8 +83,7 @@ for p in sorted(Path('exports').glob('*')) if Path('exports').exists() else []:
 if Path('exports').exists() and not any(Path('exports').iterdir()):
     Path('exports').rmdir()
 
-# Generated benchmark reports must not be committed by Actions. Existing experiments may
-# still write the ignored directory and upload it as an artifact.
+# Generated reports remain usable as ignored Actions artifacts, but are never git-added.
 for wf in Path('.github/workflows').glob('*.yml'):
     old = wf.read_text(encoding='utf-8')
     lines = old.splitlines()
@@ -105,9 +100,6 @@ for wf in Path('.github/workflows').glob('*.yml'):
     if changed:
         wf.write_text('\n'.join(out) + '\n', encoding='utf-8')
 
-# Temporary one-shot repair workflows do not belong in upstream.
-for temporary in [
-    '.github/workflows/compile-diagnostic.yml',
-    '.github/workflows/fix-core-test-logger.yml',
-]:
-    Path(temporary).unlink(missing_ok=True)
+# Remove the obsolete test repair workflow. Keep the currently executing migration workflow;
+# deleting it in the same GITHUB_TOKEN push can be rejected by GitHub workflow protection.
+Path('.github/workflows/fix-core-test-logger.yml').unlink(missing_ok=True)
