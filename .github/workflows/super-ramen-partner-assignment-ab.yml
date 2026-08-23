@@ -1,4 +1,4 @@
-name: Super ramen partner assignment paired A/B
+name: 超级拉面额外人头同种子对照测试
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       runs:
-        description: Runs per player build and variant
+        description: 每种卡组和每个方案的模拟局数
         required: false
         default: '500'
 
@@ -22,39 +22,43 @@ env:
 
 jobs:
   paired-ab:
+    name: 拉面杯机制同种子对照
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       AB_RUNS: ${{ inputs.runs || '500' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - name: 读取仓库源码
+        uses: actions/checkout@v4
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+      - name: 恢复编译缓存
+        uses: Swatinem/rust-cache@v2
         with:
           shared-key: super-ramen-partner-assignment-ab
 
-      - name: Library tests - current ramen mechanism
+      - name: 拉面杯当前机制库测试
         shell: bash
         run: |
           set -o pipefail
           cargo test -p umasim --lib game::ramen -- --nocapture 2>&1 | tee ramen-library-baseline.log
 
-      - name: Run current ramen score matrix
+      - name: 运行拉面杯当前机制评分矩阵
         run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
 
-      - name: Apply protocol-derived URAF candidate
+      - name: 临时应用协议确认的超级拉面人头修正
         run: python3 scripts/ramen/experiment_super_ramen_partner_assignment.py
 
-      - name: Library tests - candidate ramen mechanism
+      - name: 拉面杯候选机制库测试
         shell: bash
         run: |
           set -o pipefail
           cargo test -p umasim --lib game::ramen -- --nocapture 2>&1 | tee ramen-library-candidate.log
 
-      - name: Run candidate ramen score matrix with identical seeds
+      - name: 使用相同种子运行拉面杯候选机制评分矩阵
         run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/candidate
 
-      - name: Summarize paired score matrix
+      - name: 汇总同种子配对评分
         run: |
           python3 - <<'PY'
           import csv, pathlib, statistics
@@ -66,16 +70,16 @@ jobs:
           a, b = load('baseline'), load('candidate')
           keys = sorted(a.keys() & b.keys())
           if not keys or len(keys) != len(a) or len(keys) != len(b):
-              raise SystemExit(f'unpaired results baseline={len(a)} candidate={len(b)} paired={len(keys)}')
+              raise SystemExit(f'结果无法配对：当前机制={len(a)} 候选机制={len(b)} 已配对={len(keys)}')
           deltas = [int(b[k]['score']) - int(a[k]['score']) for k in keys]
           wins = sum(x > 0 for x in deltas); losses = sum(x < 0 for x in deltas)
           report = [
-              '# 超级拉面额外人头协议修正 A/B', '',
+              '# 超级拉面额外人头协议修正同种子对照', '',
               f'- 配对局数：{len(keys)}',
               f'- 候选平均分变化：{statistics.mean(deltas):+.2f}',
               f'- 中位变化：{statistics.median(deltas):+.2f}',
               f'- 候选胜/平/负：{wins}/{len(keys)-wins-losses}/{losses}', '',
-              '| build | 局数 | 平均变化 | 胜/平/负 |', '|---|---:|---:|---:|'
+              '| 卡组 | 局数 | 平均变化 | 胜/平/负 |', '|---|---:|---:|---:|'
           ]
           for build in sorted({k[0] for k in keys}):
               ds = [int(b[k]['score'])-int(a[k]['score']) for k in keys if k[0] == build]
@@ -89,9 +93,10 @@ jobs:
           PY
           cat benchmark-results/super-ramen-ab/report.md >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - name: 上传拉面杯对照结果
+        uses: actions/upload-artifact@v4
         with:
-          name: super-ramen-partner-assignment-ab-${{ github.run_id }}
+          name: 超级拉面额外人头对照结果-${{ github.run_id }}
           path: |
             benchmark-results/super-ramen-ab
             ramen-library-baseline.log
