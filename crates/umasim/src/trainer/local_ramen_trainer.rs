@@ -144,6 +144,13 @@ pub struct LocalRamenConfig {
     /// 对 A/B/C 分别计算 `sqrt(吃前库存+2)-sqrt(吃后库存+2)`，隐藏风味另计灵活性成本，
     /// 再乘年度剩余比例与 RMJ 进度折扣。单位为策略评分缩放；当前最佳 `cook2-40` 为 `40.0`。
     pub cook2_stock_weight: f32,
+
+    /// 是否把“吃面”和“本回合训练”视为不可拆分的事务。
+    ///
+    /// `true` 时先在不吃面的当前局面决定基础动作：若应休息、外出、治病或比赛，
+    /// RamenSelect 直接选择不吃；一旦已经吃面，Train 阶段只在五种训练中比较，
+    /// 不允许随后休息而浪费仅本回合生效的拉面加成。
+    pub eat_requires_training: bool,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -173,6 +180,7 @@ impl Default for LocalRamenConfig {
             safety_bridge_min_gain: 0.0,
             safety_bridge_stock_cost: 0.0,
             cook2_stock_weight: 0.0,
+            eat_requires_training: false,
         }
     }
 }
@@ -215,6 +223,8 @@ impl LocalRamenTrainer {
                 local.cook2_stock_weight = v.parse()?
             } else if let Some(v) = token.strip_prefix("vrest") {
                 policy.vital_rest = v.parse()?
+            } else if token == "eatguard" {
+                local.eat_requires_training = true
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -320,9 +330,25 @@ impl LocalRamenTrainer {
         if t >= 72 { 0.25 } else { 3.5 + (t as f32 / 72.) * 2. }
     }
     fn decide_train(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
-        let (guard, mut out) = self.policy.decide_train(g, a)?;
+        let (mut guard, mut out) = self.policy.decide_train(g, a)?;
         if out.len() != a.len() {
-            return Ok((guard, out));
+            let ate_this_turn = self.config.eat_requires_training && g.ramen.current_ramen.is_some();
+            let selected_is_train = a
+                .get(guard)
+                .is_some_and(|action| matches!(action.operation, Operation::Train(_)));
+            if !ate_this_turn || selected_is_train {
+                return Ok((guard, out));
+            }
+            // 已吃面但旧硬守门想休息/外出：重新计算全部候选，并只允许五种训练。
+            // 生病/自选比赛通常不会经过吃面前门控；这里仍以“拉面只为训练使用”为最终不变量。
+            out = self.policy.score_train_actions(g, a)?;
+            guard = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| anyhow::anyhow!("已吃面但 Train 阶段没有训练候选"))?;
         }
         let base = out.iter().map(|x| x.score).collect::<Vec<_>>();
         let bb = Self::choose(&out);
@@ -458,6 +484,21 @@ impl LocalRamenTrainer {
         };
         Ok((checkpoint, rmj, great))
     }
+    /// 在不吃面的当前状态下返回真正会执行的基础动作。
+    /// 用于在 RamenSelect 前决定本回合究竟是训练，还是应先休息/外出/治病/比赛。
+    fn pre_eat_action(&self, g: &RamenGame) -> Result<Operation> {
+        let mut preview = g.clone();
+        preview.stage = RamenStage::Train;
+        preview.ramen.current_ramen = None;
+        preview.ramen.clear_pending();
+        let actions = preview.list_actions()?;
+        let (idx, _) = self.decide_train(&preview, &actions)?;
+        actions
+            .get(idx)
+            .map(|a| a.operation)
+            .ok_or_else(|| anyhow::anyhow!("吃面前训练决策索引越界: {idx}/{}", actions.len()))
+    }
+
     fn best_action_score(&self, g: &RamenGame) -> Result<f32> {
         let actions = g.list_actions()?;
         let (idx, out) = self.decide_train(g, &actions)?;
@@ -651,6 +692,21 @@ impl LocalRamenTrainer {
 
     fn decide_ramen(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (_, mut out) = self.policy.decide_ramen(g, a)?;
+        if self.config.eat_requires_training && !matches!(self.pre_eat_action(g)?, Operation::Train(_)) {
+            let no_eat = a
+                .iter()
+                .position(|action| action.ramen.is_none())
+                .ok_or_else(|| anyhow::anyhow!("需要休息/外出时 RamenSelect 却没有不吃面候选"))?;
+            for (i, candidate) in out.iter_mut().enumerate() {
+                if i == no_eat {
+                    candidate.reason = "不吃面：本回合基础决策不是训练".to_string();
+                } else {
+                    candidate.score = f32::NEG_INFINITY;
+                    candidate.reason = "禁止吃面：本回合应先休息/外出/治病/比赛".to_string();
+                }
+            }
+            return Ok((no_eat, out));
+        }
         let risk = (g.ramen.feeling_stock.iter().sum::<i32>() - self.config.feeling_overflow_threshold).max(0) as f32;
         let bridge = self.safety_bridge(g, a)?;
         for (act, o) in a.iter().zip(out.iter_mut()) {
@@ -710,7 +766,8 @@ impl LocalRamenTrainer {
 /// - 使用基础失败率作为保守决策风险预算（游戏规则仍应用真实减失败率）；
 /// - Cook2 式诀窍边际库存权重：40；
 /// - 关闭随机分身 lookahead；
-/// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策。
+/// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
+/// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -744,6 +801,7 @@ impl RecommendedRamenTrainer {
             local.ramen_lookahead_samples = 1;
             local.effective_ramen_failure = false;
             local.cook2_stock_weight = 40.0;
+            local.eat_requires_training = true;
             LocalRamenTrainer::with_configs(policy, local)
         }
 
