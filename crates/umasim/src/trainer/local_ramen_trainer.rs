@@ -1136,7 +1136,7 @@ impl LocalRamenTrainer {
 /// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
 /// - 第三年终盘允许有马前把体力控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管；
-/// - 本来要休息时按 1/3/5 跨年累计节奏使用友人外出；即使万能材料暂时溢出也不禁止；
+/// - 本来要休息时按 0/2/5 跨年累计节奏使用友人外出；第一年不消耗次数，第二年累计 2 次，第三年完成 5 次；
 /// - 五段事件按当前体力、干劲、属性/PT及完链进度动态估值，第三段不再使用硬体力阈值；
 /// - 不使用 RMJ 截止期紧迫度加分：300 局同种子矩阵中 deadline20/35/50 完全同轨，
 ///   平均分 56960.7，显著低于 deadline0 的 58881.6；硬目标仍由规则和既有跨线价值保证。
@@ -1181,7 +1181,7 @@ impl RecommendedRamenTrainer {
             local.y3_recovery_horizon = true;
             local.friend_outing_replaces_rest = true;
             local.friend_outing3_recovery_vital = 0;
-            local.friend_outing_cumulative_caps = [1, 3, 5];
+            local.friend_outing_cumulative_caps = [0, 2, 5];
             local.friend_rest_max_special = 4;
             local.deadline_urgency_scale = 0.0;
             local.dynamic_special_targets = true;
@@ -1289,5 +1289,27 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
     }
     fn last_breakdown(&self) -> Option<String> {
         self.last_breakdown.lock().ok().and_then(|b| b.clone())
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::RecommendedRamenTrainer;
+
+    /// 正式 preset 必须使用 v44 同种子回归胜出的友人跨年节奏。
+    #[test]
+    #[allow(clippy::panic)]
+    fn recommended_ramen_uses_025_friend_pacing() {
+        let trainer = RecommendedRamenTrainer::new();
+        let actual = trainer
+            .years
+            .each_ref()
+            .map(|year| year.config.friend_outing_cumulative_caps);
+        let expected = [[0, 2, 5]; 3];
+        println!("正式友人累计出门配额: {actual:?}");
+        if actual != expected {
+            panic!("正式 preset 应使用 {expected:?}，实际为 {actual:?}");
+        }
     }
 }
