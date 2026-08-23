@@ -6,10 +6,15 @@ use anyhow::{Context, Result, ensure};
 use rand::prelude::StdRng;
 use umasim::{
     bench::{self, CardPickOpts, DeckComposition},
-    game::{Game, InheritInfo, Trainer, ramen::{RamenAction, RamenGame}},
+    game::{
+        Game,
+        InheritInfo,
+        Trainer,
+        ramen::{RamenAction, RamenGame}
+    },
     gamedata::{EventChoice, EventData, GAMECONSTANTS, init_global_with_config},
     global,
-    trainer::{LocalRamenTrainer, RecommendedRamenTrainer},
+    trainer::{LocalRamenTrainer, LoggingTrainer, RecommendedRamenTrainer},
     utils::{get_workspace_root, load_game_config}
 };
 
@@ -42,7 +47,13 @@ impl CandidateTrainer {
     }
 
     fn year(game: &RamenGame) -> usize {
-        if game.turn() < 24 { 0 } else if game.turn() < 48 { 1 } else { 2 }
+        if game.turn() < 24 {
+            0
+        } else if game.turn() < 48 {
+            1
+        } else {
+            2
+        }
     }
 }
 
@@ -60,11 +71,7 @@ impl Trainer<RamenGame> for CandidateTrainer {
     }
 
     fn select_event_choice(
-        &self,
-        game: &RamenGame,
-        event: &EventData,
-        choices: &[Vec<EventChoice>],
-        rng: &mut StdRng
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
     ) -> Result<usize> {
         let year = Self::year(game);
         *self.last_year.lock().unwrap() = Some(year);
@@ -128,14 +135,8 @@ fn main() -> Result<()> {
 
     let mut baseline = Vec::with_capacity(runs as usize);
     for run_index in 0..runs {
-        baseline.push(bench::run_seeded(
-            UMA,
-            &deck,
-            &INHERIT,
-            BASE_SEED,
-            run_index,
-            &RecommendedRamenTrainer::new()
-        )?);
+        let trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_index);
+        baseline.push(bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &trainer)?);
     }
 
     let mut file = File::create("composition-weight-result.csv")?;
@@ -149,14 +150,8 @@ fn main() -> Result<()> {
         for overflow in WEIGHTS {
             for pt in PT_WEIGHTS {
                 for run_index in 0..runs {
-                    let candidate = bench::run_seeded(
-                        UMA,
-                        &deck,
-                        &INHERIT,
-                        BASE_SEED,
-                        run_index,
-                        &CandidateTrainer::new(pt, gap, overflow)?
-                    )?;
+                    let trainer = LoggingTrainer::new(CandidateTrainer::new(pt, gap, overflow)?, run_index);
+                    let candidate = bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_index, &trainer)?;
                     let base = &baseline[run_index as usize];
                     writeln!(
                         file,
