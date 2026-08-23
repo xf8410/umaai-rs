@@ -1,0 +1,57 @@
+name: Ramen composition profile matrix v30
+on:
+  workflow_dispatch:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/ramen-composition-profile-v30.yml]
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    env:
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-composition-v30}
+      - run: cargo fmt --all -- --check
+      - run: cargo check -p umasim --bin composition_profile_matrix --no-default-features
+      - run: cargo run -p umasim --bin composition_profile_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: composition-v30-shard${{ matrix.shard }}
+          path: composition-profile-result.csv
+  summary:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {pattern: composition-v30-*, path: results}
+      - name: Summarize paired results
+        run: |
+          python3 - <<'PY'
+          import csv,glob,collections,statistics
+          d=collections.defaultdict(list)
+          for p in glob.glob('results/*/*.csv'):
+            with open(p) as f:
+              for r in csv.DictReader(f): d[r['build']].append(r)
+          print('|配卡（另含固定友人303054）|卡组|局数|基线均分|画像均分|差值|基线PT|画像PT|PT差值|基线RMJ全通|画像RMJ全通|')
+          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for name,rs in d.items():
+            mean=lambda k: statistics.mean(int(x[k]) for x in rs)
+            b,p=mean('baseline_score'),mean('profile_score')
+            bp,pp=mean('baseline_pt'),mean('profile_pt')
+            br=statistics.mean(int(x['baseline_rmj'])==3 for x in rs)
+            pr=statistics.mean(int(x['profile_rmj'])==3 for x in rs)
+            print(f"|{name}|{rs[0]['deck']}|{len(rs)}|{b:.1f}|{p:.1f}|{p-b:+.1f}|{bp:.1f}|{pp:.1f}|{pp-bp:+.1f}|{br:.1%}|{pr:.1%}|")
+          PY
