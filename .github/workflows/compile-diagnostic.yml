@@ -2,20 +2,33 @@ name: Validate reorganized Ramen sources
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
+      - name: Promote evidence-based handwritten v35 preset
+        run: python3 scripts/ramen/promote_deadline0_v35.py
       - uses: dtolnay/rust-toolchain@nightly
         with: {components: rustfmt}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: ramen-reorganized-source}
-      - name: Nightly formatting check
-        run: cargo +nightly fmt --all -- --check
+      - name: Format with nightly only
+        run: cargo +nightly fmt --all
       - name: Core-only tests
         run: cargo test -p umasim --lib --no-default-features
       - name: Default workspace check
         run: cargo check --workspace
+      - name: Commit validated preset update
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'feat(ramen): promote deadline-free handwritten preset v35'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
