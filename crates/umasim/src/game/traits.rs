@@ -11,7 +11,7 @@ use crate::{
     game::{BaseAction, CardTrainingEffect, SupportCard, Uma},
     gamedata::{ActionValue, EventChoice, EventData, GAMECONSTANTS, TrainingBasicTable, TriggerType},
     global,
-    output::{DecisionInfo, GameView}
+    output::{DecisionInfo, GameView},
 };
 // Game为核心特性，
 // ActionEnum 执行动作，修改Game状态
@@ -174,7 +174,7 @@ pub trait Game: Clone {
         match self.persons()[person_index].person_type() {
             PersonType::ScenarioCard => self.turn() >= 2,
             PersonType::Reporter => self.turn() >= 13,
-            _ => true
+            _ => true,
         }
     }
     /// distribution getter
@@ -208,7 +208,7 @@ pub trait Game: Clone {
         let mut absent_rate = match person.person_type() {
             PersonType::Card => 50 - self.absent_rate_drop(),
             PersonType::Yayoi | PersonType::Reporter => 200,
-            _ => 100 - self.absent_rate_drop()
+            _ => 100 - self.absent_rate_drop(),
         };
         if !allow_absent {
             absent_rate = 0;
@@ -304,7 +304,7 @@ pub trait Game: Clone {
             PersonType::Card => person.train_type() == train as i32 && person.friendship() >= 80,
             PersonType::TeamCard => self.has_group_buff(),
             // 默认实现中其他卡不能闪彩
-            _ => false
+            _ => false,
         }
     }
     /// provided: 指定训练的彩圈个数
@@ -459,7 +459,7 @@ pub trait Game: Clone {
             max_vital: uma.max_vital,
             motivation: uma.motivation,
             skill_pt: uma.skill_pt,
-            total_hints: uma.total_hints
+            total_hints: uma.total_hints,
         }
     }
 }
@@ -473,7 +473,7 @@ pub trait Trainer<G: Game> {
     ///
     /// 暂时回退到 select_choice。
     fn select_event_choice(
-        &self, game: &G, _event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
+        &self, game: &G, _event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         self.select_choice(game, choices, rng)
     }

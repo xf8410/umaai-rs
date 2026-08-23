@@ -36,7 +36,13 @@ impl PhaseTrainer {
         })
     }
     fn year(g: &RamenGame) -> usize {
-        if g.turn() < 24 { 0 } else if g.turn() < 48 { 1 } else { 2 }
+        if g.turn() < 24 {
+            0
+        } else if g.turn() < 48 {
+            1
+        } else {
+            2
+        }
     }
     fn take_selected(&self) -> Option<Operation> {
         self.selected.lock().ok()?.take()
@@ -66,7 +72,10 @@ fn main() -> Result<()> {
     let runs: u64 = env::var("RUNS").unwrap_or_else(|_| "100".into()).parse()?;
     let start: u64 = env::var("START").unwrap_or_else(|_| "0".into()).parse()?;
     let mut file = File::create("y3-train-pt.csv")?;
-    writeln!(file, "run_idx,turn,phase,training,success,pt_before,pt_after,pt_gain,vital_before,vital_after,ate_ramen")?;
+    writeln!(
+        file,
+        "run_idx,turn,phase,training,success,pt_before,pt_after,pt_gain,vital_before,vital_after,ate_ramen"
+    )?;
 
     for run_idx in start..start + runs {
         let (mut rng, rule_master) = bench::seeded_rngs(BASE_SEED, run_idx);

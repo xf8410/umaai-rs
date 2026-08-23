@@ -3,7 +3,7 @@ use colored::Colorize;
 use crate::{
     gamedata::{EventChoice, GAMECONSTANTS},
     global,
-    utils::{Array5, Array6}
+    utils::{Array5, Array6},
 };
 
 pub struct Explain;

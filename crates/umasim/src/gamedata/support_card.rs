@@ -51,7 +51,7 @@ pub struct CardValue {
     /// 初始属性
     pub initial_bonus: Array6,
     /// 启发收益
-    pub hint_bonus: Array6
+    pub hint_bonus: Array6,
 }
 
 /// 支援卡数据 CardDB.json
@@ -79,7 +79,7 @@ pub struct SupportCardData {
     pub unique_effect_summary: Option<String>,
     /// 固有数值
     #[serde(default)]
-    pub unique_effect_param: Vec<i32>
+    pub unique_effect_param: Vec<i32>,
 }
 
 impl SupportCardData {

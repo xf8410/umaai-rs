@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     game::onsen::OnsenOrder,
     gamedata::load_json,
-    utils::{Array5, Array6}
+    utils::{Array5, Array6},
 };
 
 /// 训练基础值表格
@@ -74,7 +74,7 @@ pub struct GameConstants {
     /// 蒙特卡洛每回合比手写逻辑增加的分数（搜索启发式）
     /// 默认值来源："game_config.toml" → "default_config.toml" → `default_mcts_turn_bonus()`
     #[serde(default, skip)]
-    pub mcts_turn_bonus: i32
+    pub mcts_turn_bonus: i32,
 }
 
 impl GameConstants {
@@ -153,7 +153,7 @@ pub struct MctsConfig {
     ///
     /// 拉面规则层已由无状态流接管（RNG Refactor Plan v2 §5.2），不受此开关影响。
     #[serde(default = "default_mcts_crn_stage_reseed")]
-    pub crn_stage_reseed: bool
+    pub crn_stage_reseed: bool,
 }
 
 impl Default for MctsConfig {
@@ -169,7 +169,7 @@ impl Default for MctsConfig {
             search_group_size: default_mcts_search_group_size(),
             search_cpuct: default_mcts_search_cpuct(),
             expected_search_stdev: default_mcts_expected_search_stdev(),
-            crn_stage_reseed: default_mcts_crn_stage_reseed()
+            crn_stage_reseed: default_mcts_crn_stage_reseed(),
         }
     }
 }
@@ -349,7 +349,7 @@ pub struct CollectorConfig {
     pub search_cpuct: Option<f64>,
     /// 覆盖 expected_search_stdev（None 则回退）
     #[serde(default)]
-    pub expected_search_stdev: Option<f64>
+    pub expected_search_stdev: Option<f64>,
 }
 
 impl Default for CollectorConfig {
@@ -388,7 +388,7 @@ impl Default for CollectorConfig {
             use_ucb: None,
             search_group_size: None,
             search_cpuct: None,
-            expected_search_stdev: None
+            expected_search_stdev: None,
         }
     }
 }
@@ -552,7 +552,7 @@ pub struct GameConfig {
     ///
     /// 例如 `[[10, 12, 14]]`：第3年固定选 [10,12,14]
     #[serde(default)]
-    pub ramen_region_fixed: Option<Vec<[usize; 3]>>
+    pub ramen_region_fixed: Option<Vec<[usize; 3]>>,
 }
 
 fn default_mcts_turn_bonus() -> i32 {
@@ -603,7 +603,7 @@ impl GameConfig {
             pt_favor_rate: default_pt_favor_rate(),
             race_grades: default_race_grades(),
             ramen_region_strategy: RamenRegionStrategy::default(),
-            ramen_region_fixed: None
+            ramen_region_fixed: None,
         }
     }
 
@@ -616,7 +616,7 @@ impl GameConfig {
             cards: self.cards,
             blue_count: self.blue_count,
             extra_count: self.extra_count,
-            simulation_count: self.simulation_count
+            simulation_count: self.simulation_count,
         }
     }
 
@@ -628,7 +628,7 @@ impl GameConfig {
             neuralnet_model_path: self.neuralnet_model_path.clone(),
             mcts_turn_bonus: self.mcts_turn_bonus,
             pt_favor_rate: self.pt_favor_rate,
-            race_grades: self.race_grades.clone()
+            race_grades: self.race_grades.clone(),
         }
     }
 
@@ -636,14 +636,14 @@ impl GameConfig {
     pub fn policy(&self) -> PolicyConfig {
         PolicyConfig {
             ramen_region_strategy: self.ramen_region_strategy,
-            ramen_region_fixed: self.ramen_region_fixed.clone()
+            ramen_region_fixed: self.ramen_region_fixed.clone(),
         }
     }
 
     /// 输出参数：日志级别、统计级别等
     pub fn output(&self) -> OutputConfig {
         OutputConfig {
-            log_level: self.log_level.clone() // 步骤 3 后续：统计级别（None / Summary / Turn / Detailed）等
+            log_level: self.log_level.clone(), // 步骤 3 后续：统计级别（None / Summary / Turn / Detailed）等
         }
     }
 
@@ -651,7 +651,7 @@ impl GameConfig {
     pub fn dev(&self) -> DeveloperConfig {
         DeveloperConfig {
             collector: self.collector.clone(),
-            num_threads: self.collector.threads
+            num_threads: self.collector.threads,
         }
     }
 }
@@ -678,7 +678,7 @@ pub struct SimulationConfig {
     /// 种马额外属性
     pub extra_count: Array6,
     /// 模拟次数（默认 1 次）
-    pub simulation_count: usize
+    pub simulation_count: usize,
 }
 
 /// 搜索参数（MCTS、神经网络、用户可调搜索项）
@@ -695,7 +695,7 @@ pub struct SearchConfig {
     /// PT 偏好评分倍率（用户可调）
     pub pt_favor_rate: f32,
     /// 比赛等级表 72 项（用户可调）
-    pub race_grades: Vec<i32>
+    pub race_grades: Vec<i32>,
 }
 
 /// 拉面杯地区选择策略（Phase 2 步骤 5 接入）
@@ -710,7 +710,7 @@ pub enum RamenRegionStrategy {
     #[serde(rename = "all")]
     All,
     #[serde(rename = "fixed")]
-    Fixed
+    Fixed,
 }
 
 /// 策略参数（手写/未来模型策略参数）
@@ -723,14 +723,14 @@ pub struct PolicyConfig {
     /// 第3年固定地区组合（`Fixed` 策略时生效；长度必须 = 1，每项为 3 个地区 id）
     ///
     /// 例如 `[[10, 12, 14]]`：第3年固定选 [10,12,14]
-    pub ramen_region_fixed: Option<Vec<[usize; 3]>>
+    pub ramen_region_fixed: Option<Vec<[usize; 3]>>,
 }
 
 /// 输出参数（日志、统计级别等）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OutputConfig {
     /// 日志级别: "debug" | "off" | "info" | "trace"
-    pub log_level: String // 步骤 3 后续：统计级别（None / Summary / Turn / Detailed）
+    pub log_level: String, // 步骤 3 后续：统计级别（None / Summary / Turn / Detailed）
 }
 
 /// 开发者参数（collector、线程数、调试开关）
@@ -739,7 +739,7 @@ pub struct DeveloperConfig {
     /// 训练数据收集（collector）配置
     pub collector: CollectorConfig,
     /// 线程数
-    pub num_threads: usize
+    pub num_threads: usize,
 }
 
 fn default_scenario() -> String {
@@ -768,7 +768,7 @@ fn default_simulation_count() -> usize {
 pub struct OverrideGameConfig {
     pub onsen_order: OnsenOrder,
     pub config_override: OverrideConfig,
-    pub mcts: MctsConfig
+    pub mcts: MctsConfig,
 }
 
 /// 简化的覆盖配置 - GameConfig部分
@@ -808,7 +808,7 @@ pub struct OverrideConfig {
     pub pt_favor_rate: Option<f32>,
     /// 比赛等级表 72 项（可选覆盖；Phase 2 步骤 1 引入）
     #[serde(default)]
-    pub race_grades: Option<Vec<i32>>
+    pub race_grades: Option<Vec<i32>>,
 }
 
 impl OverrideGameConfig {
@@ -870,7 +870,7 @@ mod tests {
             num_threads: None,
             mcts_turn_bonus: None,
             pt_favor_rate: None,
-            race_grades: None
+            race_grades: None,
         }
     }
 
@@ -878,7 +878,7 @@ mod tests {
         OverrideGameConfig {
             onsen_order: OnsenOrder::default(),
             config_override: cfg,
-            mcts: MctsConfig::default()
+            mcts: MctsConfig::default(),
         }
     }
 

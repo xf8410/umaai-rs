@@ -21,7 +21,7 @@ use crate::{
     gamedata::{GAMECONSTANTS, GAMEDATA, SupportCardData},
     global,
     trainer::LoggingTrainer,
-    utils::get_workspace_root
+    utils::get_workspace_root,
 };
 
 /// 五种普通支援卡类型英文名称（CSV 等机器可读输出用），索引与 `card_type` 一一对应。
@@ -73,12 +73,12 @@ pub struct GameOutcome {
     /// 五次友人出行是否全部完成。
     pub friend_all: bool,
     /// 整局耗时（毫秒）。
-    pub elapsed_ms: f64
+    pub elapsed_ms: f64,
 }
 
 /// 跑一局固定种子的完整拉面杯（统一 `LoggingTrainer` 包装，注入规则主种子）。
 pub fn run_seeded<T: Trainer<RamenGame>>(
-    uma: u32, deck: &[u32; 6], inherit: &InheritInfo, base_seed: u64, run_idx: u64, trainer: &LoggingTrainer<T>
+    uma: u32, deck: &[u32; 6], inherit: &InheritInfo, base_seed: u64, run_idx: u64, trainer: &LoggingTrainer<T>,
 ) -> Result<GameOutcome> {
     let (mut decision_rng, rule_master) = seeded_rngs(base_seed, run_idx);
     let mut game = RamenGame::newgame(uma, deck, inherit.clone())?;
@@ -97,7 +97,7 @@ pub fn run_seeded<T: Trainer<RamenGame>>(
         rmj_ok: game.ramen.rmj_results.iter().filter(|&&ok| ok).count(),
         eat_count: game.ramen.eat_count,
         friend_all: game.friend.out_used.iter().all(|used| *used),
-        elapsed_ms
+        elapsed_ms,
     })
 }
 
@@ -113,7 +113,7 @@ pub struct Stats {
     /// 中位数。
     pub median: f64,
     /// 标准差（总体）。
-    pub std: f64
+    pub std: f64,
 }
 
 /// 基本统计（min/max/mean/median/std），空序列返回全 0。
@@ -124,7 +124,7 @@ pub fn summarize(values: &[f64]) -> Stats {
             max: 0.0,
             mean: 0.0,
             median: 0.0,
-            std: 0.0
+            std: 0.0,
         };
     }
     let n = values.len() as f64;
@@ -181,7 +181,7 @@ pub struct CardRep {
     /// 满破 idrank（card_id * 10 + 4）。
     pub idrank: u32,
     /// 卡名。
-    pub name: String
+    pub name: String,
 }
 
 /// 代表性支援卡选择参数。
@@ -192,7 +192,7 @@ pub struct CardPickOpts {
     /// 弱卡阈值：满破面板「友情+干劲+训练」低于此值视为弱卡。
     pub min_panel: f32,
     /// 每种类型选取张数。
-    pub pick: usize
+    pub pick: usize,
 }
 
 impl Default for CardPickOpts {
@@ -201,7 +201,7 @@ impl Default for CardPickOpts {
         Self {
             pool_size: 5,
             min_panel: 70.0,
-            pick: 3
+            pick: 3,
         }
     }
 }
@@ -212,7 +212,7 @@ pub struct RepresentativeSet {
     /// 各类型选出的代表卡（按 card_id 倒序）。
     pub picked: [Vec<CardRep>; 5],
     /// 候选池中友情+干劲+训练低于阈值的弱卡。
-    pub skipped: [Vec<CardRep>; 5]
+    pub skipped: [Vec<CardRep>; 5],
 }
 
 /// 选取各类型的代表性支援卡。
@@ -243,12 +243,12 @@ pub fn select_representatives(opts: &CardPickOpts) -> Result<RepresentativeSet> 
             if panel_score(card) >= opts.min_panel && picked[card_type].len() < opts.pick {
                 picked[card_type].push(CardRep {
                     idrank: card.card_id * 10 + 4,
-                    name: card.card_name.clone()
+                    name: card.card_name.clone(),
                 });
             } else if panel_score(card) < opts.min_panel {
                 skipped[card_type].push(CardRep {
                     idrank: card.card_id * 10 + 4,
-                    name: card.card_name.clone()
+                    name: card.card_name.clone(),
                 });
             }
         }
@@ -275,7 +275,7 @@ pub struct DeckComposition {
     /// 速/耐/力/根/智各类型普通卡数量。
     pub counts: [usize; 5],
     /// 预设短名（如 "speed"）；非预设（枚举构成）为空串，展示时回退为数量描述。
-    pub name: String
+    pub name: String,
 }
 
 /// bench_config.toml 中 `[player_builds]` 段的解析容器（其余字段忽略）。
@@ -283,7 +283,7 @@ pub struct DeckComposition {
 struct BenchPlayerBuilds {
     /// 玩家 build：key 即 build 名，value 为普通卡数量分布（保声明序）。
     #[serde(default)]
-    player_builds: IndexMap<String, [usize; 5]>
+    player_builds: IndexMap<String, [usize; 5]>,
 }
 
 /// 校验玩家 build 列表：普通卡合计 5 张、单类型不超过 3 张。
@@ -454,7 +454,7 @@ mod tests {
     fn test_select_representatives_live_data() -> Result<()> {
         use crate::{
             gamedata::{GameConfig, init_global_with_config},
-            utils::get_workspace_root
+            utils::get_workspace_root,
         };
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(&workspace_root)?;
@@ -541,7 +541,7 @@ average = [1, 0, 1, 1, 2]
     fn test_player_builds_make_deck_live_data() -> Result<()> {
         use crate::{
             gamedata::{GameConfig, init_global_with_config},
-            utils::get_workspace_root
+            utils::get_workspace_root,
         };
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(&workspace_root)?;

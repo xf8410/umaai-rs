@@ -13,7 +13,7 @@ pub struct OnsenBuff {
     /// 当前的温泉Buff组合
     pub onsen: OnsenEffect,
     /// 当前的旅馆效果
-    pub hotel: HotelEffect
+    pub hotel: HotelEffect,
 }
 
 /// 温泉buff信息
@@ -26,7 +26,7 @@ pub struct BathingInfo {
     /// buff是否超回复
     pub is_super: bool,
     /// 下一个buff是否超回复
-    pub is_super_ready: bool
+    pub is_super_ready: bool,
 }
 
 impl BathingInfo {
@@ -59,7 +59,7 @@ pub enum OnsenTurnStage {
     /// 4. 选择训练或比赛
     Train,
     /// 5. 回合后事件
-    AfterTrain
+    AfterTrain,
 }
 
 /// 配置文件中的手写逻辑温泉顺序
@@ -70,7 +70,7 @@ pub struct OnsenOrder {
     /// 第2年
     pub year2: Vec<i32>,
     /// 第3年
-    pub year3: Vec<i32>
+    pub year3: Vec<i32>,
 }
 
 impl OnsenOrder {
@@ -80,7 +80,7 @@ impl OnsenOrder {
             1 => &self.year1,
             2 => &self.year2,
             3 => &self.year3,
-            _ => panic!("year must between 1..3")
+            _ => panic!("year must between 1..3"),
         }
     }
 }

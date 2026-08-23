@@ -20,13 +20,10 @@ use rand::prelude::StdRng;
 
 use crate::{
     game::{
-        ActionEnum,
-        BaseAction,
-        Game,
-        Trainer,
-        ramen::{RamenAction, RamenGame, RamenStage}
+        ActionEnum, BaseAction, Game, Trainer,
+        ramen::{RamenAction, RamenGame, RamenStage},
     },
-    gamedata::{EventChoice, EventData}
+    gamedata::{EventChoice, EventData},
 };
 
 /// 一次决策的记录（局面/候选/选择 三类的中间载体）
@@ -46,7 +43,7 @@ pub struct TurnDecision {
     /// 选中的候选索引
     pub selected: usize,
     /// 选中候选的可读文本（选项名）
-    pub selected_desc: String
+    pub selected_desc: String,
 }
 
 /// 记录型包装训练员
@@ -64,7 +61,7 @@ pub struct RecordingTrainer<T> {
     /// 全部决策记录（按发生顺序）
     pub log: RefCell<Vec<TurnDecision>>,
     /// 是否实时打印候选列表与选择（默认 false：仅记录）
-    pub verbose: bool
+    pub verbose: bool,
 }
 
 impl<T> RecordingTrainer<T> {
@@ -73,19 +70,14 @@ impl<T> RecordingTrainer<T> {
         Self {
             inner,
             log: RefCell::new(Vec::new()),
-            verbose: false
+            verbose: false,
         }
     }
 
     /// 追加一条决策记录
     fn record(
-        &self,
-        game: &RamenGame,
-        stage: &str,
-        candidates: Vec<String>,
-        candidate_details: Vec<String>,
-        candidate_recipes: Vec<String>,
-        selected: usize
+        &self, game: &RamenGame, stage: &str, candidates: Vec<String>, candidate_details: Vec<String>,
+        candidate_recipes: Vec<String>, selected: usize,
     ) {
         let selected_desc = candidates.get(selected).cloned().unwrap_or_default();
         self.log.borrow_mut().push(TurnDecision {
@@ -95,7 +87,7 @@ impl<T> RecordingTrainer<T> {
             candidate_details,
             candidate_recipes,
             selected,
-            selected_desc
+            selected_desc,
         });
     }
 
@@ -157,7 +149,7 @@ impl<T> RecordingTrainer<T> {
     fn split_preview(text: &str) -> (String, String) {
         match text.split_once(' ') {
             Some((name, detail)) => (name.to_string(), detail.to_string()),
-            None => (text.to_string(), String::new())
+            None => (text.to_string(), String::new()),
         }
     }
 
@@ -174,7 +166,7 @@ impl<T> RecordingTrainer<T> {
 
 impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
     fn select_action(
-        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut StdRng
+        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut StdRng,
     ) -> Result<usize> {
         // 实时模式：先展示候选（含内联预览），再交 inner 决策
         if self.verbose {
@@ -200,11 +192,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
 
     fn select_choice(&self, game: &RamenGame, choices: &[Vec<EventChoice>], rng: &mut StdRng) -> Result<usize> {
         if self.verbose {
-            println!(
-                "== 候选 [回合 {} · 事件] {} 个 ==",
-                game.turn() + 1,
-                choices.len()
-            );
+            println!("== 候选 [回合 {} · 事件] {} 个 ==", game.turn() + 1, choices.len());
             for (i, x) in choices.iter().enumerate() {
                 let text = x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
                 println!("  {}. {}", i + 1, text.bright_yellow());
@@ -212,11 +200,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
         }
         let idx = self.inner.select_choice(game, choices, rng)?;
         if self.verbose {
-            let text = choices[idx]
-                .iter()
-                .map(|y| y.explain())
-                .collect::<Vec<_>>()
-                .join(" | ");
+            let text = choices[idx].iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
             println!("→ 选择: {}\n", text.bright_yellow());
         }
         let candidates: Vec<String> = choices
@@ -230,7 +214,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
     }
 
     fn select_event_choice(
-        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         if self.verbose {
             println!(
@@ -246,11 +230,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
         }
         let idx = self.inner.select_event_choice(game, event, choices, rng)?;
         if self.verbose {
-            let text = choices[idx]
-                .iter()
-                .map(|y| y.explain())
-                .collect::<Vec<_>>()
-                .join(" | ");
+            let text = choices[idx].iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
             println!("→ 选择: {}\n", text.bright_yellow());
         }
         let candidates: Vec<String> = choices
@@ -287,10 +267,7 @@ pub fn render_turn_situation(game: &RamenGame) -> Result<String> {
 pub fn render_decision(d: &TurnDecision) -> String {
     // SpecialSelect 阶段仅 1 个候选且无隐藏风味替换（0 替换）时，玩家没有真实
     // 选择空间，用提示代替"1 个候选"列表
-    if d.stage.starts_with("SpecialSelect")
-        && d.candidates.len() == 1
-        && !d.candidates[0].contains("(替换")
-    {
+    if d.stage.starts_with("SpecialSelect") && d.candidates.len() == 1 && !d.candidates[0].contains("(替换") {
         return format!(
             "== 决策 [回合 {} · SpecialSelect] 无隐藏风味可选，自动 0 替换 ==",
             d.turn + 1
@@ -317,7 +294,11 @@ pub fn render_decision(d: &TurnDecision) -> String {
             parts.push(detail);
         }
         let line = parts.join(" ");
-        lines.push(if mark.is_empty() { line } else { format!("{line} {mark}") });
+        lines.push(if mark.is_empty() {
+            line
+        } else {
+            format!("{line} {mark}")
+        });
     }
     lines.join("\n")
 }
@@ -330,13 +311,13 @@ mod tests {
         game::{InheritInfo, ramen::RamenStage, traits::Person},
         gamedata::init_global,
         trainer::RamenHandwrittenTrainer,
-        utils::{get_workspace_root, init_test_logger}
+        utils::{get_workspace_root, init_test_logger},
     };
 
     const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
     const TEST_INHERIT: InheritInfo = InheritInfo {
         blue_count: [15, 3, 0, 0, 0],
-        extra_count: [0, 30, 0, 0, 30, 30]
+        extra_count: [0, 30, 0, 0, 30, 30],
     };
     const TEST_UMA_ID: u32 = 102601;
 
@@ -428,15 +409,17 @@ mod tests {
 
         // 切回 info：第 31 回合的规则层 diag（效果）可见
         if let Some(logger) = crate::gamedata::LOGGER.get() {
-            let handle = logger
-                .lock()
-                .map_err(|_| anyhow::anyhow!("LOGGER 锁中毒"))?;
+            let handle = logger.lock().map_err(|_| anyhow::anyhow!("LOGGER 锁中毒"))?;
             let spec = flexi_logger::LogSpecification::try_from("info")?;
             handle.set_new_spec(spec);
         }
 
         println!("╔════════════════════════════════════════════╗");
-        println!("║  完整回合信息基线（第 {} 回合 · turn={}）   ║", game.turn() + 1, game.turn());
+        println!(
+            "║  完整回合信息基线（第 {} 回合 · turn={}）   ║",
+            game.turn() + 1,
+            game.turn()
+        );
         println!("╚════════════════════════════════════════════╝");
         println!();
         println!("【局面 · 回合开始】");

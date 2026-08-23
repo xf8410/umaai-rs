@@ -9,7 +9,7 @@ use crate::{
     diag,
     game::{base::*, onsen::game::OnsenGame, *},
     gamedata::{EventData, GAMECONSTANTS, onsen::ONSENDATA},
-    utils::system_event
+    utils::system_event,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ pub enum OnsenAction {
     /// 升级工具
     Upgrade(i32),
     /// 选择事件选项
-    Choice((Box<EventData>, usize))
+    Choice((Box<EventData>, usize)),
 }
 
 impl Display for OnsenAction {
@@ -63,7 +63,7 @@ impl Display for OnsenAction {
                 let name = &global!(ONSENDATA).dig_tool_name[*x as usize];
                 write!(f, "升级 {}", name.bright_yellow())
             }
-            OnsenAction::Choice((_event, choice)) => write!(f, "选项{}", *choice + 1)
+            OnsenAction::Choice((_event, choice)) => write!(f, "选项{}", *choice + 1),
         }
     }
 }
@@ -108,9 +108,13 @@ impl ActionEnum for OnsenAction {
                         scenario_bonus *= 2.7;
                         pt_rate = 0.45;
                     }
-                    diag!("{}", format!(
-                        ">> 生涯比赛 - 比赛加成: {}, 剧本加成: {scenario_bonus}x",
-                        game.uma.race_bonus).bright_magenta()
+                    diag!(
+                        "{}",
+                        format!(
+                            ">> 生涯比赛 - 比赛加成: {}, 剧本加成: {scenario_bonus}x",
+                            game.uma.race_bonus
+                        )
+                        .bright_magenta()
                     );
                     let mut event = system_event("race_career")?.clone();
                     // 事件面板乘算比赛加成
@@ -120,9 +124,9 @@ impl ActionEnum for OnsenAction {
                     game.unresolved_events.push(event);
                 } else {
                     let grade = global!(GAMECONSTANTS).race_grades[game.turn as usize];
-                    diag!("{}", format!(
-                            ">> 自选比赛 G{grade} - 比赛加成: {}", game.uma.race_bonus
-                        ).bright_magenta()
+                    diag!(
+                        "{}",
+                        format!(">> 自选比赛 G{grade} - 比赛加成: {}", game.uma.race_bonus).bright_magenta()
                     );
                     let event_name = format!("race_g{grade}");
                     let mut event = system_event(&event_name)?.clone();
@@ -184,7 +188,7 @@ impl ActionEnum for OnsenAction {
             // ========== 升级工具动作 ==========
             OnsenAction::Upgrade(tool) => game.do_upgrade_equipment(*tool as usize),
             // ========== 选择事件选项(test) ==========
-            OnsenAction::Choice((event, choice)) => game.apply_event(event, *choice, rng)
+            OnsenAction::Choice((event, choice)) => game.apply_event(event, *choice, rng),
         }
     }
 
@@ -196,7 +200,7 @@ impl ActionEnum for OnsenAction {
             OnsenAction::FriendOuting => Some(BaseAction::FriendOuting),
             OnsenAction::NormalOuting => Some(BaseAction::NormalOuting),
             OnsenAction::Clinic => Some(BaseAction::Clinic),
-            _ => None
+            _ => None,
         }
     }
 }

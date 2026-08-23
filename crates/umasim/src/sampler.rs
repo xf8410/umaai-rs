@@ -49,12 +49,12 @@ use crate::{
     bench::seeded_rngs,
     game::{
         Game, InheritInfo, Trainer,
-        ramen::{RamenAction, RamenGame, RamenStage}
+        ramen::{RamenAction, RamenGame, RamenStage},
     },
     gamedata::{EventChoice, GAMEDATA},
     global,
     rng::splitmix64,
-    trainer::RamenHandwrittenTrainer
+    trainer::RamenHandwrittenTrainer,
 };
 
 // ============================================================================
@@ -90,7 +90,7 @@ pub struct UmaEntry {
     /// 马娘 gameId
     pub game_id: u32,
     /// 通称（日志与测试可读性用，不参与任何计算）
-    pub alias: &'static str
+    pub alias: &'static str,
 }
 
 impl UmaEntry {
@@ -110,13 +110,34 @@ impl UmaEntry {
 /// 均衡（杏目 10-10-10）。自选比赛要求 4 无 3 有，其中小栗帽两段区间、
 /// 第二段限 G1，是守门逻辑最硬的测试用例。
 pub const GEN1_UMAS: [UmaEntry; 7] = [
-    UmaEntry { game_id: 100603, alias: "小栗帽[芦毛灰姑娘]" },
-    UmaEntry { game_id: 102403, alias: "摩耶重炮[Rock in MewMeow]" },
-    UmaEntry { game_id: 112901, alias: "杏目[The Changer]" },
-    UmaEntry { game_id: 110602, alias: "菱钻奇宝[快乐小音符]" },
-    UmaEntry { game_id: 113101, alias: "放声欢呼" },
-    UmaEntry { game_id: 108702, alias: "真弓快车[不融化的糖果]" },
-    UmaEntry { game_id: 100301, alias: "东海帝王[无上喜悦]" }
+    UmaEntry {
+        game_id: 100603,
+        alias: "小栗帽[芦毛灰姑娘]",
+    },
+    UmaEntry {
+        game_id: 102403,
+        alias: "摩耶重炮[Rock in MewMeow]",
+    },
+    UmaEntry {
+        game_id: 112901,
+        alias: "杏目[The Changer]",
+    },
+    UmaEntry {
+        game_id: 110602,
+        alias: "菱钻奇宝[快乐小音符]",
+    },
+    UmaEntry {
+        game_id: 113101,
+        alias: "放声欢呼",
+    },
+    UmaEntry {
+        game_id: 108702,
+        alias: "真弓快车[不融化的糖果]",
+    },
+    UmaEntry {
+        game_id: 100301,
+        alias: "东海帝王[无上喜悦]",
+    },
 ];
 
 /// 采样空间中的一张支援卡（满破）
@@ -125,7 +146,7 @@ pub struct CardEntry {
     /// 6 位 idrank = 5 位卡 ID + 1 位突破等级（第一代锁定满破 ◆4）
     pub idrank: u32,
     /// 卡名（日志可读性用）
-    pub alias: &'static str
+    pub alias: &'static str,
 }
 
 impl CardEntry {
@@ -140,17 +161,50 @@ impl CardEntry {
 /// 类型分布 6 速 / 2 耐 / 1 力 / 1 智 / 1 友——**类型不在此硬编码**，
 /// 一律由 `cardDB.json` 读出，见 [`SamplingSpace::gen1`]。
 pub const GEN1_CARD_POOL: [CardEntry; 11] = [
-    CardEntry { idrank: 302754, alias: "[天才的乌托邦]东海帝王" },
-    CardEntry { idrank: 302984, alias: "[刀光迸发Clash！]跳舞城" },
-    CardEntry { idrank: 302424, alias: "[改变世界的目光]杏目" },
-    CardEntry { idrank: 302824, alias: "[铭记于心，京之华]气槽" },
-    CardEntry { idrank: 303024, alias: "[永恒的誓言，永恒的光辉]里见光钻" },
-    CardEntry { idrank: 302924, alias: "[响彻吧，两人的凯歌]洛林军歌" },
-    CardEntry { idrank: 303044, alias: "[其执念如怒涛般汹涌]名将怒涛" },
-    CardEntry { idrank: 303004, alias: "[载着热闹的未来奔驰吧！]樱花千代王" },
-    CardEntry { idrank: 302834, alias: "[优雅，闪耀的旅途]美妙姿势" },
-    CardEntry { idrank: 302894, alias: "[Innovator]青春永驻" },
-    CardEntry { idrank: 303054, alias: "[一杯怀旧之味]骏川手纲" }
+    CardEntry {
+        idrank: 302754,
+        alias: "[天才的乌托邦]东海帝王",
+    },
+    CardEntry {
+        idrank: 302984,
+        alias: "[刀光迸发Clash！]跳舞城",
+    },
+    CardEntry {
+        idrank: 302424,
+        alias: "[改变世界的目光]杏目",
+    },
+    CardEntry {
+        idrank: 302824,
+        alias: "[铭记于心，京之华]气槽",
+    },
+    CardEntry {
+        idrank: 303024,
+        alias: "[永恒的誓言，永恒的光辉]里见光钻",
+    },
+    CardEntry {
+        idrank: 302924,
+        alias: "[响彻吧，两人的凯歌]洛林军歌",
+    },
+    CardEntry {
+        idrank: 303044,
+        alias: "[其执念如怒涛般汹涌]名将怒涛",
+    },
+    CardEntry {
+        idrank: 303004,
+        alias: "[载着热闹的未来奔驰吧！]樱花千代王",
+    },
+    CardEntry {
+        idrank: 302834,
+        alias: "[优雅，闪耀的旅途]美妙姿势",
+    },
+    CardEntry {
+        idrank: 302894,
+        alias: "[Innovator]青春永驻",
+    },
+    CardEntry {
+        idrank: 303054,
+        alias: "[一杯怀旧之味]骏川手纲",
+    },
 ];
 
 /// 卡组构成：5 张普通卡的类型分布，友人卡固定 1 张
@@ -159,14 +213,23 @@ pub struct DeckShape {
     /// 各类型张数 `[速, 耐, 力, 根, 智]`，合计恒为 5
     pub counts: [usize; 5],
     /// 构成名（进 manifest 与日志）
-    pub name: &'static str
+    pub name: &'static str,
 }
 
 /// 第一代的 3 种卡组构成
 pub const GEN1_SHAPES: [DeckShape; 3] = [
-    DeckShape { counts: [3, 1, 0, 0, 1], name: "3速1耐1智1友" },
-    DeckShape { counts: [2, 2, 0, 0, 1], name: "2速2耐1智1友" },
-    DeckShape { counts: [2, 1, 1, 0, 1], name: "2速1耐1力1智1友" }
+    DeckShape {
+        counts: [3, 1, 0, 0, 1],
+        name: "3速1耐1智1友",
+    },
+    DeckShape {
+        counts: [2, 2, 0, 0, 1],
+        name: "2速2耐1智1友",
+    },
+    DeckShape {
+        counts: [2, 1, 1, 0, 1],
+        name: "2速1耐1力1智1友",
+    },
 ];
 
 /// 该阶段的决策点能否作为搜索根局面
@@ -206,19 +269,22 @@ pub struct DeckPlan {
     /// 卡组（6 位 idrank，前 5 张普通卡按类型序、末位友人卡）
     pub deck: [u32; 6],
     /// 所属构成名
-    pub shape: &'static str
+    pub shape: &'static str,
 }
 
 /// 第一代继承因子（沿用 `bench_config.toml` 现值，第一代固定不随机）
 pub fn gen1_inherit() -> InheritInfo {
-    InheritInfo { blue_count: [15, 0, 0, 0, 3], extra_count: [10, 10, 20, 20, 20, 40] }
+    InheritInfo {
+        blue_count: [15, 0, 0, 0, 3],
+        extra_count: [10, 10, 20, 20, 20, 40],
+    }
 }
 
 /// 枚举好的采样空间
 #[derive(Debug, Clone)]
 pub struct SamplingSpace {
     /// 全部合法 `(马娘, 卡组)` 组合
-    plans: Vec<DeckPlan>
+    plans: Vec<DeckPlan>,
 }
 
 impl SamplingSpace {
@@ -242,7 +308,10 @@ impl SamplingSpace {
                     }
                 }
                 t if (0..5).contains(&t) => by_type[t as usize].push(entry.idrank),
-                other => bail!("卡池中 {} 的类型 {other} 不受支持（第一代只接受普通卡与友人卡）", entry.alias)
+                other => bail!(
+                    "卡池中 {} 的类型 {other} 不受支持（第一代只接受普通卡与友人卡）",
+                    entry.alias
+                ),
             }
         }
         let Some(friend) = friend else {
@@ -265,7 +334,11 @@ impl SamplingSpace {
                     let mut deck = [0u32; 6];
                     deck[..5].copy_from_slice(&normals);
                     deck[5] = friend;
-                    plans.push(DeckPlan { uma: uma.game_id, deck, shape: shape.name });
+                    plans.push(DeckPlan {
+                        uma: uma.game_id,
+                        deck,
+                        shape: shape.name,
+                    });
                 }
             }
         }
@@ -311,7 +384,7 @@ impl SamplingSpace {
             truncate_turn,
             seed: derive_seed(config.seed_base, index, SAMPLER_STREAM_TAG),
             epsilon: config.epsilon,
-            min_actions: config.min_actions
+            min_actions: config.min_actions,
         }
     }
 }
@@ -385,7 +458,7 @@ pub struct SamplerConfig {
     /// 截断回合的上界（含）
     pub max_turn: i32,
     /// 种子基底：换基底即得到一批全新但同样可复现的数据
-    pub seed_base: u64
+    pub seed_base: u64,
 }
 
 impl Default for SamplerConfig {
@@ -395,7 +468,7 @@ impl Default for SamplerConfig {
             min_actions: 2,
             inherit: gen1_inherit(),
             max_turn: 77,
-            seed_base: 0x5041_5254_5F31
+            seed_base: 0x5041_5254_5F31,
         }
     }
 }
@@ -426,7 +499,7 @@ pub struct SampleSpec {
     /// 轨迹扰动概率（随任务固化，不在执行时从配置读）
     pub epsilon: f64,
     /// 合格决策点的最小候选数（同上）
-    pub min_actions: usize
+    pub min_actions: usize,
 }
 
 /// 采样产出的根局面
@@ -448,7 +521,7 @@ pub struct SampledPosition {
     /// 实际停下的阶段
     pub stage: RamenStage,
     /// 实际停下的回合（可能大于 `truncate_turn`：该回合起首个合格决策点才停）
-    pub turn: i32
+    pub turn: i32,
 }
 
 /// 一次采样的结果
@@ -470,8 +543,8 @@ pub enum SampleOutcome {
         /// 当时要求的截断回合
         truncate_turn: i32,
         /// 育成实际停在的回合
-        final_turn: i32
-    }
+        final_turn: i32,
+    },
 }
 
 impl SampleOutcome {
@@ -484,7 +557,7 @@ impl SampleOutcome {
     pub fn captured(&self) -> Option<&SampledPosition> {
         match self {
             Self::Captured(pos) => Some(pos),
-            Self::Exhausted { .. } => None
+            Self::Exhausted { .. } => None,
         }
     }
 
@@ -492,7 +565,7 @@ impl SampleOutcome {
     pub fn into_captured(self) -> Option<SampledPosition> {
         match self {
             Self::Captured(pos) => Some(*pos),
-            Self::Exhausted { .. } => None
+            Self::Exhausted { .. } => None,
         }
     }
 }
@@ -512,7 +585,7 @@ struct CapturedRoot {
     /// 阶段
     stage: RamenStage,
     /// 回合
-    turn: i32
+    turn: i32,
 }
 
 /// 采样用训练员：截断前做 ε 扰动，到达截断回合后捕获首个合格决策点
@@ -529,7 +602,7 @@ struct SamplingTrainer {
     /// 截断回合
     truncate_turn: i32,
     /// 捕获结果
-    captured: RefCell<Option<CapturedRoot>>
+    captured: RefCell<Option<CapturedRoot>>,
 }
 
 impl SamplingTrainer {
@@ -551,7 +624,7 @@ impl Trainer<RamenGame> for SamplingTrainer {
                 actions: actions.to_vec(),
                 rng: rng.clone(),
                 stage: game.stage.clone(),
-                turn: game.turn()
+                turn: game.turn(),
             });
             // 返回值不影响结果：外层在本 stage 结束后立即停止推进
             return Ok(0);
@@ -599,7 +672,7 @@ pub fn sample_from_spec(spec: SampleSpec) -> Result<SampleOutcome> {
         epsilon: spec.epsilon,
         min_actions: spec.min_actions,
         truncate_turn: spec.truncate_turn,
-        captured: RefCell::new(None)
+        captured: RefCell::new(None),
     };
 
     game.run_stage(&trainer, &mut decision_rng)?;
@@ -610,7 +683,7 @@ pub fn sample_from_spec(spec: SampleSpec) -> Result<SampleOutcome> {
     let Some(root) = trainer.captured.into_inner() else {
         return Ok(SampleOutcome::Exhausted {
             truncate_turn: spec.truncate_turn,
-            final_turn: game.turn()
+            final_turn: game.turn(),
         });
     };
     Ok(SampleOutcome::Captured(Box::new(SampledPosition {
@@ -619,7 +692,7 @@ pub fn sample_from_spec(spec: SampleSpec) -> Result<SampleOutcome> {
         actions: root.actions,
         decision_rng: root.rng,
         stage: root.stage,
-        turn: root.turn
+        turn: root.turn,
     })))
 }
 
@@ -633,7 +706,7 @@ mod tests {
     use crate::{
         gamedata::init_global,
         search::{FlatSearch, SearchConfig},
-        utils::{get_workspace_root, init_test_logger}
+        utils::{get_workspace_root, init_test_logger},
     };
 
     /// 测试统一前置：切到 workspace 根并加载 gamedata
@@ -906,16 +979,23 @@ mod tests {
     fn test_epsilon_perturbs_trajectory() -> Result<()> {
         setup()?;
         let space = SamplingSpace::gen1()?;
-        let plain = SamplerConfig { epsilon: 0.0, ..SamplerConfig::default() };
-        let noisy = SamplerConfig { epsilon: 0.15, ..SamplerConfig::default() };
+        let plain = SamplerConfig {
+            epsilon: 0.0,
+            ..SamplerConfig::default()
+        };
+        let noisy = SamplerConfig {
+            epsilon: 0.15,
+            ..SamplerConfig::default()
+        };
 
         let mut differ = 0;
         let mut compared = 0;
         for index in 0..40u64 {
             // 任一侧育成提前失败就跳过：那种情况下两侧不可比
-            let (SampleOutcome::Captured(a), SampleOutcome::Captured(b)) =
-                (sample_position(&space, &plain, index)?, sample_position(&space, &noisy, index)?)
-            else {
+            let (SampleOutcome::Captured(a), SampleOutcome::Captured(b)) = (
+                sample_position(&space, &plain, index)?,
+                sample_position(&space, &noisy, index)?,
+            ) else {
                 continue;
             };
             compared += 1;
@@ -937,7 +1017,10 @@ mod tests {
         setup()?;
         let space = SamplingSpace::gen1()?;
         for bad in [-0.1, 1.5] {
-            let config = SamplerConfig { epsilon: bad, ..SamplerConfig::default() };
+            let config = SamplerConfig {
+                epsilon: bad,
+                ..SamplerConfig::default()
+            };
             let err = sample_position(&space, &config, 0).expect_err("越界 epsilon 应当报错");
             println!("epsilon={bad} -> {err}");
         }
@@ -985,7 +1068,10 @@ mod tests {
         // 那种根局面不在阶段入口，会破坏搜索的 `apply_action -> next()` 契约。
         for (stage, count) in stages.iter() {
             assert!(
-                matches!(stage.as_str(), "RamenSelect" | "SpecialSelect" | "Train" | "RegionSelect"),
+                matches!(
+                    stage.as_str(),
+                    "RamenSelect" | "SpecialSelect" | "Train" | "RegionSelect"
+                ),
                 "捕获到非阶段入口的根局面: {stage} x{count}"
             );
         }
@@ -1042,12 +1128,25 @@ mod tests {
             let pos = must_capture(&space, &config, index)?;
             let mut rng = pos.decision_rng.clone();
             let out = search.search(&pos.game, &pos.actions, &mut rng)?;
-            println!("index={index} 回合 {} 阶段 {:?} 候选 {}", pos.turn, pos.stage, pos.actions.len());
+            println!(
+                "index={index} 回合 {} 阶段 {:?} 候选 {}",
+                pos.turn,
+                pos.stage,
+                pos.actions.len()
+            );
             for (i, result) in out.action_results.iter().enumerate() {
-                println!("  #{i} {} n={} mean={:.1}", pos.actions[i], result.0.count(), result.0.mean());
+                println!(
+                    "  #{i} {} n={} mean={:.1}",
+                    pos.actions[i],
+                    result.0.count(),
+                    result.0.mean()
+                );
             }
             assert_eq!(out.action_results.len(), pos.actions.len(), "搜索输出应与候选表等长");
-            assert!(out.action_results.iter().any(|r| r.0.count() > 0), "搜索没有产出任何有效样本");
+            assert!(
+                out.action_results.iter().any(|r| r.0.count() > 0),
+                "搜索没有产出任何有效样本"
+            );
         }
         Ok(())
     }

@@ -14,10 +14,10 @@ use rand::prelude::StdRng;
 use crate::{
     game::{
         ramen::{Operation, RamenGame, RamenStage},
-        traits::{Game, Trainer}
+        traits::{Game, Trainer},
     },
     gamedata::{EventChoice, EventData},
-    output::decision_log::{DecisionLog, DecisionLogRow}
+    output::decision_log::{DecisionLog, DecisionLogRow},
 };
 
 /// 决策日志包装训练员
@@ -29,7 +29,7 @@ pub struct LoggingTrainer<T> {
     /// 本局种子（写入每条记录）
     seed: u64,
     /// 是否记录（默认开；bench 之外可按需关闭）
-    logging: bool
+    logging: bool,
 }
 
 impl<T> LoggingTrainer<T> {
@@ -39,7 +39,7 @@ impl<T> LoggingTrainer<T> {
             inner,
             log: RefCell::new(DecisionLog::new()),
             seed,
-            logging: true
+            logging: true,
         }
     }
 
@@ -56,7 +56,7 @@ impl<T> LoggingTrainer<T> {
 
 impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
     fn select_action(
-        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut StdRng
+        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut StdRng,
     ) -> Result<usize> {
         let start = Instant::now();
         let idx = self.inner.select_action(game, actions, rng)?;
@@ -75,14 +75,14 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 } else {
                     match &game.stage {
                         RamenStage::RegionSelect => "RegionSelect".to_string(),
-                        other => format!("{other:?}")
+                        other => format!("{other:?}"),
                     }
                 },
                 candidates: actions.len(),
                 action_index: idx,
                 action_desc: actions.get(idx).map(|a| a.to_string()).unwrap_or_default(),
                 elapsed_us,
-                score_breakdown: self.inner.last_breakdown()
+                score_breakdown: self.inner.last_breakdown(),
             };
             self.log.borrow_mut().record(row);
         }
@@ -112,7 +112,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 action_index: idx,
                 action_desc: explain,
                 elapsed_us,
-                score_breakdown: None
+                score_breakdown: None,
             };
             self.log.borrow_mut().record(row);
         }
@@ -120,7 +120,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
     }
 
     fn select_event_choice(
-        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         let start = Instant::now();
         let idx = self.inner.select_event_choice(game, event, choices, rng)?;
@@ -144,7 +144,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 action_index: idx,
                 action_desc: format!("事件#{} {}: {}", event.id, event.name, explain),
                 elapsed_us,
-                score_breakdown: None
+                score_breakdown: None,
             };
             self.log.borrow_mut().record(row);
         }
@@ -159,7 +159,7 @@ mod tests {
     use crate::{
         gamedata::init_global,
         trainer::RandomTrainer,
-        utils::{get_workspace_root, init_test_logger}
+        utils::{get_workspace_root, init_test_logger},
     };
 
     // 与 game.rs 测试公共参数一致（避免跨文件依赖私有常量）
@@ -167,7 +167,7 @@ mod tests {
     const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
     const TEST_INHERIT: crate::game::InheritInfo = crate::game::InheritInfo {
         blue_count: [15, 3, 0, 0, 0],
-        extra_count: [0, 30, 0, 0, 30, 30]
+        extra_count: [0, 30, 0, 0, 30, 30],
     };
 
     /// 完整 77 回合跑一局（固定 seed），返回决策序列

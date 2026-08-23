@@ -5,12 +5,11 @@ use log::{info, warn};
 use serde::{Deserialize, Serialize};
 use umasim::{
     game::{
-        BasePerson,
-        PersonType,
-        onsen::{BathingInfo, OnsenBuff, OnsenTurnStage, game::OnsenGame}
+        BasePerson, PersonType,
+        onsen::{BathingInfo, OnsenBuff, OnsenTurnStage, game::OnsenGame},
     },
     gamedata::onsen::ONSENDATA,
-    global
+    global,
 };
 
 use crate::protocol::{BasePersonStatus, GameStatus, GameStatusBase};
@@ -20,7 +19,7 @@ use crate::protocol::{BasePersonStatus, GameStatus, GameStatusBase};
 pub struct BathingStatus {
     pub ticket_num: i32,
     pub buff_remain_turn: i32,
-    pub is_super_ready: bool
+    pub is_super_ready: bool,
 }
 
 impl From<&BathingStatus> for BathingInfo {
@@ -29,7 +28,7 @@ impl From<&BathingStatus> for BathingInfo {
             ticket_num: status.ticket_num,
             buff_remain_turn: status.buff_remain_turn,
             is_super: false,
-            is_super_ready: status.is_super_ready
+            is_super_ready: status.is_super_ready,
         }
     }
 }
@@ -39,7 +38,7 @@ impl From<&BathingInfo> for BathingStatus {
         BathingStatus {
             ticket_num: info.ticket_num,
             buff_remain_turn: info.buff_remain_turn,
-            is_super_ready: info.is_super_ready
+            is_super_ready: info.is_super_ready,
         }
     }
 }
@@ -64,7 +63,7 @@ pub struct OnsenStatus {
     /// 挖掘花费的体力
     pub dig_vital_cost: i32,
     /// 是否需要选择温泉
-    pub pending_selection: bool
+    pub pending_selection: bool,
 }
 
 /// 从小黑板接收的数据
@@ -72,7 +71,7 @@ pub struct OnsenStatus {
 #[serde(rename_all = "camelCase")]
 pub struct GameStatusOnsen {
     pub base_game: GameStatusBase,
-    pub onsen: OnsenStatus
+    pub onsen: OnsenStatus,
 }
 
 impl Deref for GameStatusOnsen {
@@ -172,7 +171,7 @@ impl GameStatus for GameStatusOnsen {
             dig_progress,
             scenario_buff: OnsenBuff::default(),
             pending_selection: pending,
-            deck_can_split
+            deck_can_split,
         };
         // 刷新温泉Buff
         ret.update_scenario_buff(true);
@@ -198,7 +197,7 @@ impl From<&OnsenGame> for GameStatusOnsen {
             dig_power: game.dig_power.clone(),
             dig_level: game.dig_level.clone(),
             dig_vital_cost: game.dig_vital_cost,
-            pending_selection: game.pending_selection
+            pending_selection: game.pending_selection,
         };
         GameStatusOnsen { base_game: base, onsen }
     }

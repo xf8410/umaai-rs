@@ -8,9 +8,8 @@
 //! - 自对弈训练
 
 use std::sync::{
-    Arc,
-    Mutex,
-    atomic::{AtomicU64, Ordering}
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::{Result, anyhow};
@@ -20,15 +19,14 @@ use rand::prelude::StdRng;
 
 use crate::{
     game::{
-        InheritInfo,
-        Trainer,
-        onsen::{action::OnsenAction, game::OnsenGame}
+        InheritInfo, Trainer,
+        onsen::{action::OnsenAction, game::OnsenGame},
     },
     gamedata::{EventChoice, EventData, GAMECONSTANTS},
     global,
     neural::{Evaluator, HandwrittenEvaluator},
     search::{FlatSearch, SearchConfig, SearchOutput},
-    utils::format_luck
+    utils::format_luck,
 };
 
 /// MCTS 训练员
@@ -54,7 +52,7 @@ pub struct MctsTrainer {
     /// 第一回合分数
     pub initial_score: (AtomicU64, AtomicU64),
     /// 保存当前的搜索结果用于输出
-    pub search_output: Arc<Mutex<SearchOutput>>
+    pub search_output: Arc<Mutex<SearchOutput>>,
 }
 
 impl MctsTrainer {
@@ -69,7 +67,7 @@ impl MctsTrainer {
             last_game: None,
             last_score: (AtomicU64::new(0), AtomicU64::new(0)),
             initial_score: (AtomicU64::new(0), AtomicU64::new(0)),
-            search_output: Arc::new(Mutex::new(SearchOutput::default()))
+            search_output: Arc::new(Mutex::new(SearchOutput::default())),
         }
     }
 
@@ -107,7 +105,7 @@ impl MctsTrainer {
             .collect::<Vec<_>>();
         let inherit = InheritInfo {
             blue_count: game.inherit.blue_count.clone(),
-            extra_count: game.inherit.extra_count.clone()
+            extra_count: game.inherit.extra_count.clone(),
         };
         let msg = format!(
             r#"-------- 开始新游戏 --------
@@ -193,7 +191,7 @@ blue_count = {inherit:?}
                 line.push(self.format_action_result(
                     action,
                     weighted + mcts_bonus as f64 - mean_weighted,
-                    best_score - mean_weighted
+                    best_score - mean_weighted,
                 ));
             }
             info!("[回合 {}] {}", game.turn + 1, line.join(" "));
@@ -263,7 +261,7 @@ impl Default for MctsTrainer {
 
 impl Trainer<OnsenGame> for MctsTrainer {
     fn select_action(
-        &self, game: &OnsenGame, actions: &[<OnsenGame as crate::game::Game>::Action], rng: &mut StdRng
+        &self, game: &OnsenGame, actions: &[<OnsenGame as crate::game::Game>::Action], rng: &mut StdRng,
     ) -> Result<usize> {
         use crate::game::onsen::action::OnsenAction;
 
@@ -299,7 +297,7 @@ impl Trainer<OnsenGame> for MctsTrainer {
         let best_action_2 = search_output.best_action_pt();
         let selection = match self.mcts_selection.as_str() {
             "pt" => best_action_2,
-            _ => best_action
+            _ => best_action,
         };
 
         // 找到最优动作在原列表中的索引
@@ -351,7 +349,7 @@ impl Trainer<OnsenGame> for MctsTrainer {
 
     /// 重构的选择事件逻辑
     fn select_event_choice(
-        &self, game: &OnsenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
+        &self, game: &OnsenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
     ) -> Result<usize> {
         let choice_actions: Vec<_> = choices
             .iter()

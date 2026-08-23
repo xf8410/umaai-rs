@@ -4,30 +4,24 @@ use anyhow::{Result, anyhow};
 use colored::Colorize;
 #[cfg(feature = "cli")]
 use comfy_table::{ColumnConstraint, Table, Width};
-use rand::{Rng, rngs::StdRng, seq::{IndexedRandom, IteratorRandom}};
+use rand::{
+    Rng,
+    rngs::StdRng,
+    seq::{IndexedRandom, IteratorRandom},
+};
 use rand_distr::{Distribution, weighted::WeightedIndex};
 
 use crate::{
     diag,
     explain::Explain,
     game::{
-        BaseGame,
-        BasePerson,
-        CardTrainingEffect,
-        FriendCardState,
-        FriendOutState,
-        Game,
-        InheritInfo,
-        Person,
-        PersonType,
-        SupportCard,
-        Trainer,
-        Uma,
-        onsen::{action::OnsenAction, *}
+        BaseGame, BasePerson, CardTrainingEffect, FriendCardState, FriendOutState, Game, InheritInfo, Person,
+        PersonType, SupportCard, Trainer, Uma,
+        onsen::{action::OnsenAction, *},
     },
     gamedata::{ActionValue, EventData, GAMECONSTANTS, TrainingBasicTable, onsen::ONSENDATA},
     global,
-    utils::{Array5, Array6, AttributeArray, global_events, system_event, system_event_prob}
+    utils::{Array5, Array6, AttributeArray, global_events, system_event, system_event_prob},
 };
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -61,7 +55,7 @@ pub struct OnsenGame {
     /// 挖掘完成后待处理选择（装备升级+源泉选择）
     pub pending_selection: bool,
     /// 是否能触发分身
-    pub deck_can_split: bool
+    pub deck_can_split: bool,
 }
 
 impl Deref for OnsenGame {
@@ -356,7 +350,7 @@ impl OnsenGame {
             OnsenAction::Sleep | OnsenAction::NormalOuting => Some(15),
             OnsenAction::FriendOuting => Some(25),
             OnsenAction::Clinic => Some(0),
-            _ => None
+            _ => None,
         };
         if let (Some(base), Some(ty)) = (base_dig_value, self.current_dig_type()) {
             // if link_bonus[ty] > 0 {
@@ -669,7 +663,7 @@ impl OnsenGame {
             match self.friend.card_state {
                 FriendCardState::SSR => 2,
                 FriendCardState::R => 1,
-                _ => 0
+                _ => 0,
             }
         }
     }
@@ -1339,7 +1333,7 @@ impl Game for OnsenGame {
                     friend_state = match card.data.rarity {
                         1 => FriendCardState::R,
                         3 => FriendCardState::SSR,
-                        _ => return Err(anyhow!("invalid friend rarity"))
+                        _ => return Err(anyhow!("invalid friend rarity")),
                     };
                     friend_index = Some(i);
                     diag!("剧本友人: {friend_state}, index = {i}");
@@ -1424,7 +1418,7 @@ impl Game for OnsenGame {
                     Ok(actions)
                 }
             }
-            _ => Ok(vec![])
+            _ => Ok(vec![]),
         }
     }
 
@@ -1469,7 +1463,7 @@ impl Game for OnsenGame {
                             None
                         }
                     }
-                    _ => None
+                    _ => None,
                 };
                 event.map(|x| vec![x]).unwrap_or_default()
             }
@@ -1612,7 +1606,7 @@ impl Game for OnsenGame {
                 OnsenAction::NormalOuting,
                 OnsenAction::Race,
                 OnsenAction::Sleep,
-                OnsenAction::PR
+                OnsenAction::PR,
             ] {
                 if let Some(dig) = self.calc_dig_value(&action) {
                     others.push(format!("{} 挖: {:?}", action, dig));

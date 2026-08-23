@@ -12,10 +12,10 @@ pub mod effects;
 pub mod events;
 pub mod game;
 pub mod policy;
-pub mod rules;
-pub mod state;
 #[cfg(test)]
 mod rng_consistency;
+pub mod rules;
+pub mod state;
 
 pub use action::*;
 use enum_iterator::Sequence;
@@ -58,7 +58,7 @@ pub enum RamenStage {
     /// 超级拉面选择（第 71 回合结束后）
     SuperRamenSelect,
     /// 剧本结算（回合 23/47/71 结束时）
-    Settlement
+    Settlement,
 }
 
 impl RamenStage {
@@ -74,7 +74,7 @@ impl RamenStage {
             // NextTurn 在 run_stage 中推进回合，回到 Begin 或特殊阶段
             Self::NextTurn => None,
             // 特殊阶段处理后回到 Begin
-            Self::RegionSelect | Self::SuperRamenSelect | Self::Settlement => None
+            Self::RegionSelect | Self::SuperRamenSelect | Self::Settlement => None,
         }
     }
 }
@@ -90,7 +90,7 @@ pub enum FeelingType {
     /// 诀窍 B
     B = 1,
     /// 诀窍 C
-    C = 2
+    C = 2,
 }
 
 /// 训练类型（与 BaseAction 对应）
@@ -106,7 +106,7 @@ pub enum TrainingType {
     /// 根性
     Guts = 3,
     /// 智力
-    Wisdom = 4
+    Wisdom = 4,
 }
 
 /// 拉面基础操作（不含吃面决策）
@@ -133,5 +133,5 @@ pub enum Operation {
     /// 用于 `RamenSelect`/`SpecialSelect` 阶段的 `RamenAction`，这些阶段的决策
     /// 仅体现在 `ramen` 或 `special_targets` 字段上，不需要真正的基础操作。
     /// `apply` 看到此变体时直接切阶段、不执行任何操作。
-    StageOnly
+    StageOnly,
 }

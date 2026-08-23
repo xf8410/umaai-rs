@@ -9,7 +9,7 @@ use std::{
     ffi::OsStr,
     io::{BufWriter, Write},
     path::{Path, PathBuf},
-    time::UNIX_EPOCH
+    time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result, anyhow};
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     gamedata::CollectorConfig,
     search::SearchConfig,
-    training_sample::{TrainingSample, TrainingSampleBatch}
+    training_sample::{TrainingSample, TrainingSampleBatch},
 };
 
 // ============================================================================
@@ -31,7 +31,7 @@ pub struct FileSignature {
     pub path: String,
     pub size: u64,
     pub modified_unix: Option<i64>,
-    pub hash_fnv1a64: Option<String>
+    pub hash_fnv1a64: Option<String>,
 }
 
 fn fnv1a64(bytes: &[u8]) -> u64 {
@@ -64,7 +64,7 @@ pub fn compute_file_signature(path: &Path, hash: bool) -> Result<FileSignature> 
         path: path.to_string_lossy().to_string(),
         size: meta.len(),
         modified_unix,
-        hash_fnv1a64
+        hash_fnv1a64,
     })
 }
 
@@ -100,7 +100,7 @@ pub struct ManifestSearchConfig {
     pub use_ucb: bool,
     pub search_group_size: usize,
     pub search_cpuct: f64,
-    pub expected_search_stdev: f64
+    pub expected_search_stdev: f64,
 }
 
 impl ManifestSearchConfig {
@@ -113,7 +113,7 @@ impl ManifestSearchConfig {
             use_ucb: cfg.use_ucb,
             search_group_size: cfg.search_group_size,
             search_cpuct: cfg.search_cpuct,
-            expected_search_stdev: cfg.expected_search_stdev
+            expected_search_stdev: cfg.expected_search_stdev,
         }
     }
 }
@@ -150,7 +150,7 @@ pub struct ManifestProgress {
     pub choice_skipped_too_many_options: u64,
     /// 跳过：chance event（random_choice_prob.is_some）
     #[serde(default)]
-    pub choice_skipped_chance_event: u64
+    pub choice_skipped_chance_event: u64,
 }
 
 fn default_vec_u64_78() -> Vec<u64> {
@@ -169,7 +169,7 @@ pub struct ManifestPerTurn {
     #[serde(default = "default_vec_u64_78")]
     pub choice_accepted: Vec<u64>,
     #[serde(default = "default_vec_u64_78")]
-    pub choice_dropped: Vec<u64>
+    pub choice_dropped: Vec<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -178,13 +178,13 @@ pub struct ManifestScoreMeanSummary {
     pub mean: Option<f64>,
     pub p50: Option<f64>,
     pub p90: Option<f64>,
-    pub p99: Option<f64>
+    pub p99: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestPart {
     pub name: String,
-    pub samples: usize
+    pub samples: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -210,14 +210,14 @@ pub struct CollectorManifest {
     pub progress: ManifestProgress,
     pub per_turn: ManifestPerTurn,
     pub score_mean: ManifestScoreMeanSummary,
-    pub parts: Vec<ManifestPart>
+    pub parts: Vec<ManifestPart>,
 }
 
 impl CollectorManifest {
     pub fn new(
         output_dir: &Path, git_commit: Option<String>, config_path: &str, config_hash_fnv1a64: String,
         gamedata_sig: Vec<FileSignature>, model_sig: Option<FileSignature>, collector_config: CollectorConfig,
-        search_config_effective: &SearchConfig
+        search_config_effective: &SearchConfig,
     ) -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
@@ -247,7 +247,7 @@ impl CollectorManifest {
                 choice_sum_not_one: 0,
                 choice_policy_not_zero: 0,
                 choice_skipped_too_many_options: 0,
-                choice_skipped_chance_event: 0
+                choice_skipped_chance_event: 0,
             },
             per_turn: ManifestPerTurn {
                 candidates: vec![0; 78],
@@ -255,16 +255,16 @@ impl CollectorManifest {
                 dropped: vec![0; 78],
                 choice_candidates: vec![0; 78],
                 choice_accepted: vec![0; 78],
-                choice_dropped: vec![0; 78]
+                choice_dropped: vec![0; 78],
             },
             score_mean: ManifestScoreMeanSummary {
                 min: None,
                 mean: None,
                 p50: None,
                 p90: None,
-                p99: None
+                p99: None,
             },
-            parts: Vec::new()
+            parts: Vec::new(),
         }
     }
 
@@ -306,7 +306,7 @@ impl CollectorManifest {
 pub struct ExistingPartsScan {
     pub parts: Vec<ManifestPart>,
     pub accepted_written: u64,
-    pub next_part_index: usize
+    pub next_part_index: usize,
 }
 
 fn parse_part_index(name: &str) -> Option<usize> {
@@ -337,7 +337,7 @@ pub fn scan_part_files(output_dir: &Path) -> Result<Vec<(usize, PathBuf)>> {
         }
         let name = match path.file_name().and_then(OsStr::to_str) {
             Some(v) => v,
-            None => continue
+            None => continue,
         };
         if let Some(idx) = parse_part_index(name) {
             ret.push((idx, path));
@@ -359,7 +359,7 @@ pub fn scan_existing_parts(output_dir: &Path, manifest: Option<&CollectorManifes
         return Ok(ExistingPartsScan {
             parts: Vec::new(),
             accepted_written: 0,
-            next_part_index: 0
+            next_part_index: 0,
         });
     }
 
@@ -373,7 +373,7 @@ pub fn scan_existing_parts(output_dir: &Path, manifest: Option<&CollectorManifes
             return Ok(ExistingPartsScan {
                 parts: m.parts.clone(),
                 accepted_written,
-                next_part_index
+                next_part_index,
             });
         }
     }
@@ -385,7 +385,7 @@ pub fn scan_existing_parts(output_dir: &Path, manifest: Option<&CollectorManifes
         let samples = load_part_sample_count(&path)?;
         parts.push(ManifestPart {
             name: format!("part_{:06}.bin", idx),
-            samples
+            samples,
         });
         accepted_written += samples as u64;
     }
@@ -399,7 +399,7 @@ pub fn scan_existing_parts(output_dir: &Path, manifest: Option<&CollectorManifes
     Ok(ExistingPartsScan {
         parts,
         accepted_written,
-        next_part_index
+        next_part_index,
     })
 }
 
@@ -413,13 +413,13 @@ pub struct ShardWriter {
     current_shard: Vec<TrainingSample>,
     current_score_means: Vec<f32>,
 
-    pub manifest: CollectorManifest
+    pub manifest: CollectorManifest,
 }
 
 impl ShardWriter {
     pub fn open_or_create(
         output_dir: &Path, manifest_name: &str, score_mean_values_name: &str, shard_size: usize, resume: bool,
-        overwrite: bool, new_manifest: impl FnOnce() -> Result<CollectorManifest>
+        overwrite: bool, new_manifest: impl FnOnce() -> Result<CollectorManifest>,
     ) -> Result<(Self, ExistingPartsScan)> {
         if output_dir.exists() {
             if overwrite {
@@ -469,7 +469,7 @@ impl ShardWriter {
             next_part_index: scan.next_part_index,
             current_shard: Vec::with_capacity(shard_size.max(1)),
             current_score_means: Vec::with_capacity(shard_size.max(1)),
-            manifest
+            manifest,
         };
 
         Ok((writer, scan))
@@ -539,7 +539,7 @@ impl ShardWriter {
 
         self.manifest.parts.push(ManifestPart {
             name: part_name,
-            samples: batch.samples.len()
+            samples: batch.samples.len(),
         });
         self.next_part_index += 1;
         Ok(())
@@ -597,7 +597,7 @@ pub fn load_score_mean_values(path: &Path) -> Result<Vec<f32>> {
 }
 
 fn align_score_mean_values(
-    values_path: &Path, output_dir: &Path, manifest: &CollectorManifest, accepted_written: u64
+    values_path: &Path, output_dir: &Path, manifest: &CollectorManifest, accepted_written: u64,
 ) -> Result<()> {
     // 若不存在：
     // - accepted_written==0：允许后续写入创建
@@ -691,7 +691,7 @@ pub fn calc_score_mean_summary(values: &mut [f32]) -> ManifestScoreMeanSummary {
             mean: None,
             p50: None,
             p90: None,
-            p99: None
+            p99: None,
         };
     }
 
@@ -713,6 +713,6 @@ pub fn calc_score_mean_summary(values: &mut [f32]) -> ManifestScoreMeanSummary {
         mean: Some(mean),
         p50: Some(p(0.50)),
         p90: Some(p(0.90)),
-        p99: Some(p(0.99))
+        p99: Some(p(0.99)),
     }
 }

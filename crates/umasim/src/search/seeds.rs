@@ -22,7 +22,6 @@
 //!
 //! `InternalSeed` 已随拉面接驳退役（规则层直接注入 rollout 种子，无需分频道派生）。
 
-
 use crate::rng::splitmix64;
 
 /// SplitMix64 的 gamma 增量常数（黄金比例）
@@ -43,7 +42,7 @@ const MIX_A: u64 = 0xBF58_476D_1CE4_E5B9;
 #[derive(Debug, Clone, Copy)]
 pub struct RolloutSeeds {
     /// 本次搜索的根种子
-    root: u64
+    root: u64,
 }
 
 impl RolloutSeeds {
@@ -70,7 +69,7 @@ impl RolloutSeeds {
     pub fn seed_at(&self, rollout: usize) -> u64 {
         splitmix64(
             self.root
-                .wrapping_add((rollout as u64).wrapping_add(1).wrapping_mul(GOLDEN_GAMMA))
+                .wrapping_add((rollout as u64).wrapping_add(1).wrapping_mul(GOLDEN_GAMMA)),
         )
     }
 

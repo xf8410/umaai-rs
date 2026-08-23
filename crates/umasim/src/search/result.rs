@@ -10,7 +10,7 @@ use super::SearchConfig;
 use crate::{
     game::onsen::{action::OnsenAction, game::OnsenGame},
     sample_collector::action_to_global_index,
-    training_sample::{CHOICE_DIM, TrainingSample}
+    training_sample::{CHOICE_DIM, TrainingSample},
 };
 
 /// 最大分数（用于分布直方图）
@@ -42,7 +42,7 @@ pub struct ActionResult {
 
     // ========== 缓存 ==========
     /// 缓存的加权平均分结果: (radical_factor, result)
-    cached_weighted: Cell<Option<(f64, f64)>>
+    cached_weighted: Cell<Option<(f64, f64)>>,
 }
 
 impl Default for ActionResult {
@@ -61,7 +61,7 @@ impl ActionResult {
             sum_sq: 0.0,
             min_score: f64::MAX,
             max_score: f64::MIN,
-            cached_weighted: Cell::new(None)
+            cached_weighted: Cell::new(None),
         }
     }
 
@@ -206,7 +206,7 @@ pub struct SearchOutput<A = OnsenAction> {
     pub best_action_idx: usize,
 
     /// 本次搜索使用的激进度因子
-    pub radical_factor: f64
+    pub radical_factor: f64,
 }
 
 /// 手写而非 `derive(Default)`：后者会给泛型参数加上多余的 `A: Default` 约束，
@@ -217,16 +217,14 @@ impl<A> Default for SearchOutput<A> {
             actions: Vec::new(),
             action_results: Vec::new(),
             best_action_idx: 0,
-            radical_factor: 0.0
+            radical_factor: 0.0,
         }
     }
 }
 
 impl<A> SearchOutput<A> {
     /// 创建搜索输出
-    pub fn new(
-        actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64
-    ) -> Self {
+    pub fn new(actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64) -> Self {
         // 找到加权平均分最高的动作
         let best_action_idx = action_results
             .iter()
@@ -243,7 +241,7 @@ impl<A> SearchOutput<A> {
             actions,
             action_results,
             best_action_idx,
-            radical_factor
+            radical_factor,
         }
     }
 
@@ -272,7 +270,6 @@ impl<A> SearchOutput<A> {
     pub fn best_result(&self) -> &ActionResult {
         &self.action_results[self.best_action_idx].0
     }
-
 }
 
 impl SearchOutput<OnsenAction> {
@@ -349,7 +346,7 @@ impl SearchOutput<OnsenAction> {
                 let result = match which {
                     0 => &self.action_results[i].0,
                     1 => &self.action_results[i].1,
-                    _ => unreachable!()
+                    _ => unreachable!(),
                 };
                 entries.push(ScoreEntry {
                     action: self.actions[i].to_string(),
@@ -357,7 +354,7 @@ impl SearchOutput<OnsenAction> {
                     count: result.num as i64,
                     mean: result.mean(),
                     weighted_mean: result.weighted_mean(self.radical_factor),
-                    stdev: result.stdev()
+                    stdev: result.stdev(),
                 });
             }
             ret.push(entries);
@@ -374,5 +371,5 @@ pub struct ScoreEntry {
     pub count: i64,
     pub mean: f64,
     pub weighted_mean: f64,
-    pub stdev: f64
+    pub stdev: f64,
 }

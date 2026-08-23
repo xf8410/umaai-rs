@@ -24,7 +24,7 @@ use umasim::{
     global,
     output::RecordingTrainer,
     trainer::ManualTrainer,
-    utils::{init_logger_stdout, load_game_config}
+    utils::{init_logger_stdout, load_game_config},
 };
 
 fn main() -> Result<()> {
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
     let deck = game_config.cards;
     let inherit = InheritInfo {
         blue_count: game_config.blue_count,
-        extra_count: game_config.extra_count
+        extra_count: game_config.extra_count,
     };
 
     println!("╔══════════════════════════════════════════════╗");

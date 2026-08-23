@@ -18,11 +18,10 @@ use rand::prelude::StdRng;
 
 use crate::{
     game::{
-        Game,
-        Trainer,
-        ramen::{RamenGame, RamenStage, policy::RamenPolicy, policy::RamenPolicyOutput}
+        Game, Trainer,
+        ramen::{RamenGame, RamenStage, policy::RamenPolicy, policy::RamenPolicyOutput},
     },
-    gamedata::{EventChoice, EventData}
+    gamedata::{EventChoice, EventData},
 };
 
 /// 拉面杯手写策略训练员
@@ -36,7 +35,7 @@ pub struct RamenHandwrittenTrainer {
     /// 用 `Mutex` 而非 `RefCell`：搜索层要求 `Trainer: Sync`（rayon 跨线程共享同一个
     /// rollout 决策器），`RefCell` 会让整个 `FlatSearch<RamenGame>` 失去 `Sync`。
     /// 单局日志场景无竞争，加锁开销可忽略。
-    last_breakdown: Mutex<Option<String>>
+    last_breakdown: Mutex<Option<String>>,
 }
 
 impl RamenHandwrittenTrainer {
@@ -45,7 +44,7 @@ impl RamenHandwrittenTrainer {
         Self {
             policy: RamenPolicy::default(),
             verbose: false,
-            last_breakdown: Mutex::new(None)
+            last_breakdown: Mutex::new(None),
         }
     }
 
@@ -54,7 +53,7 @@ impl RamenHandwrittenTrainer {
         Self {
             policy,
             verbose: false,
-            last_breakdown: Mutex::new(None)
+            last_breakdown: Mutex::new(None),
         }
     }
 
@@ -92,7 +91,7 @@ impl Default for RamenHandwrittenTrainer {
 
 impl Trainer<RamenGame> for RamenHandwrittenTrainer {
     fn select_action(
-        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut StdRng
+        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut StdRng,
     ) -> Result<usize> {
         // 单个候选直接返回（无选择空间）
         if actions.len() <= 1 {
@@ -111,12 +110,12 @@ impl Trainer<RamenGame> for RamenHandwrittenTrainer {
                     2 => 0,
                     23 => 1,
                     47 => 2,
-                    _ => 0
+                    _ => 0,
                 };
                 self.policy.decide_region(game, year_idx, actions)?
             }
             // 其他阶段（Begin/Distribute/AfterTrain 等）不应有多个候选
-            _ => (0, vec![])
+            _ => (0, vec![]),
         };
         self.stash_breakdown(&outputs);
         if self.verbose {
@@ -140,7 +139,7 @@ impl Trainer<RamenGame> for RamenHandwrittenTrainer {
     }
 
     fn select_event_choice(
-        &self, game: &RamenGame, _event: &EventData, choices: &[Vec<EventChoice>], _rng: &mut StdRng
+        &self, game: &RamenGame, _event: &EventData, choices: &[Vec<EventChoice>], _rng: &mut StdRng,
     ) -> Result<usize> {
         let (idx, outputs) = self.policy.decide_event(game, choices)?;
         self.stash_breakdown(&outputs);
@@ -163,14 +162,14 @@ mod tests {
         game::ramen::RamenGame,
         gamedata::{GAMECONSTANTS, init_global},
         global,
-        utils::{get_workspace_root, init_test_logger}
+        utils::{get_workspace_root, init_test_logger},
     };
 
     const TEST_UMA_ID: u32 = 102601;
     const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
     const TEST_INHERIT: crate::game::InheritInfo = crate::game::InheritInfo {
         blue_count: [15, 3, 0, 0, 0],
-        extra_count: [0, 30, 0, 0, 30, 30]
+        extra_count: [0, 30, 0, 0, 30, 30],
     };
 
     /// 完整 77 回合跑通（固定种子可复现），输出关键结局指标

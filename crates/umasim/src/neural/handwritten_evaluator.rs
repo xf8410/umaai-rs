@@ -16,14 +16,12 @@ use rand::{rngs::StdRng, seq::IndexedRandom};
 use super::{Evaluator, ValueOutput};
 use crate::{
     game::{
-        ActionScore,
-        Game,
-        PersonType,
-        onsen::{OnsenOrder, action::OnsenAction, game::OnsenGame}
+        ActionScore, Game, PersonType,
+        onsen::{OnsenOrder, action::OnsenAction, game::OnsenGame},
     },
     gamedata::{GAMECONSTANTS, onsen::ONSENDATA},
     global,
-    utils::load_game_config
+    utils::load_game_config,
 };
 
 // ============================================================================
@@ -220,7 +218,7 @@ pub struct HandwrittenEvaluator {
     /// 彩圈加成系数
     pub shining_bonus: f64,
     /// 温泉顺序
-    pub onsen_order: OnsenOrder
+    pub onsen_order: OnsenOrder,
 }
 
 impl HandwrittenEvaluator {
@@ -231,7 +229,7 @@ impl HandwrittenEvaluator {
             skill_weight: 0.5,
             vital_threshold: 55,
             shining_bonus: 35.0,
-            onsen_order: load_onsen_order().expect("onsen order")
+            onsen_order: load_onsen_order().expect("onsen order"),
         }
     }
 
@@ -245,8 +243,8 @@ impl HandwrittenEvaluator {
             onsen_order: OnsenOrder {
                 year1: vec![1, 3, 2],
                 year2: vec![7, 5, 4, 2],
-                year3: vec![8, 9, 4, 2, 6]
-            }
+                year3: vec![8, 9, 4, 2, 6],
+            },
         }
     }
 
@@ -260,8 +258,8 @@ impl HandwrittenEvaluator {
             onsen_order: OnsenOrder {
                 year1: vec![1, 2, 3],
                 year2: vec![6, 7, 4, 2],
-                year3: vec![8, 9, 4, 2, 5]
-            }
+                year3: vec![8, 9, 4, 2, 5],
+            },
         }
     }
 
@@ -432,7 +430,7 @@ impl HandwrittenEvaluator {
         // 获取挖掘量
         let dig_value = match game.calc_dig_value(action) {
             Some(v) => v,
-            None => return 0.0
+            None => return 0.0,
         };
 
         // 总挖掘量
@@ -616,7 +614,7 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
             return Some(ActionScore::new(
                 OnsenAction::UseTicket(self.should_use_ticket(game)),
                 actions,
-                vec![]
+                vec![],
             ));
         }
 
@@ -764,7 +762,7 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
                     value
                 }
 
-                _ => -1000.0
+                _ => -1000.0,
             };
 
             scores.push(value);

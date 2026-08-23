@@ -5,7 +5,7 @@ use umasim::{
     explain::Explain,
     gamedata::{ActionValue, EventData, GAMECONSTANTS},
     global,
-    utils::Array6
+    utils::Array6,
 };
 
 /// 从小黑板接收的事件信息
@@ -19,7 +19,7 @@ pub struct StoryStatus {
     /// 角色名
     pub trigger_name: String,
     /// 选项数据
-    pub choices: Vec<Vec<StoryChoice>>
+    pub choices: Vec<Vec<StoryChoice>>,
 }
 
 impl StoryStatus {
@@ -28,7 +28,7 @@ impl StoryStatus {
         lines.push(
             format!("事件 #{} [{}]{}", self.id, self.trigger_name, self.name)
                 .bright_yellow()
-                .to_string()
+                .to_string(),
         );
         for (i, ch) in self.choices.iter().enumerate() {
             if let Some(c) = ch.first() {
@@ -77,7 +77,7 @@ pub struct StoryChoice {
     /// 成功数值
     pub success_effect_value: Option<StoryEffectValue>,
     /// 失败数值
-    pub failed_effect_value: Option<StoryEffectValue>
+    pub failed_effect_value: Option<StoryEffectValue>,
 }
 
 impl StoryChoice {
@@ -116,7 +116,7 @@ pub struct StoryEffectValue {
     /// 其他词条
     pub extras: Vec<String>,
     /// 状态名字，可选
-    pub buff_name: Option<String>
+    pub buff_name: Option<String>,
 }
 
 impl StoryEffectValue {
@@ -174,7 +174,7 @@ impl From<&StoryEffectValue> for ActionValue {
             vital: value.vital(),
             friendship: value.friendship(),
             motivation: value.motivation(),
-            max_vital: 0 // 暂无这个字段
+            max_vital: 0, // 暂无这个字段
         }
     }
 }

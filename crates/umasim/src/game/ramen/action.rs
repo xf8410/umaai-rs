@@ -15,17 +15,16 @@ use rand::{Rng, seq::IndexedRandom};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Operation,
-    TrainingType,
+    Operation, TrainingType,
     effects::calc_ramen_training_effect,
-    rules::{fill_gauge_after_non_train, fill_gauge_after_train}
+    rules::{fill_gauge_after_non_train, fill_gauge_after_train},
 };
 use crate::{
     diag,
     game::{ActionEnum, BaseAction, FriendOutState, PersonType, traits::Game},
     gamedata::{EventData, GAMECONSTANTS, ramen::RAMENDATA},
     global,
-    utils::{system_event, system_event_prob}
+    utils::{system_event, system_event_prob},
 };
 
 /// 拉面杯动作
@@ -51,7 +50,7 @@ pub struct RamenAction {
     /// - Some([tA, tB, tC]): 替换各类 `t[i]` 个普通诀窍
     pub special_targets: Option<[i32; 3]>,
     /// 基础操作
-    pub operation: Operation
+    pub operation: Operation,
 }
 
 impl RamenAction {
@@ -64,7 +63,7 @@ impl RamenAction {
         Self {
             ramen: None,
             special_targets: None,
-            operation
+            operation,
         }
     }
 
@@ -78,7 +77,7 @@ impl RamenAction {
         Self {
             ramen: Some(ramen_idx),
             special_targets: None,
-            operation
+            operation,
         }
     }
 
@@ -89,7 +88,7 @@ impl RamenAction {
         Self {
             ramen: ramen_idx,
             special_targets: None,
-            operation: Operation::StageOnly
+            operation: Operation::StageOnly,
         }
     }
 
@@ -98,7 +97,7 @@ impl RamenAction {
         Self {
             ramen: Some(ramen_idx),
             special_targets: Some(targets),
-            operation: Operation::StageOnly
+            operation: Operation::StageOnly,
         }
     }
 
@@ -111,7 +110,7 @@ impl RamenAction {
         Self {
             ramen: ramen_idx,
             special_targets: Some(targets),
-            operation: Operation::StageOnly
+            operation: Operation::StageOnly,
         }
     }
 
@@ -143,7 +142,7 @@ impl RamenAction {
                 }
                 format!("(替换{})", parts.join("+"))
             }
-            _ => String::new()
+            _ => String::new(),
         };
         match self.ramen {
             Some(idx) => {
@@ -154,7 +153,7 @@ impl RamenAction {
                     .unwrap_or("???");
                 format!("吃面/{name}{targets_text}")
             }
-            None => "不吃面".to_string()
+            None => "不吃面".to_string(),
         }
     }
 
@@ -182,7 +181,7 @@ impl RamenAction {
                     .collect();
                 format!("地区[{}]", names.join(","))
             }
-            Operation::StageOnly => String::new()
+            Operation::StageOnly => String::new(),
         }
     }
 }
@@ -217,7 +216,7 @@ impl Operation {
             Operation::FriendOuting => Some(BaseAction::FriendOuting),
             Operation::Clinic => Some(BaseAction::Clinic),
             Operation::RegionSelect(_) => None,
-            Operation::StageOnly => None
+            Operation::StageOnly => None,
         }
     }
 }
@@ -410,7 +409,7 @@ impl RamenAction {
                         success = true;
                         break;
                     }
-                    Err(_) => continue // 分配失败，重试
+                    Err(_) => continue, // 分配失败，重试
                 }
             }
 
@@ -613,7 +612,7 @@ impl RamenAction {
         Ok(TrainParams {
             buffs,
             is_shining,
-            failure_rate
+            failure_rate,
         })
     }
 
@@ -634,7 +633,7 @@ impl RamenAction {
 
     /// 处理训练成功
     fn handle_train_success(
-        &self, game: &mut super::RamenGame, train: usize, params: &TrainParams, rng: &mut impl Rng
+        &self, game: &mut super::RamenGame, train: usize, params: &TrainParams, rng: &mut impl Rng,
     ) -> Result<()> {
         // calc_training_value 内部已两阶段计算（含拉面 buff），直接使用结果
         let final_value = game.calc_training_value(&params.buffs, train)?;
@@ -700,7 +699,7 @@ impl RamenAction {
     ///   所有 PersonType::Card 的 hint 事件，每个支援卡触发 `1 + hint_count_bonus` 次
     /// - 否则：从 hint_persons 中随机选一个触发 `1 + hint_count_bonus` 次（保留温泉杯逻辑）
     fn handle_hint_event(
-        &self, game: &mut super::RamenGame, train: usize, hint_persons: &[i32], rng: &mut impl Rng
+        &self, game: &mut super::RamenGame, train: usize, hint_persons: &[i32], rng: &mut impl Rng,
     ) -> Result<()> {
         if hint_persons.is_empty() {
             return Ok(());
@@ -822,7 +821,7 @@ impl RamenAction {
 
     /// 填充诀窍槽
     fn fill_feeling_gauge(
-        &self, game: &mut super::RamenGame, train: usize, params: &TrainParams, is_xiahesu: bool
+        &self, game: &mut super::RamenGame, train: usize, params: &TrainParams, is_xiahesu: bool,
     ) -> Result<()> {
         if let Some(train_feelings) = game.ramen.train_feeling_type {
             let base_dist = super::rules::calc_gauge_base_distribution(&game.ramen.selected_regions);
@@ -845,7 +844,7 @@ impl RamenAction {
                 train_feelings[train],
                 train_bonus,
                 params.is_shining,
-                is_xiahesu
+                is_xiahesu,
             );
         }
         Ok(())
@@ -869,7 +868,7 @@ struct TrainParams {
     /// 是否友情训练
     is_shining: bool,
     /// 失败率（百分比）
-    failure_rate: f32
+    failure_rate: f32,
 }
 
 /// 列出吃面选择（阶段1）
@@ -934,7 +933,7 @@ pub fn list_operations(can_friend_outing: bool, is_ill: bool, is_xiahesu: bool, 
 /// - `is_xiahesu`: 是否处于夏合宿回合
 /// - `can_race`: 是否允许比赛（回合 0-12 为 false，回合 13 起为 true）
 pub fn list_all_actions(
-    available_ramens: &[usize], can_friend_outing: bool, is_ill: bool, is_xiahesu: bool, can_race: bool
+    available_ramens: &[usize], can_friend_outing: bool, is_ill: bool, is_xiahesu: bool, can_race: bool,
 ) -> Vec<RamenAction> {
     let ramen_choices = list_ramen_choices(available_ramens);
     let operations = list_operations(can_friend_outing, is_ill, is_xiahesu, can_race);
@@ -944,7 +943,7 @@ pub fn list_all_actions(
         for &op in &operations {
             match ramen {
                 None => actions.push(RamenAction::no_ramen(op)),
-                Some(idx) => actions.push(RamenAction::with_ramen(*idx, op))
+                Some(idx) => actions.push(RamenAction::with_ramen(*idx, op)),
             }
         }
     }
@@ -1017,7 +1016,7 @@ pub fn list_train_actions(can_friend_outing: bool, is_ill: bool, is_xiahesu: boo
 /// 候选数估算：1（不吃）+ Σ 各面 `list_special_targets_for` 长度。
 /// 库存紧张时每个面仅 1~6 种，全富余时 9~10 种；3 面全富余时峰值约 28~31 个。
 pub fn list_combined_ramen_select_actions(
-    state: &super::RamenState, selected_regions: &[usize; 3]
+    state: &super::RamenState, selected_regions: &[usize; 3],
 ) -> Vec<RamenAction> {
     use super::rules::list_special_targets_for;
 
@@ -1059,7 +1058,7 @@ mod tests {
     use super::{super::RamenState, *};
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger}
+        utils::{get_workspace_root, init_test_logger},
     };
 
     #[test]
@@ -1410,10 +1409,10 @@ mod tests {
         use crate::{
             game::{
                 ramen::{FeelingType, RamenGame, RamenStage, rules::calc_gauge_base_distribution},
-                traits::Game
+                traits::Game,
             },
-            gamedata::{init_global},
-            utils::{get_workspace_root, init_test_logger}
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger},
         };
         use rand::{SeedableRng, rngs::StdRng};
 
@@ -1424,7 +1423,7 @@ mod tests {
 
         let inherit = crate::game::InheritInfo {
             blue_count: [15, 3, 0, 0, 0],
-            extra_count: [0, 30, 0, 0, 30, 30]
+            extra_count: [0, 30, 0, 0, 30, 30],
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         let mut game = RamenGame::newgame(102601, &deck, inherit)?;
@@ -1436,7 +1435,7 @@ mod tests {
             FeelingType::B,
             FeelingType::C,
             FeelingType::A,
-            FeelingType::B
+            FeelingType::B,
         ]);
         game.stage = RamenStage::Train;
         let _rng = StdRng::seed_from_u64(42);
@@ -1456,7 +1455,7 @@ mod tests {
         let params = TrainParams {
             buffs: game.calc_training_buff(0)?,
             is_shining: false,
-            failure_rate: 0.0
+            failure_rate: 0.0,
         };
         game.ramen.feeling_slot = [0, 0, 0];
         action.fill_feeling_gauge(&mut game, 0, &params, false)?;
@@ -1482,7 +1481,7 @@ mod tests {
         let params = TrainParams {
             buffs: game.calc_training_buff(0)?,
             is_shining: false,
-            failure_rate: 0.0
+            failure_rate: 0.0,
         };
         game.ramen.feeling_slot = [0, 0, 0];
         action.fill_feeling_gauge(&mut game, 0, &params, false)?;

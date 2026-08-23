@@ -1,10 +1,7 @@
 //! umaai-rs - Rewrite UmaAI in Rust
 //!
 //! author: curran
-use std::{
-    sync::Mutex,
-    time::Instant
-};
+use std::{sync::Mutex, time::Instant};
 
 use anyhow::Result;
 use colored::Colorize;
@@ -14,23 +11,22 @@ use serde::Serialize;
 use text_to_ascii_art::to_art;
 use umasim::{
     game::{
-        Game,
-        Trainer,
-        onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame}
+        Game, Trainer,
+        onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame},
     },
     gamedata::init_global_with_config,
     neural::Evaluator,
     search::SearchConfig,
     trainer::MctsTrainer,
-    utils::{check_windows_terminal, check_working_dir, init_logger, load_game_config, pause}
+    utils::{check_windows_terminal, check_working_dir, init_logger, load_game_config, pause},
 };
 
 use crate::{
     protocol::{
         GameStatusOnsen,
-        urafile::{UraFileWatcher, parse_game}
+        urafile::{UraFileWatcher, parse_game},
     },
-    utils::{SAVED_GAME, hotkey_handler}
+    utils::{SAVED_GAME, hotkey_handler},
 };
 
 pub mod protocol;
@@ -40,7 +36,7 @@ pub fn run_evaluate<G, E>(game: &G, evaluator: &E, rng: &mut StdRng) -> Result<(
 where
     G: Game + Serialize,
     G::Action: Serialize,
-    E: Evaluator<G>
+    E: Evaluator<G>,
 {
     let t = Instant::now();
     let score = evaluator.evaluate(&game);
@@ -283,7 +279,7 @@ mod tests {
 
     use crate::protocol::{
         GameStatusOnsen,
-        urafile::{UraFileWatcher, parse_game}
+        urafile::{UraFileWatcher, parse_game},
     };
 
     #[tokio::test]

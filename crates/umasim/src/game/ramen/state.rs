@@ -13,7 +13,7 @@ use crate::{
     game::{BaseGame, BasePerson, InheritInfo, PersonType, traits::Game},
     gamedata::ramen::RAMENDATA,
     global,
-    rng::{EventRng, StrategyRng, StreamTag, TurnFixedRng, derive_seed}
+    rng::{EventRng, StrategyRng, StreamTag, TurnFixedRng, derive_seed},
 };
 
 /// 拉面杯专用状态
@@ -71,7 +71,7 @@ pub struct RamenState {
     /// - false（默认）：走标准三阶段路径（next() 按 `pending_ramen` 决定 SpecialSelect / Train）
     ///
     /// 由 `clear_pending()` 一并清空，确保不跨回合残留。
-    pub combined_decision: bool
+    pub combined_decision: bool,
 }
 
 /// 拉面效果合并（基础效果 + 地区效果 + 超级拉面效果 + Pt常驻效果）
@@ -117,7 +117,7 @@ pub struct RamenEffect {
     /// 分身数量（额外支援卡出现次数）
     pub clone: i32,
     /// hint_special: 支援卡类型>=4 时，除友人/团队卡外所有支援卡出现 Hint
-    pub hint_special: bool
+    pub hint_special: bool,
 }
 
 impl RamenEffect {
@@ -137,7 +137,7 @@ impl RamenEffect {
             deyilv: self.deyilv + other.deyilv,
             hint: self.hint + other.hint,
             clone: self.clone + other.clone,
-            hint_special: self.hint_special || other.hint_special
+            hint_special: self.hint_special || other.hint_special,
         }
     }
 }
@@ -187,7 +187,7 @@ pub struct RamenGame {
     ///
     /// 事件的触发依赖事件历史（策略状态），但随机本身独立成轴——事件历史差异
     /// 只影响事件流自身，不污染局面流与策略流。
-    pub event: Option<EventRng>
+    pub event: Option<EventRng>,
 }
 
 impl Deref for RamenGame {
@@ -240,7 +240,7 @@ impl RamenGame {
             rule_master: None,
             turn_fixed: None,
             strategy: None,
-            event: None
+            event: None,
         };
         // 合并拉面杯剧本的友人事件 ID（base 已包含 global_events.friend_events 的 ID）
         // 让 apply_event 能正确识别 8303051xx 的友人事件并应用 friend.event_bonus / vital_bonus
@@ -288,7 +288,7 @@ impl RamenGame {
                 chara_id: npc_id,
                 friendship: 0,
                 is_hint: false,
-                card_id: None
+                card_id: None,
             });
         }
         Ok(())
@@ -382,7 +382,10 @@ impl RamenGame {
             Some(master) => {
                 let turn = self.base.turn as u64;
                 self.turn_fixed = Some(TurnFixedRng::new(derive_seed(master, &[turn])));
-                self.strategy = Some(StrategyRng::new(derive_seed(master, &[turn, StreamTag::Strategy.tag()])));
+                self.strategy = Some(StrategyRng::new(derive_seed(
+                    master,
+                    &[turn, StreamTag::Strategy.tag()],
+                )));
                 self.event = Some(EventRng::new(derive_seed(master, &[turn, StreamTag::Event.tag()])));
             }
             None => {

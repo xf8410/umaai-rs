@@ -25,8 +25,6 @@ pub use evaluator::{Evaluator, RandomEvaluator};
 pub use handwritten_evaluator::HandwrittenEvaluator;
 #[cfg(feature = "onnx")]
 pub use neural_net_evaluator::{
-    NeuralNetEvaluator,
-    ThreadLocalNeuralNetLeafEvaluator,
-    ThreadLocalNeuralNetLeafStatsSnapshot
+    NeuralNetEvaluator, ThreadLocalNeuralNetLeafEvaluator, ThreadLocalNeuralNetLeafStatsSnapshot,
 };
 pub use value_output::ValueOutput;

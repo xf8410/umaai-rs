@@ -17,22 +17,20 @@ use rand::RngCore;
 use crate::{
     bench::seeded_rngs,
     game::{
-        ActionEnum,
-        Game,
-        InheritInfo,
+        ActionEnum, Game, InheritInfo,
         ramen::{FeelingType, RamenGame},
-        traits::Trainer
+        traits::Trainer,
     },
     rng::SplitmixRng,
-    trainer::{RandomTrainer, RamenHandwrittenTrainer},
-    utils::{get_workspace_root, init_test_logger}
+    trainer::{RamenHandwrittenTrainer, RandomTrainer},
+    utils::{get_workspace_root, init_test_logger},
 };
 
 const TEST_UMA_ID: u32 = 102601;
 const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const TEST_INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 3, 0, 0, 0],
-    extra_count: [0, 30, 0, 0, 30, 30]
+    extra_count: [0, 30, 0, 0, 30, 30],
 };
 
 /// 每回合一条的局面快照
@@ -118,14 +116,14 @@ impl<T> SnapTrainer<T> {
 
 impl<T: Trainer<RamenGame>> Trainer<RamenGame> for SnapTrainer<T> {
     fn select_action(
-        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut rand::rngs::StdRng
+        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut rand::rngs::StdRng,
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_action(game, actions, rng)
     }
 
     fn select_choice(
-        &self, game: &RamenGame, choices: &[Vec<crate::gamedata::EventChoice>], rng: &mut rand::rngs::StdRng
+        &self, game: &RamenGame, choices: &[Vec<crate::gamedata::EventChoice>], rng: &mut rand::rngs::StdRng,
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_choice(game, choices, rng)
@@ -133,7 +131,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for SnapTrainer<T> {
 
     fn select_event_choice(
         &self, game: &RamenGame, _event: &crate::gamedata::EventData, choices: &[Vec<crate::gamedata::EventChoice>],
-        rng: &mut rand::rngs::StdRng
+        rng: &mut rand::rngs::StdRng,
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_event_choice(game, _event, choices, rng)
@@ -202,14 +200,15 @@ fn test_layer2_cross_strategy_consistency() -> Result<()> {
         if let Some(h) = hmap.get(turn) {
             compared += 1;
             // 一致性判定口径：角标 + 分布表 + 固定流消费量（hint 依赖 PT 档位，不参与）
-            let same = r.feeling == h.feeling
-                && r.dist == h.dist
-                && r.fixed_counter == h.fixed_counter;
+            let same = r.feeling == h.feeling && r.dist == h.dist && r.fixed_counter == h.fixed_counter;
             if !same {
                 mismatch += 1;
             }
             let fixed_only = |d: &[(u32, u32)]| -> Vec<(u32, u32)> {
-                d.iter().copied().filter(|(id, _)| !(5007..=5011).contains(id) && *id != 830305102).collect()
+                d.iter()
+                    .copied()
+                    .filter(|(id, _)| !(5007..=5011).contains(id) && *id != 830305102)
+                    .collect()
             };
             let same_dist = r.dist == h.dist;
             let same_feel = r.feeling == h.feeling;
@@ -217,7 +216,6 @@ fn test_layer2_cross_strategy_consistency() -> Result<()> {
             // 属游戏机制而非随机错位——单独输出，不作为一致性的判定口径。
             let same_hint = r.hints == h.hints;
             println!(
-
                 "回合 {}: 角标一致={same_feel} 分布一致={same_dist} | 固定流消费 随机={} 手写={} | hint一致={same_hint}(依赖PT档位) | 事件增量 随机={:?} 手写={:?}",
                 turn,
                 r.fixed_counter,
@@ -259,7 +257,7 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
         }
 
         fn select_action(
-            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng
+            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng,
         ) -> Result<usize> {
             Ok(actions
                 .iter()
@@ -277,7 +275,7 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
         }
 
         fn select_action(
-            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng
+            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng,
         ) -> Result<usize> {
             Ok(actions
                 .iter()
@@ -324,7 +322,11 @@ fn test_layer3_clone_isolation() -> Result<()> {
     let mut b = a;
     let _ = b.next_u64();
     println!("===== 层 3b：克隆隔离 =====");
-    println!("原流 counter={}（消费克隆后应保持），克隆流 counter={}", a.counter(), b.counter());
+    println!(
+        "原流 counter={}（消费克隆后应保持），克隆流 counter={}",
+        a.counter(),
+        b.counter()
+    );
     println!("原流下一个值不受克隆消费影响: {:#018x}", a.next_u64());
     Ok(())
 }
