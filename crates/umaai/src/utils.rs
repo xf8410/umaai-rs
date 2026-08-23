@@ -1,13 +1,13 @@
 use std::{
     sync::{Mutex, OnceLock},
-    time::Duration,
+    time::Duration
 };
 
 use anyhow::Result;
 use log::warn;
 use ratatui::crossterm::{
     self,
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind}
 };
 use umasim::game::onsen::game::OnsenGame;
 #[cfg(target_os = "windows")]

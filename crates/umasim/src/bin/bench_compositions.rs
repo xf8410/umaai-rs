@@ -25,7 +25,7 @@ use umasim::{
     gamedata::{GAMEDATA, init_global_with_config},
     global,
     trainer::{LoggingTrainer, RamenHandwrittenTrainer, RandomTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 /// 默认测试马娘。
@@ -35,7 +35,7 @@ const DEFAULT_FRIEND: u32 = 303054;
 /// 默认继承因子，与 bench_base 保持一致。
 const DEFAULT_INHERIT: InheritInfo = InheritInfo {
     blue_count: [12, 0, 0, 0, 6],
-    extra_count: [10, 0, 0, 20, 20, 40],
+    extra_count: [10, 0, 0, 20, 20, 40]
 };
 
 /// 命令行配置。
@@ -54,7 +54,7 @@ struct Config {
     /// 代表卡选择参数（pool_size/min_panel/pick 均可由 CLI 覆盖）。
     pick: CardPickOpts,
     /// 手动代表卡配置（toml），覆盖自动选择。
-    cards_file: Option<String>,
+    cards_file: Option<String>
 }
 
 impl Default for Config {
@@ -66,7 +66,7 @@ impl Default for Config {
             trainer: "handwritten".to_string(),
             out: "logs/bench_compositions.csv".to_string(),
             pick: CardPickOpts::default(),
-            cards_file: None,
+            cards_file: None
         }
     }
 }
@@ -95,7 +95,7 @@ struct Summary {
     /// 三年 RMJ 全通率。
     rmj_all_rate: f64,
     /// 五次友人出行完成率。
-    friend_all_rate: f64,
+    friend_all_rate: f64
 }
 
 impl Summary {
@@ -141,7 +141,7 @@ fn parse_args() -> Result<Config> {
                 );
                 std::process::exit(0);
             }
-            other => anyhow::bail!("未知参数: {other:?}（可用 --help 查看用法）"),
+            other => anyhow::bail!("未知参数: {other:?}（可用 --help 查看用法）")
         }
     }
     ensure!(cfg.runs > 0, "--runs 必须大于 0");
@@ -184,7 +184,7 @@ struct ManualCards {
     /// 根。
     guts: Vec<u32>,
     /// 智。
-    wisdom: Vec<u32>,
+    wisdom: Vec<u32>
 }
 
 /// 读取手动代表卡配置（toml），转成与自动选择一致的 `RepresentativeSet`（无跳过卡）。
@@ -208,20 +208,20 @@ fn load_manual_cards(path: &str, pick: usize) -> Result<bench::RepresentativeSet
                 .with_context(|| format!("{} 类型手动卡 idrank={idrank} 不存在", bench::type_name_zh(card_type)))?;
             reps.push(CardRep {
                 idrank,
-                name: card.card_name.clone(),
+                name: card.card_name.clone()
             });
         }
         result[card_type] = reps;
     }
     Ok(bench::RepresentativeSet {
         picked: result,
-        skipped: std::array::from_fn(|_| Vec::new()),
+        skipped: std::array::from_fn(|_| Vec::new())
     })
 }
 
 /// 使用指定训练员执行一种构成（每局构造 `LoggingTrainer`，与 bench_base 一致）。
 fn run_composition<T: Trainer<RamenGame>>(
-    cfg: &Config, composition: &DeckComposition, deck: [u32; 6], make_trainer: &dyn Fn(u64) -> LoggingTrainer<T>,
+    cfg: &Config, composition: &DeckComposition, deck: [u32; 6], make_trainer: &dyn Fn(u64) -> LoggingTrainer<T>
 ) -> Summary {
     let mut scores = Vec::with_capacity(cfg.runs);
     let mut status_sum = [0_i64; 5];
@@ -267,7 +267,7 @@ fn run_composition<T: Trainer<RamenGame>>(
         status_mean: std::array::from_fn(|idx| status_sum[idx] as f64 / divisor),
         skill_pt_mean: skill_pt_sum as f64 / divisor,
         rmj_all_rate: rmj_all as f64 / divisor,
-        friend_all_rate: friend_all as f64 / divisor,
+        friend_all_rate: friend_all as f64 / divisor
     }
 }
 
@@ -298,7 +298,7 @@ fn print_representatives(set: &bench::RepresentativeSet, opts: &CardPickOpts) {
 
 /// 执行全部构成并返回汇总。
 fn run_all(
-    cfg: &Config, compositions: &[DeckComposition], representatives: &[Vec<CardRep>; 5],
+    cfg: &Config, compositions: &[DeckComposition], representatives: &[Vec<CardRep>; 5]
 ) -> Result<Vec<Summary>> {
     let random = |seed: u64| LoggingTrainer::new(RandomTrainer, seed);
     let handwritten = |seed: u64| LoggingTrainer::new(RamenHandwrittenTrainer::new(), seed);
@@ -315,7 +315,7 @@ fn run_all(
         let summary = match cfg.trainer.as_str() {
             "random" => run_composition(cfg, composition, deck, &random),
             "handwritten" => run_composition(cfg, composition, deck, &handwritten),
-            _ => unreachable!("训练员已在参数解析时校验"),
+            _ => unreachable!("训练员已在参数解析时校验")
         };
         summaries.push(summary);
     }
@@ -339,7 +339,7 @@ fn save_csv(path: &str, summaries: &[Summary]) -> Result<()> {
         "wisdom_mean",
         "skill_pt_mean",
         "rmj_all_rate",
-        "friend_all_rate",
+        "friend_all_rate"
     ];
     let rows: Vec<Vec<String>> = summaries.iter().map(Summary::csv_row).collect();
     bench::write_csv(Path::new(path), &header, &rows)
@@ -361,7 +361,7 @@ fn main() -> Result<()> {
     );
     let representative_set = match &cfg.cards_file {
         Some(path) => load_manual_cards(path, cfg.pick.pick)?,
-        None => bench::select_representatives(&cfg.pick)?,
+        None => bench::select_representatives(&cfg.pick)?
     };
     println!(
         "开始基准：trainer={} compositions={} runs_each={} total_runs={} base_seed={} friend={} min_panel={}",
@@ -415,7 +415,7 @@ mod tests {
             (0..3)
                 .map(|idx| CardRep {
                     idrank: 100_000 + card_type as u32 * 100 + idx,
-                    name: format!("type-{card_type}-{idx}"),
+                    name: format!("type-{card_type}-{idx}")
                 })
                 .collect()
         });

@@ -63,7 +63,7 @@ pub struct SearchConfig {
     ///
     /// 实测（onsen，回合 0 Train，7 候选 × 200 rollout）：关闭时平均配对相关 0.18、
     /// 等效 1.31 倍；开启后 0.69、等效 **3.65 倍**（区间 2.44–8.62）。
-    pub crn_stage_reseed: bool,
+    pub crn_stage_reseed: bool
 }
 
 impl Default for SearchConfig {
@@ -78,7 +78,7 @@ impl Default for SearchConfig {
             search_group_size: 256,
             search_cpuct: 1.0,
             expected_search_stdev: 2200.0,
-            crn_stage_reseed: true,
+            crn_stage_reseed: true
         }
     }
 }

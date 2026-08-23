@@ -6,12 +6,14 @@ use rand::prelude::StdRng;
 use umasim::{
     bench,
     game::{
-        Game, InheritInfo, Trainer,
-        ramen::{Operation, RamenAction, RamenGame, RamenStage},
+        Game,
+        InheritInfo,
+        Trainer,
+        ramen::{Operation, RamenAction, RamenGame, RamenStage}
     },
     gamedata::{EventChoice, EventData, init_global_with_config},
     trainer::LocalRamenTrainer,
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 const BASE_SEED: u64 = 61444;
@@ -19,20 +21,20 @@ const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 const STRUCTURE: &str = "structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friend3v45-friendcap135-friendspecial2";
 
 struct PhaseTrainer {
     years: [LocalRamenTrainer; 3],
-    selected: Mutex<Option<Operation>>,
+    selected: Mutex<Option<Operation>>
 }
 impl PhaseTrainer {
     fn new() -> Result<Self> {
         let make = |pt| LocalRamenTrainer::matrix_variant(&format!("pt{pt}-sac140-long-fail0-{STRUCTURE}"));
         Ok(Self {
             years: [make(16)?, make(64)?, make(64)?],
-            selected: Mutex::new(None),
+            selected: Mutex::new(None)
         })
     }
     fn year(g: &RamenGame) -> usize {
@@ -60,7 +62,7 @@ impl Trainer<RamenGame> for PhaseTrainer {
         self.years[Self::year(g)].select_choice(g, c, r)
     }
     fn select_event_choice(
-        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng,
+        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng
     ) -> Result<usize> {
         self.years[Self::year(g)].select_event_choice(g, e, c, r)
     }

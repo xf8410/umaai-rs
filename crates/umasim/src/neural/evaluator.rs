@@ -21,7 +21,7 @@ use crate::game::{ActionScore, Game};
 /// - `G`: 游戏类型，必须实现 `Game` trait
 pub trait Evaluator<G: Game>: Send + Sync
 where
-    G::Action: Serialize,
+    G::Action: Serialize
 {
     /// 选择动作（策略）
     ///
@@ -80,7 +80,7 @@ pub struct RandomEvaluator;
 
 impl<G: Game> Evaluator<G> for RandomEvaluator
 where
-    G::Action: Clone + Serialize + PartialEq,
+    G::Action: Clone + Serialize + PartialEq
 {
     fn select_action(&self, game: &G, rng: &mut StdRng) -> Option<ActionScore<G::Action>> {
         use rand::seq::IndexedRandom;

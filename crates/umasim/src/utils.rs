@@ -20,8 +20,15 @@ use crate::gamedata::LOGGER;
 use crate::{
     game::onsen::OnsenOrder,
     gamedata::{
-        EventCollection, EventData, GAMECONSTANTS, GAMEDATA, GameConfig, MctsConfig, OverrideConfig, OverrideGameConfig,
-    },
+        EventCollection,
+        EventData,
+        GAMECONSTANTS,
+        GAMEDATA,
+        GameConfig,
+        MctsConfig,
+        OverrideConfig,
+        OverrideGameConfig
+    }
 };
 
 pub type Array5 = [i32; 5];
@@ -348,11 +355,11 @@ pub fn resolve_user_config_path() -> std::path::PathBuf {
 pub fn validate_game_config(config: &GameConfig) -> Result<()> {
     match config.scenario.as_str() {
         "basic" | "onsen" | "ramen" => {}
-        other => anyhow::bail!("未知 scenario={other:?}，应为 basic | onsen | ramen"),
+        other => anyhow::bail!("未知 scenario={other:?}，应为 basic | onsen | ramen")
     }
     match config.trainer.as_str() {
         "manual" | "random" | "handwritten" | "collector" | "neuralnet" | "mcts" => {}
-        other => anyhow::bail!("未知 trainer={other:?}"),
+        other => anyhow::bail!("未知 trainer={other:?}")
     }
     if config.cards.len() != 6 {
         anyhow::bail!("cards 长度应为 6，实际 {}", config.cards.len());
@@ -367,7 +374,7 @@ pub fn validate_game_config(config: &GameConfig) -> Result<()> {
                 "ramen_region_strategy=fixed 但 ramen_region_fixed 长度 = {}（应为 1）",
                 fixed.len()
             ),
-            None => anyhow::bail!("ramen_region_strategy=fixed 但未设置 ramen_region_fixed"),
+            None => anyhow::bail!("ramen_region_strategy=fixed 但未设置 ramen_region_fixed")
         }
     }
     Ok(())
@@ -402,9 +409,9 @@ pub fn load_game_config() -> Result<GameConfig> {
                 num_threads: None,
                 mcts_turn_bonus: None,
                 pt_favor_rate: None,
-                race_grades: None,
+                race_grades: None
             },
-            mcts: MctsConfig::default(),
+            mcts: MctsConfig::default()
         }
     };
 

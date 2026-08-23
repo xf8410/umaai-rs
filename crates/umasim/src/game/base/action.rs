@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diag,
     game::{base::*, *},
-    gamedata::{ActionValue, GAMECONSTANTS},
+    gamedata::{ActionValue, GAMECONSTANTS}
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,7 +25,7 @@ pub enum BaseAction {
     /// 普通出行
     NormalOuting,
     /// 治病
-    Clinic,
+    Clinic
 }
 
 impl Display for BaseAction {
@@ -36,7 +36,7 @@ impl Display for BaseAction {
             BaseAction::Sleep => write!(f, "休息"),
             BaseAction::FriendOuting => write!(f, "友人出行"),
             BaseAction::NormalOuting => write!(f, "普通出行"),
-            BaseAction::Clinic => write!(f, "治病"),
+            BaseAction::Clinic => write!(f, "治病")
         }
     }
 }
@@ -162,7 +162,7 @@ impl ActionEnum for BaseAction {
             BaseAction::Sleep => BaseAction::do_sleep(game, rng),
             BaseAction::FriendOuting => BaseAction::do_friend_outing(game, rng),
             BaseAction::NormalOuting => BaseAction::do_normal_outing(game, rng),
-            BaseAction::Clinic => BaseAction::do_clinic(game, rng),
+            BaseAction::Clinic => BaseAction::do_clinic(game, rng)
         }
     }
 
@@ -176,7 +176,7 @@ impl ActionEnum for BaseAction {
 pub struct ActionScore<A: ActionEnum + Serialize> {
     pub selection: A,
     pub actions: Vec<A>,
-    pub score: Vec<f64>,
+    pub score: Vec<f64>
 }
 
 impl<A: ActionEnum + Serialize> ActionScore<A> {
@@ -186,7 +186,7 @@ impl<A: ActionEnum + Serialize> ActionScore<A> {
             Self {
                 selection,
                 actions,
-                score: default_score,
+                score: default_score
             }
         } else {
             Self { selection, actions, score }

@@ -7,7 +7,7 @@ use umasim::{
     game::{BaseGame, BasePerson, FriendOutState, FriendState, InheritInfo, SupportCard, TurnStage, Uma, UmaFlags},
     gamedata::{EventData, GAMEDATA},
     global,
-    utils::{Array5, load_game_config},
+    utils::{Array5, load_game_config}
 };
 
 pub mod onsen;
@@ -36,7 +36,7 @@ pub struct BasePersonStatus {
     /// 羁绊
     pub friendship: i32,
     /// 是否叹号
-    pub is_hint: bool,
+    pub is_hint: bool
 }
 
 /// 从小黑板接收的数据的baseGame字段
@@ -119,7 +119,7 @@ pub struct GameStatusBase {
     #[serde(default)]
     pub race_history: Vec<i32>,
     /// 事件信息
-    pub story: Option<StoryStatus>,
+    pub story: Option<StoryStatus>
 }
 
 impl GameStatusBase {
@@ -151,7 +151,7 @@ impl GameStatusBase {
             race_bonus: 0,
             flags,
             career_races: data.zip_races(),
-            win_races: 0,
+            win_races: 0
         };
         // 设置比赛状态
         for t in &self.race_history {
@@ -174,7 +174,7 @@ impl GameStatusBase {
                     0 => FriendOutState::UnClicked,
                     1 => FriendOutState::BeforeUnlock,
                     2 => FriendOutState::AfterUnlock,
-                    _ => FriendOutState::Away,
+                    _ => FriendOutState::Away
                 };
                 for i in 0..self.friend_outgoing_used {
                     friend.out_used[i as usize] = true;
@@ -192,7 +192,7 @@ impl GameStatusBase {
         let game_config = load_game_config()?;
         Ok(InheritInfo {
             blue_count: self.zhongma_blue_count.clone(),
-            extra_count: game_config.extra_count.clone(),
+            extra_count: game_config.extra_count.clone()
         })
     }
 
@@ -248,7 +248,7 @@ impl From<&BasePerson> for BasePersonStatus {
             person_type: 0, // 没使用这个字段
             chara_id: person.chara_id,
             friendship: person.friendship,
-            is_hint: person.is_hint,
+            is_hint: person.is_hint
         }
     }
 }
@@ -300,7 +300,7 @@ impl From<&BaseGame> for GameStatusBase {
             friend_outgoing_used,
             playing_state: 1,
             race_history: game.uma.list_races(),
-            story: None,
+            story: None
         }
     }
 }

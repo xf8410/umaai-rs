@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     game::CardTrainingEffect,
     gamedata::{ActionValue, EventData, TrainingBasicTable, load_json},
-    utils::{Array5, AttributeArray},
+    utils::{Array5, AttributeArray}
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub struct OnsenScenarioData {
     /// 超回复触发概率
     pub super_probs: Vec<i32>,
     /// 剧本事件
-    pub scenario_events: Vec<EventData>,
+    pub scenario_events: Vec<EventData>
 }
 
 impl OnsenScenarioData {
@@ -69,7 +69,7 @@ pub struct OnsenInfo {
     /// 挖掘量
     pub dig_volume: Vec<i32>,
     /// 效果
-    pub effect: OnsenEffect,
+    pub effect: OnsenEffect
 }
 
 /// 温泉效果词条
@@ -116,7 +116,7 @@ pub struct OnsenEffect {
     pub hint: i32,
     /// 临时体力
     #[serde(default)]
-    pub temp_max_vital: i32,
+    pub temp_max_vital: i32
 }
 
 impl OnsenEffect {
@@ -157,7 +157,7 @@ pub struct HotelEffect {
     /// 得意率
     pub deyilv: i32,
     /// Hint数量
-    pub hint: i32,
+    pub hint: i32
 }
 
 pub static ONSENDATA: OnceLock<OnsenScenarioData> = OnceLock::new();

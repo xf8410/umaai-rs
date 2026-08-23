@@ -14,21 +14,27 @@ use rand::{Rng, SeedableRng, prelude::IndexedRandom, rngs::StdRng};
 use rand_distr::{Distribution, weighted::WeightedIndex};
 
 use super::{
-    FeelingType, Operation, RamenAction, RamenGame, RamenStage,
+    FeelingType,
+    Operation,
+    RamenAction,
+    RamenGame,
+    RamenStage,
     effects::calc_ramen_training_effect,
     events::assign_train_feeling_type,
-    rules::{self, get_turn_special_feeling},
+    rules::{self, get_turn_special_feeling}
 };
 use crate::{
     diag,
     game::{
-        BasePerson, FriendOutState, PersonType,
+        BasePerson,
+        FriendOutState,
+        PersonType,
         traits::{Game, Person, Trainer},
-        uma::Uma,
+        uma::Uma
     },
     gamedata::{ActionValue, EventData, GAMECONFIG, GAMECONSTANTS, RamenRegionStrategy, TriggerType, ramen::RAMENDATA},
     global,
-    utils::{AttributeArray, global_events, system_event, system_event_prob},
+    utils::{AttributeArray, global_events, system_event, system_event_prob}
 };
 
 impl Game for RamenGame {
@@ -165,8 +171,8 @@ impl Game for RamenGame {
                                 self.internal_rng = Some(r);
                                 e
                             }
-                            None => self.apply_event(&event, 0, &mut StdRng::from_os_rng()).is_err(),
-                        },
+                            None => self.apply_event(&event, 0, &mut StdRng::from_os_rng()).is_err()
+                        }
                     };
                     if err {
                         crate::diag!("RMJ 事件 #{} apply 失败: {:?}", event.id, event.name);
@@ -225,7 +231,7 @@ impl Game for RamenGame {
                     2 => 0,
                     23 => 1,
                     47 => 2,
-                    _ => unreachable!("unexpected turn for RegionSelect: {}", self.base.turn),
+                    _ => unreachable!("unexpected turn for RegionSelect: {}", self.base.turn)
                 };
                 self.run_region_select(trainer, rng, year_idx)?;
             }
@@ -255,7 +261,7 @@ impl Game for RamenGame {
                 if self.base.turn >= 2 && !self.is_super_ramen_turn() {
                     Ok(super::action::list_ramen_select_actions(
                         &self.ramen,
-                        &self.ramen.selected_regions,
+                        &self.ramen.selected_regions
                     ))
                 } else {
                     Ok(vec![RamenAction::ramen_select(None)])
@@ -272,7 +278,7 @@ impl Game for RamenGame {
                 can_friend_outing,
                 is_ill,
                 self.is_xiahesu(),
-                can_race,
+                can_race
             )),
             // 其他阶段的 list_actions 保留旧行为（虽然外部不会在此阶段调）
             _ => {
@@ -286,7 +292,7 @@ impl Game for RamenGame {
                     can_friend_outing,
                     is_ill,
                     self.is_xiahesu(),
-                    can_race,
+                    can_race
                 ))
             }
         }
@@ -493,7 +499,7 @@ impl Game for RamenGame {
             // 友人卡：有 group buff 时闪耀
             PersonType::ScenarioCard => self.has_group_buff(),
             // NPC、理事长、记者不能闪耀
-            _ => false,
+            _ => false
         }
     }
 
@@ -635,7 +641,7 @@ impl Game for RamenGame {
         match self.persons[person_index].person_type {
             PersonType::ScenarioCard => self.base.turn >= 2,
             PersonType::Reporter => self.base.turn >= 12,
-            _ => true,
+            _ => true
         }
     }
 
@@ -823,8 +829,8 @@ impl RamenGame {
                     self.internal_rng = Some(r);
                     err
                 }
-                None => self.ground_ramen_effects(&mut StdRng::from_os_rng()).is_err(),
-            },
+                None => self.ground_ramen_effects(&mut StdRng::from_os_rng()).is_err()
+            }
         }
     }
 
@@ -1158,12 +1164,12 @@ impl RamenGame {
         // 友人解锁判定（触发条件依赖 friend.out_state——是否点击友人）
         let unlock_event = match ev.as_mut() {
             Some(s) => self.try_friend_unlock(s),
-            None => self.try_friend_unlock(rng),
+            None => self.try_friend_unlock(rng)
         };
         // 事件生成（随机部分；Fixed 剧本事件无随机，天然逐位一致）
         let mut events = match ev.as_mut() {
             Some(s) => self.generate_events(s),
-            None => self.generate_events(rng),
+            None => self.generate_events(rng)
         };
         if unlock_event.is_some() {
             // 解锁触发时取代一般随机事件（与原语义一致）
@@ -1174,7 +1180,7 @@ impl RamenGame {
         for event in &events {
             match ev.as_mut() {
                 Some(s) => self.run_event_on(event, trainer, rng, s)?,
-                None => self.run_event(event, trainer, rng)?,
+                None => self.run_event(event, trainer, rng)?
             }
         }
         self.event = ev;
@@ -1255,7 +1261,7 @@ impl RamenGame {
                 let mut strat = self.strategy.take();
                 match strat.as_mut() {
                     Some(s) => super::action::RamenAction::distribute_super_ramen_clones(self, s)?,
-                    None => super::action::RamenAction::distribute_super_ramen_clones(self, rng)?,
+                    None => super::action::RamenAction::distribute_super_ramen_clones(self, rng)?
                 }
                 self.strategy = strat;
             }
@@ -1282,7 +1288,7 @@ impl RamenGame {
         let mut strat = self.strategy.take();
         let result = match strat.as_mut() {
             Some(s) => self.apply_action(action, s),
-            None => self.apply_action(action, rng),
+            None => self.apply_action(action, rng)
         };
         self.strategy = strat;
         result
@@ -1341,7 +1347,7 @@ impl RamenGame {
     // 与 `Game::run_event` 默认实现（决策/规则共流）不同：规则层改造后事件结果
     // 必须由调用点决定用哪条规则流——回合开始固定事件用固定流，策略触发事件用策略流。
     fn run_event_on<T: Trainer<Self>>(
-        &mut self, event: &EventData, trainer: &T, decision_rng: &mut StdRng, rule_rng: &mut impl Rng,
+        &mut self, event: &EventData, trainer: &T, decision_rng: &mut StdRng, rule_rng: &mut impl Rng
     ) -> Result<()> {
         diag!("【事件】#{} {}", event.id, event.name);
         if event.player_select && event.choices.len() > 1 {
@@ -1442,7 +1448,7 @@ impl RamenGame {
         let init_val = match friend_card {
             Some(card) if card.card_id == 30305 => 2,                     // 新友人
             Some(card) if matches!(card.data.chara_id, 9001 | 9008) => 1, // 旧友人
-            _ => 0,                                                       // 无友人卡
+            _ => 0                                                        // 无友人卡
         };
 
         self.ramen.feeling_stock = [init_val; 3];
@@ -1728,7 +1734,7 @@ impl RamenGame {
     /// 暂时屏蔽（训练数值计算明细）：调用点已注释，需要时恢复调用并删除本 allow。
     #[allow(dead_code)]
     fn collect_train_lines(
-        &self, lines: &mut Vec<String>, headers: &[String], _dist: &[Vec<i32>], show_ramen: bool,
+        &self, lines: &mut Vec<String>, headers: &[String], _dist: &[Vec<i32>], show_ramen: bool
     ) -> Result<()> {
         for train in 0..5 {
             lines.push(self.train_value_line(&headers[train], train, show_ramen)?);
@@ -1875,7 +1881,7 @@ fn find_rmj_event(year_idx: usize) -> Option<crate::gamedata::EventData> {
         0 => 401404,
         1 => 401405,
         2 => 401406,
-        _ => return None,
+        _ => return None
     };
     ramen_data.scenario_events.iter().find(|e| e.id == target_id).cloned()
 }
@@ -1896,7 +1902,7 @@ fn rmj_event_year(event_id: u32) -> Option<usize> {
         401404 => Some(0),
         401405 => Some(1),
         401406 => Some(2),
-        _ => None,
+        _ => None
     }
 }
 
@@ -1911,15 +1917,15 @@ fn rmj_event_year(event_id: u32) -> Option<usize> {
 /// - 优先按 `result` 字段匹配（成功→2，失败→1）
 /// - 若无 `result` 字段匹配，则回退到第 0 个分支（防御性）
 fn select_rmj_choice_by_result(
-    choices: &[crate::gamedata::EventChoice], is_success: Option<bool>,
+    choices: &[crate::gamedata::EventChoice], is_success: Option<bool>
 ) -> Option<&crate::gamedata::EventChoice> {
     if choices.is_empty() {
         return None;
     }
     let target_result = match is_success {
-        Some(true) => 2,                  // 成功 → result=2
-        Some(false) => 1,                 // 失败 → result=1
-        None => return Some(&choices[0]), // 无结算结果时回退到第一个分支
+        Some(true) => 2,                 // 成功 → result=2
+        Some(false) => 1,                // 失败 → result=1
+        None => return Some(&choices[0]) // 无结算结果时回退到第一个分支
     };
     choices.iter().find(|c| c.result == target_result).or(Some(&choices[0]))
 }
@@ -1935,7 +1941,7 @@ mod tests {
         game::{PersonType, ramen::events::assign_train_feeling_type},
         gamedata::{ActionValue, EventChoice, init_global},
         trainer::{ManualTrainer, RandomTrainer},
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     // 测试用公共参数
@@ -1943,7 +1949,7 @@ mod tests {
     const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
     const TEST_INHERIT: crate::game::InheritInfo = crate::game::InheritInfo {
         blue_count: [15, 3, 0, 0, 0],
-        extra_count: [0, 30, 0, 0, 30, 30],
+        extra_count: [0, 30, 0, 0, 30, 30]
     };
     const TEST_UMA_ID: u32 = 102601;
 
@@ -2157,7 +2163,7 @@ mod tests {
             FeelingType::B,
             FeelingType::C,
             FeelingType::A,
-            FeelingType::B,
+            FeelingType::B
         ]);
 
         use crate::game::traits::{ActionEnum, Game};

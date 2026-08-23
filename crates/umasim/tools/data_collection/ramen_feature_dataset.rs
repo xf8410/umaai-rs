@@ -9,14 +9,16 @@ use anyhow::Result;
 use serde::Serialize;
 use umasim::{
     game::{
-        Game, InheritInfo, Person,
-        ramen::{Operation, RamenAction, RamenGame, RamenStage},
+        Game,
+        InheritInfo,
+        Person,
+        ramen::{Operation, RamenAction, RamenGame, RamenStage}
     },
     gamedata::{GAMECONSTANTS, init_global_with_config, ramen::RAMENDATA},
     global,
     sampler::{SampleOutcome, SampleSpec, sample_from_spec},
     search::{FlatSearch, SearchConfig},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 const UMA: u32 = 102601;
@@ -26,12 +28,12 @@ const DECKS: [[u32; 6]; 5] = [
     [303024, 302984, 303074, 303044, 303094, 303054],
     [303014, 302974, 303094, 303064, 302894, 303054],
     [303024, 302984, 303074, 303094, 303064, 303054],
-    [303024, 303074, 303094, 303064, 302894, 303054],
+    [303024, 303074, 303094, 303064, 302894, 303054]
 ];
 const BUILD_NAMES: [&str; 5] = ["3速1耐1智", "2速2耐1智", "2力3智", "2速1耐2智", "1速1耐3智"];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 
 #[derive(Serialize)]
@@ -47,7 +49,7 @@ struct Row {
     s: Vec<f32>,
     m: Vec<f32>,
     mid: Vec<f32>,
-    l: Vec<f32>,
+    l: Vec<f32>
 }
 
 fn stage_index(stage: &RamenStage) -> usize {
@@ -61,7 +63,7 @@ fn stage_index(stage: &RamenStage) -> usize {
         RamenStage::NextTurn => 6,
         RamenStage::RegionSelect => 7,
         RamenStage::SuperRamenSelect => 8,
-        RamenStage::Settlement => 9,
+        RamenStage::Settlement => 9
     }
 }
 
@@ -82,7 +84,7 @@ fn action_features(game: &RamenGame, action: &RamenAction) -> Vec<f32> {
                 }
             }
         }
-        Operation::StageOnly => f[11] = 1.0,
+        Operation::StageOnly => f[11] = 1.0
     }
     if let Some(r) = action.ramen {
         f[12] = 1.0;
@@ -131,7 +133,7 @@ fn state_s(game: &RamenGame) -> Result<Vec<f32>> {
         game.ramen.special_feeling as f32 / 4.0,
         game.ramen.eat_count as f32 / 8.0,
         game.ramen.train_level_bonus as f32 / 5.0,
-        game.ramen.rmj_results.len() as f32 / 3.0,
+        game.ramen.rmj_results.len() as f32 / 3.0
     ]);
     for &v in &game.ramen.feeling_stock {
         f.push(v as f32 / 10.0);
@@ -182,7 +184,7 @@ fn state_m(game: &RamenGame, mut f: Vec<f32>, with_id: bool) -> Vec<f32> {
             f.push(
                 game.distribution()
                     .get(train)
-                    .is_some_and(|d| d.contains(&(idx as i32))) as u8 as f32,
+                    .is_some_and(|d| d.contains(&(idx as i32))) as u8 as f32
             );
         }
         if with_id {
@@ -202,13 +204,13 @@ fn state_l(game: &RamenGame, mut f: Vec<f32>) -> Vec<f32> {
                 person
                     .filter(|p| *p >= 0)
                     .map(|p| game.persons()[p as usize].friendship() as f32 / 100.0)
-                    .unwrap_or(0.0),
+                    .unwrap_or(0.0)
             );
             f.push(
                 person
                     .filter(|p| *p >= 0)
                     .map(|p| game.persons()[p as usize].hint() as u8 as f32)
-                    .unwrap_or(0.0),
+                    .unwrap_or(0.0)
             );
         }
     }
@@ -222,7 +224,7 @@ fn state_l(game: &RamenGame, mut f: Vec<f32>) -> Vec<f32> {
         game.current_effect.hint as f32 / 100.0,
         game.current_effect.clone as f32 / 6.0,
         game.current_effect.hint_special as u8 as f32,
-        game.deck_can_split as u8 as f32,
+        game.deck_can_split as u8 as f32
     ]);
     for r in 0..20 {
         f.push(game.ramen.selected_regions.contains(&r) as u8 as f32);
@@ -240,7 +242,7 @@ fn main() -> Result<()> {
         SearchConfig::default()
             .with_search_n(rollouts)
             .with_ucb(false)
-            .with_radical_factor_max(0.0),
+            .with_radical_factor_max(0.0)
     );
     let mut out = File::create("ramen-feature-dataset.jsonl")?;
     for index in start..start + count {
@@ -254,7 +256,7 @@ fn main() -> Result<()> {
             truncate_turn: ((index.wrapping_mul(37).wrapping_add(11)) % 72) as i32,
             seed: BASE_SEED ^ index.wrapping_mul(0x9e37_79b9_7f4a_7c15),
             epsilon: 0.15,
-            min_actions: 2,
+            min_actions: 2
         };
         let SampleOutcome::Captured(pos) = sample_from_spec(spec)? else {
             continue;
@@ -284,7 +286,7 @@ fn main() -> Result<()> {
                 s: append(s0.clone()),
                 m: append(m0.clone()),
                 mid: append(mid0.clone()),
-                l: append(l0.clone()),
+                l: append(l0.clone())
             };
             serde_json::to_writer(&mut out, &row)?;
             writeln!(out)?;

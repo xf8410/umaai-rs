@@ -16,7 +16,7 @@ use rand::prelude::StdRng;
 use crate::{
     game::{Trainer, onsen::game::OnsenGame},
     gamedata::EventChoice,
-    neural::{Evaluator, HandwrittenEvaluator},
+    neural::{Evaluator, HandwrittenEvaluator}
 };
 
 /// 手写策略训练员
@@ -26,7 +26,7 @@ use crate::{
 pub struct HandwrittenTrainer {
     pub evaluator: HandwrittenEvaluator,
     pub verbose: bool,
-    pub record: bool,
+    pub record: bool
 }
 
 impl HandwrittenTrainer {
@@ -35,7 +35,7 @@ impl HandwrittenTrainer {
         Self {
             evaluator: HandwrittenEvaluator::new(),
             verbose: false,
-            record: false,
+            record: false
         }
     }
 
@@ -55,7 +55,7 @@ impl HandwrittenTrainer {
         Self {
             evaluator: HandwrittenEvaluator::speed_build(),
             verbose: false,
-            record: false,
+            record: false
         }
     }
 
@@ -64,7 +64,7 @@ impl HandwrittenTrainer {
         Self {
             evaluator: HandwrittenEvaluator::stamina_build(),
             verbose: false,
-            record: false,
+            record: false
         }
     }
 }
@@ -77,7 +77,7 @@ impl Default for HandwrittenTrainer {
 
 impl Trainer<OnsenGame> for HandwrittenTrainer {
     fn select_action(
-        &self, game: &OnsenGame, actions: &[<OnsenGame as crate::game::Game>::Action], rng: &mut StdRng,
+        &self, game: &OnsenGame, actions: &[<OnsenGame as crate::game::Game>::Action], rng: &mut StdRng
     ) -> Result<usize> {
         use crate::game::onsen::action::OnsenAction;
 
@@ -124,7 +124,7 @@ impl Trainer<OnsenGame> for HandwrittenTrainer {
         // 找到选中动作在列表中的索引
         let idx = match &selected_action {
             Some(action) => actions.iter().position(|a| *a == action.selection).unwrap_or(0),
-            None => 0,
+            None => 0
         };
 
         if self.verbose {

@@ -34,7 +34,7 @@ use umasim::{
     global,
     output::decision_log::DecisionLogRow,
     trainer::{LoggingTrainer, RamenHandwrittenTrainer, RandomTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 /// bench_config.toml 的配置项（CLI 参数可覆盖同名项）
@@ -57,7 +57,7 @@ struct BenchConfig {
     /// 是否落盘决策日志
     decision_log: bool,
     /// 训练员: "random"（基线）| "handwritten"（手写策略）
-    trainer: String,
+    trainer: String
 }
 
 /// 内置默认值（与 bench_config.toml 保持一致；文件缺失时使用）
@@ -72,7 +72,7 @@ impl Default for BenchConfig {
             seed: 42,
             out_dir: "logs".to_string(),
             decision_log: false,
-            trainer: "random".to_string(),
+            trainer: "random".to_string()
         }
     }
 }
@@ -92,7 +92,7 @@ const RESULTS_HEADER: [&str; 14] = [
     "scenario_pt",
     "rmj_ok",
     "eat_count",
-    "elapsed_ms",
+    "elapsed_ms"
 ];
 
 /// 解析 CLI 参数（`--key value` 或 `--key=value`），覆盖 bench 配置
@@ -175,7 +175,7 @@ struct BuildResults {
     /// build 名。
     name: String,
     /// 每局结果。
-    outcomes: Vec<bench::GameOutcome>,
+    outcomes: Vec<bench::GameOutcome>
 }
 
 fn main() -> Result<()> {
@@ -199,7 +199,7 @@ fn main() -> Result<()> {
 
     let inherit = InheritInfo {
         blue_count: cfg.blue_count,
-        extra_count: cfg.extra_count,
+        extra_count: cfg.extra_count
     };
 
     println!(
@@ -222,7 +222,7 @@ fn main() -> Result<()> {
             .iter()
             .map(|id| match data.get_card(id / 10) {
                 Ok(card) => format!("{} {}", id, card.card_name),
-                Err(_) => id.to_string(),
+                Err(_) => id.to_string()
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -244,7 +244,7 @@ fn main() -> Result<()> {
                     let outcome = bench::run_seeded(cfg.uma, &deck, &inherit, cfg.seed, run_idx, &trainer)?;
                     (outcome, trainer.take_records())
                 }
-                other => anyhow::bail!("未知 trainer: {other}（可选 random / handwritten）"),
+                other => anyhow::bail!("未知 trainer: {other}（可选 random / handwritten）")
             };
             println!(
                 "  [#{:02}] seed={} score={} ({}) PT={} RMJ={}/3 耗时={:.3}ms",

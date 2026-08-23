@@ -1,29 +1,32 @@
 //! 分年份动态技能 PT 权重与结构手写逻辑实验：相同 seed 配对基准与候选。
 
+use std::{env, fs::File, io::Write, sync::Mutex};
+
 use anyhow::{Context, Result};
 use rand::prelude::StdRng;
-use std::{env, fs::File, io::Write, sync::Mutex};
 use umasim::{
     bench,
     game::{
-        Game, InheritInfo, Trainer,
-        ramen::{RamenAction, RamenGame},
+        Game,
+        InheritInfo,
+        Trainer,
+        ramen::{RamenAction, RamenGame}
     },
     gamedata::{EventChoice, EventData, GAMECONSTANTS, init_global_with_config},
     global,
     trainer::{LocalRamenTrainer, LoggingTrainer, RamenHandwrittenTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 const BASE_SEED: u64 = 61444;
 const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 struct PhaseTrainer {
     years: [LocalRamenTrainer; 3],
-    last: Mutex<Option<usize>>,
+    last: Mutex<Option<usize>>
 }
 impl PhaseTrainer {
     fn new(pt: [u32; 3], sac: u32, extra: &str) -> Result<Self> {
@@ -35,7 +38,7 @@ impl PhaseTrainer {
         let make = |p| LocalRamenTrainer::matrix_variant(&format!("pt{p}-sac{sac}-long-fail0{suffix}"));
         Ok(Self {
             years: [make(pt[0])?, make(pt[1])?, make(pt[2])?],
-            last: Mutex::new(None),
+            last: Mutex::new(None)
         })
     }
     fn year(g: &RamenGame) -> usize {
@@ -60,7 +63,7 @@ impl Trainer<RamenGame> for PhaseTrainer {
         self.years[y].select_choice(g, c, r)
     }
     fn select_event_choice(
-        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng,
+        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng
     ) -> Result<usize> {
         let y = Self::year(g);
         *self.last.lock().unwrap() = Some(y);
@@ -85,7 +88,7 @@ fn main() -> Result<()> {
     let pt = [
         env::var("PT1")?.parse()?,
         env::var("PT2")?.parse()?,
-        env::var("PT3")?.parse()?,
+        env::var("PT3")?.parse()?
     ];
     let sac = env::var("SAC")?.parse()?;
     let extra = env::var("STRUCTURE").unwrap_or_default();

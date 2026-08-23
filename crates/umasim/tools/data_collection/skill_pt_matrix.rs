@@ -9,7 +9,7 @@ use umasim::{
     gamedata::{GAMECONSTANTS, init_global_with_config},
     global,
     trainer::{LocalRamenTrainer, LoggingTrainer, RamenHandwrittenTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 const BASE_SEED: u64 = 61444;
@@ -17,7 +17,7 @@ const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 
 fn status_score(status: &[i32; 5]) -> i32 {

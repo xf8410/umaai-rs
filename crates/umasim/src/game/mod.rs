@@ -37,7 +37,7 @@ pub enum TurnStage {
     AfterTrain,
     // ---
     /// 6. 结束，剧本结算
-    End,
+    End
 }
 
 /// 训练人头类型
@@ -57,7 +57,7 @@ pub enum PersonType {
     /// 其他友人
     OtherFriend,
     /// 团队卡
-    TeamCard,
+    TeamCard
 }
 
 /// 回合阶段
@@ -69,7 +69,7 @@ pub enum FriendCardState {
     /// 3星友人
     SSR,
     /// 1星友人
-    R,
+    R
 }
 
 impl Display for FriendCardState {
@@ -77,7 +77,7 @@ impl Display for FriendCardState {
         match self {
             Self::Empty => write!(f, "没带"),
             Self::SSR => write!(f, "SSR"),
-            Self::R => write!(f, "R"),
+            Self::R => write!(f, "R")
         }
     }
 }
@@ -93,7 +93,7 @@ pub enum FriendOutState {
     /// 已出行
     AfterUnlock,
     /// 离开
-    Away,
+    Away
 }
 
 impl FriendOutState {
@@ -102,7 +102,7 @@ impl FriendOutState {
             Self::UnClicked => "未点击".to_string(),
             Self::BeforeUnlock => "未出行".to_string(),
             Self::AfterUnlock => "已出行".to_string(),
-            Self::Away => "离开".to_string(),
+            Self::Away => "离开".to_string()
         }
     }
 
@@ -111,7 +111,7 @@ impl FriendOutState {
             Self::UnClicked => 0,
             Self::BeforeUnlock => 1,
             Self::AfterUnlock => 2,
-            Self::Away => 3,
+            Self::Away => 3
         }
     }
 }
@@ -132,7 +132,7 @@ pub struct FriendState {
     /// 友人事件体力回复量加成
     pub vital_bonus: i32,
     /// 友人事件效果加成
-    pub event_bonus: i32,
+    pub event_bonus: i32
 }
 
 impl FriendState {
@@ -148,7 +148,7 @@ impl FriendState {
             let card = data.get_card(id)?;
             ret.card_state = match card.rarity {
                 3 => FriendCardState::SSR,
-                _ => FriendCardState::R,
+                _ => FriendCardState::R
             };
             ret.vital_bonus = card.card_value[rank as usize].event_recovery_amount_up;
             ret.event_bonus = card.card_value[rank as usize].event_effect_up;
@@ -177,7 +177,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]

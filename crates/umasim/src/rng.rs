@@ -67,7 +67,7 @@ pub enum StreamTag {
     /// 事件流（回合开始事件链）
     Event,
     /// 探测流（MCTS 预留）
-    Probe,
+    Probe
 }
 
 impl StreamTag {
@@ -77,7 +77,7 @@ impl StreamTag {
             Self::TurnFixed => 0,
             Self::Strategy => STRATEGY_TAG,
             Self::Event => EVENT_TAG,
-            Self::Probe => PROBE_TAG,
+            Self::Probe => PROBE_TAG
         }
     }
 }
@@ -95,7 +95,7 @@ pub struct SplitmixRng {
     /// 流主种子（本流随机序列的确定性来源）
     master: u64,
     /// 本回合内已消费次数（第 N 次随机 = N）
-    counter: u64,
+    counter: u64
 }
 
 impl SplitmixRng {

@@ -20,7 +20,7 @@ pub struct BasePerson {
     /// 是否有叹号
     pub is_hint: bool,
     /// 支援卡信息
-    pub card_id: Option<u32>,
+    pub card_id: Option<u32>
 }
 
 impl BasePerson {
@@ -60,7 +60,7 @@ impl BasePerson {
             chara_id: 9002,
             friendship: 0,
             is_hint: false,
-            card_id: None,
+            card_id: None
         }
     }
 
@@ -72,7 +72,7 @@ impl BasePerson {
             chara_id: 9003,
             friendship: 0,
             is_hint: false,
-            card_id: None,
+            card_id: None
         }
     }
 }
@@ -105,7 +105,7 @@ impl TryFrom<&SupportCard> for BasePerson {
             0..=4 => PersonType::Card,
             5 => PersonType::ScenarioCard,
             6 => PersonType::TeamCard,
-            _ => PersonType::Card,
+            _ => PersonType::Card
         };
         Ok(BasePerson {
             person_index: 0,
@@ -114,7 +114,7 @@ impl TryFrom<&SupportCard> for BasePerson {
             chara_id: card.data.chara_id,
             friendship: card.friendship,
             is_hint: false,
-            card_id: Some(card.card_id),
+            card_id: Some(card.card_id)
         })
     }
 }

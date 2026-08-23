@@ -20,19 +20,19 @@ use umasim::{
     gamedata::{GAMECONSTANTS, init_global_with_config},
     global,
     trainer::*,
-    utils::{init_logger, load_game_config},
+    utils::{init_logger, load_game_config}
 };
 
 /// 单次模拟结果
 struct SimulationResult {
     score: i32,
     pt: i32,
-    explain: String,
+    explain: String
 }
 
 /// 运行 OnsenGame（单次），返回模拟结果
 fn run_onsen_once<T: Trainer<OnsenGame>>(
-    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng,
+    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng
 ) -> Result<SimulationResult> {
     let mut game = OnsenGame::newgame(uma, cards, inherit)?;
     // println!("{game:#?}");
@@ -52,7 +52,7 @@ fn run_onsen_once<T: Trainer<OnsenGame>>(
 /// RNG 受控重构后未注入 rule_master 时规则层回退旧行为（用传入的决策 rng），
 /// 与主二进制的随机模拟（`StdRng::from_os_rng()`）语义一致。
 fn run_ramen_once<T: Trainer<RamenGame>>(
-    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng,
+    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng
 ) -> Result<SimulationResult> {
     let mut game = RamenGame::newgame(uma, cards, inherit)?;
     game.run_full_game(trainer, rng)?;
@@ -67,7 +67,7 @@ fn run_ramen_once<T: Trainer<RamenGame>>(
 
 /// 运行 BasicGame（单次），返回模拟结果
 fn run_basic_once<T: Trainer<BasicGame>>(
-    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng,
+    trainer: &T, uma: u32, cards: &[u32; 6], inherit: InheritInfo, rng: &mut StdRng
 ) -> Result<SimulationResult> {
     let mut game = BasicGame::newgame(uma, cards, inherit)?;
     game.run_full_game(trainer, rng)?;
@@ -276,7 +276,7 @@ async fn main() -> Result<()> {
 
     let inherit = InheritInfo {
         blue_count: game_config.blue_count.clone(),
-        extra_count: game_config.extra_count.clone(),
+        extra_count: game_config.extra_count.clone()
     };
 
     // 收集模拟结果

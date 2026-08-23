@@ -16,7 +16,7 @@ pub struct FreeRaceData {
     pub grade: Option<u32>,
     /// 比赛掩码，json里不存在，载入时计算
     #[serde(default)]
-    pub mask: u64,
+    pub mask: u64
 }
 
 impl FreeRaceData {
@@ -54,7 +54,7 @@ pub struct UmaData {
     /// 比赛回合
     pub races: Vec<i32>,
     /// 自由比赛回合
-    pub free_races: Vec<FreeRaceData>,
+    pub free_races: Vec<FreeRaceData>
 }
 
 impl UmaData {

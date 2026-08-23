@@ -8,7 +8,7 @@ use rand::{Rng, prelude::StdRng, seq::SliceRandom};
 
 use crate::{
     game::{ActionEnum, BaseAction, Game, Trainer},
-    gamedata::EventChoice,
+    gamedata::EventChoice
 };
 
 pub mod handwritten_trainer;
@@ -82,13 +82,13 @@ fn any_ramen_action<A>(_action: &A) -> Option<&crate::game::ramen::RamenAction> 
 
 pub struct ManualTrainer {
     pub mock_inputs: Rc<RefCell<VecDeque<String>>>,
-    pub fallback: FallbackMode,
+    pub fallback: FallbackMode
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FallbackMode {
     Interactive,
-    PickFirst,
+    PickFirst
 }
 
 impl Default for ManualTrainer {
@@ -101,13 +101,13 @@ impl ManualTrainer {
     pub fn new() -> Self {
         Self {
             mock_inputs: Rc::new(RefCell::new(VecDeque::new())),
-            fallback: FallbackMode::Interactive,
+            fallback: FallbackMode::Interactive
         }
     }
     pub fn with_mock_inputs(inputs: Vec<String>) -> Self {
         Self {
             mock_inputs: Rc::new(RefCell::new(inputs.into_iter().collect())),
-            fallback: FallbackMode::PickFirst,
+            fallback: FallbackMode::PickFirst
         }
     }
     fn pop_mock_input(&self) -> Option<String> {
@@ -144,7 +144,7 @@ impl<G: Game> Trainer<G> for ManualTrainer {
             #[cfg(not(feature = "cli"))]
             FallbackMode::Interactive => Err(anyhow::anyhow!(
                 "ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs"
-            )),
+            ))
         }
     }
 
@@ -172,7 +172,7 @@ impl<G: Game> Trainer<G> for ManualTrainer {
             #[cfg(not(feature = "cli"))]
             FallbackMode::Interactive => Err(anyhow::anyhow!(
                 "ManualTrainer::Interactive 需要 cli feature；请改用 with_mock_inputs"
-            )),
+            ))
         }
     }
 }

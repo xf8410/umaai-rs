@@ -7,30 +7,30 @@
 //!
 //! 按项目规范以 println 输出对比结果，不 assert。
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use anyhow::Result;
-
 use rand::RngCore;
 
 use crate::{
     bench::seeded_rngs,
     game::{
-        ActionEnum, Game, InheritInfo,
+        ActionEnum,
+        Game,
+        InheritInfo,
         ramen::{FeelingType, RamenGame},
-        traits::Trainer,
+        traits::Trainer
     },
     rng::SplitmixRng,
     trainer::{RamenHandwrittenTrainer, RandomTrainer},
-    utils::{get_workspace_root, init_test_logger},
+    utils::{get_workspace_root, init_test_logger}
 };
 
 const TEST_UMA_ID: u32 = 102601;
 const TEST_DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const TEST_INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 3, 0, 0, 0],
-    extra_count: [0, 30, 0, 0, 30, 30],
+    extra_count: [0, 30, 0, 0, 30, 30]
 };
 
 /// 每回合一条的局面快照
@@ -47,7 +47,7 @@ struct TurnSnap {
     /// 本回合事件计数增量（ID -> 次数）
     event_delta: Vec<(u32, u32)>,
     /// 回合结束时固定流已消费次数（调试固定流序列用）
-    fixed_counter: u64,
+    fixed_counter: u64
 }
 
 /// 局面快照 Trainer：每次决策前记录当前回合的固定局面
@@ -61,7 +61,7 @@ struct SnapTrainer<T> {
     /// 当前回合是否已记录
     recorded_turn: RefCell<i32>,
     /// 事件增量暂存（记录快照时合并）
-    pending_delta: RefCell<Vec<(u32, u32)>>,
+    pending_delta: RefCell<Vec<(u32, u32)>>
 }
 
 impl<T> SnapTrainer<T> {
@@ -72,7 +72,7 @@ impl<T> SnapTrainer<T> {
             snaps: RefCell::new(Vec::new()),
             last_events: RefCell::new(BTreeMap::new()),
             recorded_turn: RefCell::new(-1),
-            pending_delta: RefCell::new(Vec::new()),
+            pending_delta: RefCell::new(Vec::new())
         }
     }
 
@@ -105,7 +105,7 @@ impl<T> SnapTrainer<T> {
                 feeling: game.ramen.train_feeling_type,
                 hints,
                 event_delta: std::mem::take(&mut *self.pending_delta.borrow_mut()),
-                fixed_counter: game.turn_fixed.as_ref().map(|r| r.counter()).unwrap_or(u64::MAX),
+                fixed_counter: game.turn_fixed.as_ref().map(|r| r.counter()).unwrap_or(u64::MAX)
             });
         } else {
             // 同回合后续决策：事件增量并入待记录
@@ -116,14 +116,14 @@ impl<T> SnapTrainer<T> {
 
 impl<T: Trainer<RamenGame>> Trainer<RamenGame> for SnapTrainer<T> {
     fn select_action(
-        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut rand::rngs::StdRng,
+        &self, game: &RamenGame, actions: &[<RamenGame as Game>::Action], rng: &mut rand::rngs::StdRng
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_action(game, actions, rng)
     }
 
     fn select_choice(
-        &self, game: &RamenGame, choices: &[Vec<crate::gamedata::EventChoice>], rng: &mut rand::rngs::StdRng,
+        &self, game: &RamenGame, choices: &[Vec<crate::gamedata::EventChoice>], rng: &mut rand::rngs::StdRng
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_choice(game, choices, rng)
@@ -131,7 +131,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for SnapTrainer<T> {
 
     fn select_event_choice(
         &self, game: &RamenGame, _event: &crate::gamedata::EventData, choices: &[Vec<crate::gamedata::EventChoice>],
-        rng: &mut rand::rngs::StdRng,
+        rng: &mut rand::rngs::StdRng
     ) -> Result<usize> {
         self.observe(game);
         self.inner.select_event_choice(game, _event, choices, rng)
@@ -251,13 +251,13 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
     struct TrainAll;
     impl Trainer<RamenGame> for TrainAll {
         fn select_choice(
-            &self, _game: &RamenGame, _choices: &[Vec<crate::gamedata::EventChoice>], _rng: &mut rand::rngs::StdRng,
+            &self, _game: &RamenGame, _choices: &[Vec<crate::gamedata::EventChoice>], _rng: &mut rand::rngs::StdRng
         ) -> Result<usize> {
             Ok(0)
         }
 
         fn select_action(
-            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng,
+            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng
         ) -> Result<usize> {
             Ok(actions
                 .iter()
@@ -269,13 +269,13 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
     struct RestAll;
     impl Trainer<RamenGame> for RestAll {
         fn select_choice(
-            &self, _game: &RamenGame, _choices: &[Vec<crate::gamedata::EventChoice>], _rng: &mut rand::rngs::StdRng,
+            &self, _game: &RamenGame, _choices: &[Vec<crate::gamedata::EventChoice>], _rng: &mut rand::rngs::StdRng
         ) -> Result<usize> {
             Ok(0)
         }
 
         fn select_action(
-            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng,
+            &self, _game: &RamenGame, actions: &[<RamenGame as Game>::Action], _rng: &mut rand::rngs::StdRng
         ) -> Result<usize> {
             Ok(actions
                 .iter()
@@ -308,7 +308,7 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
                     println!("回合 {turn}: 分布/角标/固定流消费一致 = {same}");
                 }
             }
-            _ => println!("回合 {turn}: 一侧无决策（比赛/无决策回合），跳过"),
+            _ => println!("回合 {turn}: 一侧无决策（比赛/无决策回合），跳过")
         }
     }
     println!("不一致回合数: {mismatch}（应为 0）");

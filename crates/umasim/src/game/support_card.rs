@@ -10,7 +10,7 @@ use crate::{
     game::Game,
     gamedata::{CardValue, GAMEDATA, SupportCardData},
     global,
-    utils::*,
+    utils::*
 };
 
 /// 局中带入计算的支援卡属性. 其他不变的属性从data里取
@@ -39,7 +39,7 @@ pub struct CardTrainingEffect {
     /// 事件回复量提高，乘算
     pub event_recovery_amount_up: i32,
     /// Hint数量(由固有改变)
-    pub hint_count_bonus: i32,
+    pub hint_count_bonus: i32
 }
 
 impl CardTrainingEffect {
@@ -97,7 +97,7 @@ impl CardTrainingEffect {
             vital_cost_drop: 100.0 - (100.0 - self.vital_cost_drop) * (100.0 - other.vital_cost_drop) / 100.0,
             event_effect_up: self.event_effect_up + other.event_effect_up,
             event_recovery_amount_up: self.event_recovery_amount_up + other.event_recovery_amount_up,
-            hint_count_bonus: self.hint_count_bonus, // 不叠加，单独计算
+            hint_count_bonus: self.hint_count_bonus // 不叠加，单独计算
         }
     }
 
@@ -177,7 +177,7 @@ impl From<&CardValue> for CardTrainingEffect {
             vital_cost_drop: v.vital_cost_drop,
             event_effect_up: v.event_effect_up,
             event_recovery_amount_up: v.event_recovery_amount_up,
-            hint_count_bonus: 0, // 面板中没有此词条
+            hint_count_bonus: 0 // 面板中没有此词条
         }
     }
 }
@@ -204,7 +204,7 @@ pub struct SupportCard {
     /// 固有状态
     pub effect_state: HashMap<String, u32>,
     /// 已经获得的Hint等级
-    pub total_hints: i32,
+    pub total_hints: i32
 }
 
 impl SupportCard {
@@ -253,7 +253,7 @@ impl SupportCard {
             is_link_card: false,
             is_locked: false,
             effect_state: HashMap::new(),
-            total_hints: 0,
+            total_hints: 0
         })
     }
     /// 计算当前卡在指定位置时, 考虑固有的实际面板  
@@ -335,7 +335,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]

@@ -26,7 +26,7 @@ pub enum FriendEventState {
     /// 出行中（已出行次数 0~4）
     Outing(u8),
     /// 完成所有出行（5 次出行结束）
-    Complete,
+    Complete
 }
 
 impl FriendEventState {
@@ -80,7 +80,7 @@ impl FriendEventState {
                 }
                 true
             }
-            _ => false,
+            _ => false
         }
     }
 }
@@ -95,7 +95,7 @@ pub fn get_turn_special_feeling(turn: i32) -> i32 {
     match turn {
         2 | 24 | 36 | 48 | 60 => 2,
         37 | 38 | 39 | 61 | 62 | 63 => 1,
-        _ => 0,
+        _ => 0
     }
 }
 
@@ -207,7 +207,7 @@ mod tests {
             (60, 2),
             (61, 1),
             (62, 1),
-            (63, 1),
+            (63, 1)
         ];
         for &(turn, amount) in expected {
             let result = get_turn_special_feeling(turn);

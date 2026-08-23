@@ -12,7 +12,7 @@ pub struct InheritInfo {
     /// 蓝因子数量
     pub blue_count: Array5,
     /// 剧本因子属性
-    pub extra_count: Array6,
+    pub extra_count: Array6
 }
 
 impl InheritInfo {
@@ -76,7 +76,7 @@ mod tests {
     fn test_inherit() -> Result<()> {
         let ii = InheritInfo {
             blue_count: [15, 3, 0, 0, 0],
-            extra_count: [0, 30, 0, 0, 30, 40],
+            extra_count: [0, 30, 0, 0, 30, 40]
         };
         let mut rng = StdRng::from_os_rng();
         println!(

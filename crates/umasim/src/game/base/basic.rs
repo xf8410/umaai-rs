@@ -2,7 +2,7 @@
 
 use std::{
     fmt::Display,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut}
 };
 
 use anyhow::{Result, anyhow};
@@ -16,12 +16,19 @@ use crate::{
     diag,
     game::{
         BaseAction::{self, *},
-        BaseGame, BasePerson, FriendOutState, InheritInfo, PersonType, SupportCard, TurnStage, Uma,
-        traits::*,
+        BaseGame,
+        BasePerson,
+        FriendOutState,
+        InheritInfo,
+        PersonType,
+        SupportCard,
+        TurnStage,
+        Uma,
+        traits::*
     },
     gamedata::{onsen::ONSENDATA, *},
     global,
-    utils::{AttributeArray, global_events, system_event, system_event_prob},
+    utils::{AttributeArray, global_events, system_event, system_event_prob}
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,7 +53,7 @@ impl ActionEnum for BasicAction {
     fn apply(&self, game: &mut Self::Game, rng: &mut impl Rng) -> Result<()> {
         match &self.0 {
             BaseAction::Train(train) => self.do_train(game, *train as usize, rng),
-            _ => self.0.apply(game, rng),
+            _ => self.0.apply(game, rng)
         }
     }
 
@@ -166,7 +173,7 @@ impl BasicAction {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BasicGame {
     pub base: BaseGame,
-    pub persons: Vec<BasePerson>,
+    pub persons: Vec<BasePerson>
 }
 
 impl Deref for BasicGame {
@@ -196,7 +203,7 @@ impl BasicGame {
     pub fn newgame(uma_id: u32, deck_ids: &[u32; 6], inherit: InheritInfo) -> Result<Self> {
         let mut ret = BasicGame {
             base: BaseGame::new(uma_id, deck_ids, inherit)?,
-            persons: vec![],
+            persons: vec![]
         };
         ret.init_persons()?;
         Ok(ret)
@@ -599,7 +606,7 @@ mod tests {
     use crate::{
         global,
         trainer::RandomTrainer,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]
@@ -608,14 +615,10 @@ mod tests {
         std::env::set_current_dir(workspace_root)?;
         init_test_logger("info")?;
         init_global()?;
-        let mut game = BasicGame::newgame(
-            101901,
-            &[302424, 302464, 302484, 302564, 302574, 302644],
-            InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let mut game = BasicGame::newgame(101901, &[302424, 302464, 302484, 302564, 302574, 302644], InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         println!("{}", game.explain()?);
         let score = game.uma.calc_score();
         println!("评分: {} {}", global!(GAMECONSTANTS).get_rank_name(score), score);
@@ -640,14 +643,10 @@ mod tests {
         std::env::set_current_dir(workspace_root)?;
         init_test_logger("info")?;
         init_global()?;
-        let game = BasicGame::newgame(
-            101901,
-            &[302424, 302464, 302484, 302564, 302574, 302644],
-            InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let game = BasicGame::newgame(101901, &[302424, 302464, 302484, 302564, 302574, 302644], InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         let view = game.view();
         // 默认 view()：scenario 字段留空（具体剧本 override fill）
         assert_eq!(view.scenario, "");

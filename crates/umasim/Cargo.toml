@@ -22,6 +22,27 @@ required-features = ["cli", "diag"]
 # - no-color：启用 colored/no-color（编译期无色）。colored 无条件加载，
 #   非 Windows 纯 std 实现，Android / 嵌入式交叉编译无风险
 # - onnx：神经网络评估器（暂不使用，预留给 Phase 5+ 模型推理）
+# Data-collection and label-generation tools are kept outside src/bin.
+[[bin]]
+name = "ramen_feature_dataset"
+path = "tools/data_collection/ramen_feature_dataset.rs"
+
+[[bin]]
+name = "ramen_low_score_diagnostic"
+path = "tools/data_collection/ramen_low_score_diagnostic.rs"
+
+[[bin]]
+name = "skill_pt_matrix"
+path = "tools/data_collection/skill_pt_matrix.rs"
+
+[[bin]]
+name = "skill_pt_phase_matrix"
+path = "tools/data_collection/skill_pt_phase_matrix.rs"
+
+[[bin]]
+name = "y3_train_pt_trace"
+path = "tools/data_collection/y3_train_pt_trace.rs"
+
 [features]
 default = ["cli", "diag"]
 diag = []

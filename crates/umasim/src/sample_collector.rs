@@ -38,7 +38,7 @@ pub fn action_to_global_index(action: &OnsenAction) -> Option<usize> {
         OnsenAction::Dig(idx) => Some(11 + *idx as usize),
         OnsenAction::Upgrade(idx) => Some(21 + *idx as usize),
         OnsenAction::UseTicket(is_super) => Some(if *is_super { 25 } else { 24 }),
-        OnsenAction::Choice(_) => unimplemented!(),
+        OnsenAction::Choice(_) => unimplemented!()
     }
 }
 
@@ -52,7 +52,7 @@ pub struct TurnData {
     /// 事件选项索引（如果有）
     pub choice_idx: Option<usize>,
     /// 事件选项数量
-    pub num_choices: usize,
+    pub num_choices: usize
 }
 
 /// 样本收集器
@@ -66,7 +66,7 @@ pub struct SampleCollector {
     /// 最终分数
     final_score: i32,
     /// 是否已完成
-    is_finished: bool,
+    is_finished: bool
 }
 
 impl SampleCollector {
@@ -75,7 +75,7 @@ impl SampleCollector {
         Self {
             turn_data: Vec::with_capacity(78), // 预分配 78 回合
             final_score: 0,
-            is_finished: false,
+            is_finished: false
         }
     }
 
@@ -94,7 +94,7 @@ impl SampleCollector {
             features,
             global_action_idx,
             choice_idx: None,
-            num_choices: 0,
+            num_choices: 0
         });
     }
 
@@ -193,7 +193,7 @@ pub struct GameSample {
     /// 最终分数
     pub final_score: i32,
     /// 所有回合的训练样本
-    pub samples: Vec<TrainingSample>,
+    pub samples: Vec<TrainingSample>
 }
 
 impl GameSample {

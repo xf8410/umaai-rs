@@ -9,7 +9,7 @@ use crate::{
     explain::Explain,
     gamedata::{ActionValue, EventChoice, FreeRaceData, GAMECONSTANTS, GAMEDATA, UmaData},
     global,
-    utils::*,
+    utils::*
 };
 
 /// 训练中的马娘状态，剧本通用
@@ -41,7 +41,7 @@ pub struct UmaFlags {
     pub doll: bool,
     /// 是否生病
     #[serde(default)]
-    pub ill: bool,
+    pub ill: bool
 }
 
 impl UmaFlags {
@@ -136,7 +136,7 @@ pub struct Uma {
     /// 生涯比赛bitset 低到高位对应11-71回合
     pub career_races: u64,
     /// 比赛场次 bitset 对应11-71回合
-    pub win_races: u64,
+    pub win_races: u64
 }
 
 impl Uma {
@@ -302,7 +302,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]

@@ -23,7 +23,7 @@ pub struct GameData {
     pub uma: BTreeMap<String, UmaData>,
     pub card: BTreeMap<String, SupportCardData>,
     pub text: BTreeMap<String, BTreeMap<String, String>>,
-    pub events: EventCollection,
+    pub events: EventCollection
 }
 
 pub fn load_json<T: DeserializeOwned>(path: &str) -> Result<T> {
@@ -125,7 +125,7 @@ mod tests {
             end_turn: 47,
             count: 1,
             grade: Some(1),
-            mask: 0,
+            mask: 0
         };
         free_race.update_turn_mask(); // 只有G1会被标1
         println!("{:b}", free_race.mask); // 10111010000111110100000000000000000000

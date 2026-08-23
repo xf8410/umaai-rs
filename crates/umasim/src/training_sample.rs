@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Write}
 };
 
 use anyhow::Result;
@@ -66,7 +66,7 @@ pub struct TrainingSample {
     pub choice_target: Vec<f32>,
 
     /// Value 目标（3 维：scoreMean, scoreStdev, value）
-    pub value_target: Vec<f32>,
+    pub value_target: Vec<f32>
 }
 
 impl TrainingSample {
@@ -91,7 +91,7 @@ impl TrainingSample {
             nn_input,
             policy_target,
             choice_target,
-            value_target,
+            value_target
         }
     }
 
@@ -114,7 +114,7 @@ impl TrainingSample {
 /// 训练样本批次（用于批量保存）
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TrainingSampleBatch {
-    pub samples: Vec<TrainingSample>,
+    pub samples: Vec<TrainingSample>
 }
 
 impl TrainingSampleBatch {

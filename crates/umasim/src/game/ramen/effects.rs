@@ -33,7 +33,7 @@ pub struct RamenTrainingEffect {
     /// hint_special标记
     pub hint_special: bool,
     /// 分身数量
-    pub clone_count: i32,
+    pub clone_count: i32
 }
 
 /// 把训练效果格式化为词条列表（非 0 才显示），如 `["训+23", "失败率-50", "上限+20"]`
@@ -372,7 +372,7 @@ mod tests {
     use crate::{
         game::ramen::RamenState,
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     /// 创建一个用于测试的 RamenGame 实例

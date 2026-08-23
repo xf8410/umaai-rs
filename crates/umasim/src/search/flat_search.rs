@@ -14,7 +14,7 @@ use super::{
     config::{SearchConfig, TOTAL_TURN},
     result::{ActionResult, SearchOutput},
     searchable::{FlatSearchGame, SearchScore},
-    seeds::RolloutSeeds,
+    seeds::RolloutSeeds
 };
 #[cfg(feature = "onnx")]
 use crate::neural::{ThreadLocalNeuralNetLeafEvaluator, ThreadLocalNeuralNetLeafStatsSnapshot};
@@ -22,17 +22,17 @@ use crate::{
     game::{
         Game,
         onsen::{OnsenTurnStage, action::OnsenAction, game::OnsenGame},
-        ramen::{RamenAction, RamenGame},
+        ramen::{RamenAction, RamenGame}
     },
     gamedata::EventChoice,
-    neural::{Evaluator, HandwrittenEvaluator, ValueOutput},
+    neural::{Evaluator, HandwrittenEvaluator, ValueOutput}
 };
 
 #[derive(Clone)]
 enum LeafEvaluator {
     Handwritten,
     #[cfg(feature = "onnx")]
-    NeuralNet(ThreadLocalNeuralNetLeafEvaluator),
+    NeuralNet(ThreadLocalNeuralNetLeafEvaluator)
 }
 
 impl LeafEvaluator {
@@ -40,7 +40,7 @@ impl LeafEvaluator {
         match self {
             LeafEvaluator::Handwritten => "handwritten",
             #[cfg(feature = "onnx")]
-            LeafEvaluator::NeuralNet(_) => "nn",
+            LeafEvaluator::NeuralNet(_) => "nn"
         }
     }
 
@@ -48,7 +48,7 @@ impl LeafEvaluator {
         match self {
             LeafEvaluator::Handwritten => rollout_evaluator.evaluate(game),
             #[cfg(feature = "onnx")]
-            LeafEvaluator::NeuralNet(nn) => nn.evaluate(game),
+            LeafEvaluator::NeuralNet(nn) => nn.evaluate(game)
         }
     }
 }
@@ -59,7 +59,7 @@ impl LeafEvaluator {
 #[derive(Clone)]
 pub struct FlatSearch<G: FlatSearchGame = OnsenGame>
 where
-    G::Action: Send + Sync + Clone,
+    G::Action: Send + Sync + Clone
 {
     /// 手写评估器（温泉 rollout 与 leaf 估值用）
     ///
@@ -78,12 +78,12 @@ where
     config: SearchConfig,
 
     /// E4：leaf eval 微批大小（仅在 max_depth>0 && leaf_eval=nn 时生效）
-    rollout_batch_size: usize,
+    rollout_batch_size: usize
 }
 
 impl<G: FlatSearchGame> FlatSearch<G>
 where
-    G::Action: Send + Sync + Clone,
+    G::Action: Send + Sync + Clone
 {
     /// 创建搜索器
     pub fn new(config: SearchConfig) -> Self {
@@ -92,7 +92,7 @@ where
             leaf_evaluator: LeafEvaluator::Handwritten,
             rollout_trainer: G::default_rollout_trainer(),
             config,
-            rollout_batch_size: 1,
+            rollout_batch_size: 1
         }
     }
 
@@ -132,7 +132,7 @@ where
     pub fn leaf_nn_stats(&self) -> Option<ThreadLocalNeuralNetLeafStatsSnapshot> {
         match &self.leaf_evaluator {
             LeafEvaluator::NeuralNet(nn) => Some(nn.stats()),
-            _ => None,
+            _ => None
         }
     }
 
@@ -145,7 +145,7 @@ where
     fn leaf_nn(&self) -> Option<&ThreadLocalNeuralNetLeafEvaluator> {
         match &self.leaf_evaluator {
             LeafEvaluator::NeuralNet(nn) => Some(nn),
-            _ => None,
+            _ => None
         }
     }
 
@@ -162,10 +162,10 @@ where
     /// 若把特判留作具体 impl 的同名方法，它会静默变成死代码、温泉 `Dig`/`Upgrade`
     /// 改走通用路径——编译通过但行为改变。闭包注入从根上避免这个陷阱。
     pub fn search_with<F>(
-        &self, game: &G, actions: &[G::Action], rng: &mut StdRng, rollout: F,
+        &self, game: &G, actions: &[G::Action], rng: &mut StdRng, rollout: F
     ) -> Result<SearchOutput<G::Action>>
     where
-        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync,
+        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync
     {
         if actions.is_empty() {
             bail!("没有可用动作");
@@ -231,7 +231,7 @@ where
         *rng = StdRng::seed_from_u64(RolloutSeeds::stage_seed(
             rollout_seed,
             game.turn(),
-            game.crn_stage_key(),
+            game.crn_stage_key()
         ));
     }
 
@@ -264,10 +264,10 @@ where
     /// 注：此处按候选并行，并行度上限即候选数（≤10）。改为按 `(候选, rollout)`
     /// 扁平并行可提升吞吐且结果位级不变，留作后续性能对照实验。
     fn search_uniform<F>(
-        &self, game: &G, actions: &[G::Action], seeds: &RolloutSeeds, rollout: &F,
+        &self, game: &G, actions: &[G::Action], seeds: &RolloutSeeds, rollout: &F
     ) -> Result<Vec<(ActionResult, ActionResult)>>
     where
-        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync,
+        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync
     {
         let n = self.config.search_n;
         let run = |action: &G::Action| -> Result<(ActionResult, ActionResult, usize)> {
@@ -293,7 +293,7 @@ where
     /// 混同于「跑出来分低」。此处不中断搜索（避免偶发失败拖垮实时通道层），
     /// 但必须在日志里留下痕迹。
     fn split_failures(
-        collected: Vec<(ActionResult, ActionResult, usize)>, stage: &str,
+        collected: Vec<(ActionResult, ActionResult, usize)>, stage: &str
     ) -> Vec<(ActionResult, ActionResult)> {
         let total_failed: usize = collected.iter().map(|(_, _, f)| f).sum();
         if total_failed > 0 {
@@ -309,10 +309,10 @@ where
     #[allow(clippy::too_many_arguments)]
     fn simulate_many<F>(
         &self, game: &G, action: &G::Action, n: usize, seeds: &RolloutSeeds, offset: usize, result: &mut ActionResult,
-        result_pt: &mut ActionResult, rollout: &F,
+        result_pt: &mut ActionResult, rollout: &F
     ) -> Result<usize>
     where
-        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync,
+        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync
     {
         let mut failed = 0usize;
         for k in 0..n {
@@ -338,10 +338,10 @@ where
     /// # UCB 公式
     /// search_value = value + cpuct * expected_stdev * sqrt(total_n) / n
     fn search_ucb<F>(
-        &self, game: &G, actions: &[G::Action], radical_factor: f64, seeds: &RolloutSeeds, rollout: &F,
+        &self, game: &G, actions: &[G::Action], radical_factor: f64, seeds: &RolloutSeeds, rollout: &F
     ) -> Result<Vec<(ActionResult, ActionResult)>>
     where
-        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync,
+        F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync
     {
         let num_actions = actions.len();
         let mut action_results: Vec<(ActionResult, ActionResult)> = vec![Default::default(); num_actions];
@@ -434,7 +434,7 @@ where
     ///
     /// UCB 公式: search_value = value + cpuct * expected_stdev * sqrt(total_n) / n
     fn select_ucb_action(
-        &self, action_results: &[(ActionResult, ActionResult)], radical_factor: f64, total_n: f64,
+        &self, action_results: &[(ActionResult, ActionResult)], radical_factor: f64, total_n: f64
     ) -> usize {
         let sqrt_total = total_n.sqrt();
         let cpuct = self.config.search_cpuct;
@@ -475,7 +475,7 @@ impl FlatSearch<OnsenGame> {
     ///
     /// 保持既有对外签名不变，`MctsTrainer` 与 `umaai` 通道层无需改动。
     pub fn search(
-        &self, game: &OnsenGame, actions: &[OnsenAction], rng: &mut StdRng,
+        &self, game: &OnsenGame, actions: &[OnsenAction], rng: &mut StdRng
     ) -> Result<SearchOutput<OnsenAction>> {
         self.search_with(game, actions, rng, |game, action, seed| {
             let (score, score_pt) = self.simulate(game, action, seed)?;
@@ -509,7 +509,7 @@ impl FlatSearch<OnsenGame> {
             // 克隆游戏状态
             let mut sim_game = game.clone();
             let trainer_hw = SimulationTrainer {
-                evaluator: &self.rollout_evaluator,
+                evaluator: &self.rollout_evaluator
             };
 
             // 执行初始动作
@@ -524,7 +524,7 @@ impl FlatSearch<OnsenGame> {
                 sim_game.on_simulation_end(&trainer_hw, rng)?;
                 return Ok((
                     sim_game.uma().calc_score() as f64,
-                    sim_game.uma().calc_score_with_pt_favor() as f64,
+                    sim_game.uma().calc_score_with_pt_favor() as f64
                 ));
             }
 
@@ -549,7 +549,7 @@ impl FlatSearch<OnsenGame> {
                 sim_game.on_simulation_end(&trainer_hw, rng)?;
                 return Ok((
                     sim_game.uma().calc_score() as f64,
-                    sim_game.uma().calc_score_with_pt_favor() as f64,
+                    sim_game.uma().calc_score_with_pt_favor() as f64
                 ));
             }
             // 有些情况下（例如在达到 max_depth 的同一轮刚好走到终局），可能还未通过 next() 触发 finished。
@@ -558,7 +558,7 @@ impl FlatSearch<OnsenGame> {
                 sim_game.on_simulation_end(&trainer_hw, rng)?;
                 return Ok((
                     sim_game.uma().calc_score() as f64,
-                    sim_game.uma().calc_score_with_pt_favor() as f64,
+                    sim_game.uma().calc_score_with_pt_favor() as f64
                 ));
             }
 
@@ -592,7 +592,7 @@ impl FlatSearch<OnsenGame> {
         // 克隆游戏状态
         let mut sim_game = game.clone();
         let trainer_hw = SimulationTrainer {
-            evaluator: &self.rollout_evaluator,
+            evaluator: &self.rollout_evaluator
         };
 
         // 执行初始动作
@@ -607,7 +607,7 @@ impl FlatSearch<OnsenGame> {
             sim_game.on_simulation_end(&trainer_hw, rng)?;
             return Ok(SimOutcome::Terminal {
                 score: sim_game.uma().calc_score() as f64,
-                score_pt: sim_game.uma().calc_score_with_pt_favor() as f64,
+                score_pt: sim_game.uma().calc_score_with_pt_favor() as f64
             });
         }
 
@@ -632,7 +632,7 @@ impl FlatSearch<OnsenGame> {
             sim_game.on_simulation_end(&trainer_hw, rng)?;
             return Ok(SimOutcome::Terminal {
                 score: sim_game.uma().calc_score() as f64,
-                score_pt: sim_game.uma().calc_score_with_pt_favor() as f64,
+                score_pt: sim_game.uma().calc_score_with_pt_favor() as f64
             });
         }
 
@@ -646,7 +646,7 @@ impl FlatSearch<OnsenGame> {
 
     /// 模拟选择温泉. 因为没有做成单独的阶段，所以单独处理
     pub fn simulate_onsen_select(
-        &self, game: &OnsenGame, action: &OnsenAction, rng: &mut StdRng,
+        &self, game: &OnsenGame, action: &OnsenAction, rng: &mut StdRng
     ) -> Result<(f64, f64)> {
         let mut sim_game = game.clone();
         let mut best_score = (0.0, 0.0);
@@ -668,7 +668,7 @@ impl FlatSearch<OnsenGame> {
         sim_game.pending_selection = false;
         // 去除pending_selection状态后就可以正常模拟了。
         let trainer_hw = SimulationTrainer {
-            evaluator: &self.rollout_evaluator,
+            evaluator: &self.rollout_evaluator
         };
         while sim_game.next() {
             sim_game.run_stage(&trainer_hw, rng)?;
@@ -676,7 +676,7 @@ impl FlatSearch<OnsenGame> {
         sim_game.on_simulation_end(&trainer_hw, rng)?;
         Ok((
             sim_game.uma().calc_score() as f64,
-            sim_game.uma().calc_score_with_pt_favor() as f64,
+            sim_game.uma().calc_score_with_pt_favor() as f64
         ))
     }
 }
@@ -696,7 +696,7 @@ impl FlatSearch<RamenGame> {
     /// `special_targets`，**不设 `combined_decision`**，会静默丢掉隐藏风味。
     /// 合并动作需走 `apply_combined_ramen_decision`，留待 Phase 2。
     pub fn search(
-        &self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng,
+        &self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng
     ) -> Result<SearchOutput<RamenAction>> {
         self.search_with(game, actions, rng, |game, action, seed| {
             self.simulate_common(game, action, seed)
@@ -714,21 +714,21 @@ fn stage_id(stage: &OnsenTurnStage) -> u64 {
         OnsenTurnStage::Distribute => 1,
         OnsenTurnStage::Bathing => 2,
         OnsenTurnStage::Train => 3,
-        OnsenTurnStage::AfterTrain => 4,
+        OnsenTurnStage::AfterTrain => 4
     }
 }
 
 #[cfg(feature = "onnx")]
 enum SimOutcome {
     Terminal { score: f64, score_pt: f64 },
-    Leaf { features: Vec<f32>, pt_bias: f64 },
+    Leaf { features: Vec<f32>, pt_bias: f64 }
 }
 
 /// 模拟用训练员
 ///
 /// 包装 HandwrittenEvaluator，实现 Trainer trait。
 struct SimulationTrainer<'a> {
-    evaluator: &'a HandwrittenEvaluator,
+    evaluator: &'a HandwrittenEvaluator
 }
 
 impl<'a> crate::game::Trainer<OnsenGame> for SimulationTrainer<'a> {
@@ -754,7 +754,7 @@ impl<'a> crate::game::Trainer<OnsenGame> for SimulationTrainer<'a> {
         let selected_action = self.evaluator.select_action(game, rng);
         let idx = match &selected_action {
             Some(action) => actions.iter().position(|a| *a == action.selection).unwrap_or(0),
-            None => 0,
+            None => 0
         };
 
         Ok(idx)
@@ -788,11 +788,12 @@ mod tests {
     use super::*;
     use crate::{
         game::{
-            InheritInfo, Trainer,
-            ramen::{RamenAction, RamenGame},
+            InheritInfo,
+            Trainer,
+            ramen::{RamenAction, RamenGame}
         },
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     /// 单个候选的统计摘要（回归比对的最小单元）
@@ -804,7 +805,7 @@ mod tests {
         /// 成功样本数
         n: u32,
         /// 分数均值
-        mean: f64,
+        mean: f64
     }
 
     /// 在首个多候选决策点捕获搜索结果，然后固定选 0 号动作
@@ -819,7 +820,7 @@ mod tests {
         /// 捕获到的各候选统计（`None` 表示尚未捕获）
         captured: RefCell<Option<Vec<ActionDigest>>>,
         /// 是否反转候选顺序后再搜索（用于顺序无关性回归）
-        reverse: bool,
+        reverse: bool
     }
 
     impl CapturingTrainer {
@@ -829,7 +830,7 @@ mod tests {
                 search: FlatSearch::new(config),
                 seed,
                 captured: RefCell::new(None),
-                reverse,
+                reverse
             }
         }
 
@@ -856,7 +857,7 @@ mod tests {
                     .iter()
                     .map(|r| ActionDigest {
                         n: r.0.count(),
-                        mean: r.0.mean(),
+                        mean: r.0.mean()
                     })
                     .collect();
                 // 统一回正序，使正/逆序两次运行的结果可直接逐项比对
@@ -876,7 +877,7 @@ mod tests {
     /// 捕获首个多候选决策点的**局面本身**（CRN 测量需要直接调 `simulate`）
     struct RootCapture {
         /// 捕获到的 (根局面, 候选表)
-        got: RefCell<Option<(OnsenGame, Vec<OnsenAction>)>>,
+        got: RefCell<Option<(OnsenGame, Vec<OnsenAction>)>>
     }
 
     impl Trainer<OnsenGame> for RootCapture {
@@ -901,7 +902,7 @@ mod tests {
 
         let inherit = InheritInfo {
             blue_count: [12, 0, 0, 0, 6],
-            extra_count: [10, 0, 0, 20, 20, 40],
+            extra_count: [10, 0, 0, 20, 20, 40]
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         let mut game = OnsenGame::newgame(102601, &deck, inherit)?;
@@ -972,7 +973,7 @@ mod tests {
 
         let inherit = InheritInfo {
             blue_count: [12, 0, 0, 0, 6],
-            extra_count: [10, 0, 0, 20, 20, 40],
+            extra_count: [10, 0, 0, 20, 20, 40]
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         let mut game = OnsenGame::newgame(102601, &deck, inherit)?;
@@ -1083,7 +1084,7 @@ mod tests {
     /// 捕获拉面首个多候选决策点的局面与候选表
     struct RamenRootCapture {
         /// 捕获到的 (根局面, 候选表)
-        got: RefCell<Option<(RamenGame, Vec<RamenAction>)>>,
+        got: RefCell<Option<(RamenGame, Vec<RamenAction>)>>
     }
 
     impl Trainer<RamenGame> for RamenRootCapture {
@@ -1110,7 +1111,7 @@ mod tests {
 
         let inherit = InheritInfo {
             blue_count: [12, 0, 0, 0, 6],
-            extra_count: [10, 0, 0, 20, 20, 40],
+            extra_count: [10, 0, 0, 20, 20, 40]
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         let mut game = RamenGame::newgame(102601, &deck, inherit)?;
@@ -1139,7 +1140,7 @@ mod tests {
             .iter()
             .map(|r| ActionDigest {
                 n: r.0.count(),
-                mean: r.0.mean(),
+                mean: r.0.mean()
             })
             .collect())
     }

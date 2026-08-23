@@ -12,7 +12,7 @@ use umasim::{
     gamedata::{GAMECONSTANTS, init_global_with_config},
     global,
     trainer::{LoggingTrainer, RecommendedRamenTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 const BASE_SEED: u64 = 61_444;
@@ -20,7 +20,7 @@ const UMA: u32 = 102_601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 
 fn run(run_idx: u64, logging: bool) -> Result<(GameOutcome, LoggingTrainer<RecommendedRamenTrainer>)> {
@@ -158,7 +158,7 @@ fn main() -> Result<()> {
     lines.push("## 最低五局\n\n".to_string());
     lines.push(
         "|排名|run_idx|最终评分|技能PT|五维原值和|剧本PT|RMJ|友人完成|\n|---:|---:|---:|---:|---:|---:|---:|:---:|\n"
-            .to_string(),
+            .to_string()
     );
     for (rank, (idx, outcome)) in outcomes.iter().take(5).enumerate() {
         lines.push(format!(

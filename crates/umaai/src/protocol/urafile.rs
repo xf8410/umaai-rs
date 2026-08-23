@@ -2,7 +2,7 @@ use std::{
     env,
     fmt::Debug,
     path::Path,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::{self, Receiver}
 };
 
 use anyhow::{Result, anyhow, bail};
@@ -22,7 +22,7 @@ pub struct UraFileWatcher {
     pub watcher: RecommendedWatcher,
     pub rx: Receiver<notify::Result<Event>>,
     /// 文件内容缓存, 用于判断是否修改
-    pub contents: String,
+    pub contents: String
 }
 
 impl UraFileWatcher {
@@ -73,7 +73,7 @@ impl UraFileWatcher {
         Ok(Self {
             watcher,
             rx,
-            contents: String::new(),
+            contents: String::new()
         })
     }
 

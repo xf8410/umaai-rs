@@ -1,19 +1,28 @@
 //! 拉面杯实验策略：在现有即时评分上增加长期训练结构与剧本 PT 阈值价值。
-use crate::{
-    game::{
-        FriendOutState, Game, Person, PersonType, Trainer,
-        ramen::{
-            Operation, RamenAction, RamenGame, RamenStage,
-            effects::calc_ramen_training_effect,
-            policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput},
-            rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, list_special_targets_for},
-        },
-    },
-    gamedata::{EventChoice, EventData, ramen::RAMENDATA},
-};
+use std::sync::Mutex;
+
 use anyhow::Result;
 use rand::{SeedableRng, prelude::StdRng};
-use std::sync::Mutex;
+
+use crate::{
+    game::{
+        FriendOutState,
+        Game,
+        Person,
+        PersonType,
+        Trainer,
+        ramen::{
+            Operation,
+            RamenAction,
+            RamenGame,
+            RamenStage,
+            effects::calc_ramen_training_effect,
+            policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput},
+            rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, list_special_targets_for}
+        }
+    },
+    gamedata::{EventChoice, EventData, ramen::RAMENDATA}
+};
 
 #[derive(Debug, Clone)]
 pub struct LocalRamenConfig {
@@ -212,7 +221,7 @@ pub struct LocalRamenConfig {
     pub deadline_urgency_scale: f32,
 
     /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
-    pub dynamic_special_targets: bool,
+    pub dynamic_special_targets: bool
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -253,14 +262,14 @@ impl Default for LocalRamenConfig {
             friend_outing_cumulative_caps: [5, 5, 5],
             friend_rest_max_special: 4,
             deadline_urgency_scale: 0.0,
-            dynamic_special_targets: false,
+            dynamic_special_targets: false
         }
     }
 }
 pub struct LocalRamenTrainer {
     policy: RamenPolicy,
     config: LocalRamenConfig,
-    last_breakdown: Mutex<Option<String>>,
+    last_breakdown: Mutex<Option<String>>
 }
 impl Default for LocalRamenTrainer {
     fn default() -> Self {
@@ -275,7 +284,7 @@ impl LocalRamenTrainer {
         Self {
             policy: RamenPolicy::new(policy),
             config,
-            last_breakdown: Mutex::new(None),
+            last_breakdown: Mutex::new(None)
         }
     }
     pub fn matrix_variant(name: &str) -> Result<Self> {
@@ -320,7 +329,7 @@ impl LocalRamenTrainer {
                 local.friend_outing_cumulative_caps = [
                     (digits[0] - b'0') as usize,
                     (digits[1] - b'0') as usize,
-                    (digits[2] - b'0') as usize,
+                    (digits[2] - b'0') as usize
                 ];
                 let c = local.friend_outing_cumulative_caps;
                 if c[0] > c[1] || c[1] > c[2] || c[2] > 5 {
@@ -480,7 +489,7 @@ impl LocalRamenTrainer {
                 choice + 1,
                 event_value,
                 g.ramen.special_feeling
-            ),
+            )
         ))
     }
 
@@ -586,7 +595,7 @@ impl LocalRamenTrainer {
                         lt += match g.friend.out_state {
                             FriendOutState::UnClicked => self.config.first_friend_click_value,
                             _ if x.friendship() < 60 => self.config.low_friend_bond_value * ph,
-                            _ => self.config.active_friend_value,
+                            _ => self.config.active_friend_value
                         }
                     }
                     PersonType::Card if x.friendship() < 80 => {
@@ -1060,11 +1069,11 @@ impl LocalRamenTrainer {
                     o.score -= transition_cost;
                     o.add(
                         "y3_pre_vital_shortfall",
-                        -pre_short * self.config.y3_vital_shortfall_weight,
+                        -pre_short * self.config.y3_vital_shortfall_weight
                     );
                     o.add(
                         "y3_post_vital_shortfall",
-                        -post_short * self.config.y3_vital_shortfall_weight,
+                        -post_short * self.config.y3_vital_shortfall_weight
                     );
                 }
                 let pressure = risk * self.config.overflow_value;
@@ -1135,7 +1144,7 @@ impl LocalRamenTrainer {
 pub struct RecommendedRamenTrainer {
     years: [LocalRamenTrainer; 3],
     /// 最近一次调用落在哪一年的策略，用于把对应 breakdown 暴露给 LoggingTrainer。
-    last_year: Mutex<Option<usize>>,
+    last_year: Mutex<Option<usize>>
 }
 
 impl RecommendedRamenTrainer {
@@ -1179,7 +1188,7 @@ impl RecommendedRamenTrainer {
 
         Self {
             years: [make(16.0, 30), make(64.0, 30), make(64.0, 0)],
-            last_year: Mutex::new(None),
+            last_year: Mutex::new(None)
         }
     }
 
@@ -1218,7 +1227,7 @@ impl Trainer<RamenGame> for RecommendedRamenTrainer {
     }
 
     fn select_event_choice(
-        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng,
+        &self, game: &RamenGame, event: &EventData, choices: &[Vec<EventChoice>], rng: &mut StdRng
     ) -> Result<usize> {
         let year = Self::year(game);
         if let Ok(mut slot) = self.last_year.lock() {
@@ -1253,11 +1262,11 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
                     2 => 0,
                     23 => 1,
                     47 => 2,
-                    _ => 0,
+                    _ => 0
                 };
                 self.policy.decide_region(g, y, a)?
             }
-            _ => (0, Vec::new()),
+            _ => (0, Vec::new())
         };
         self.stash(&o);
         Ok(c)
@@ -1268,7 +1277,7 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
         Ok(i)
     }
     fn select_event_choice(
-        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng,
+        &self, g: &RamenGame, e: &EventData, c: &[Vec<EventChoice>], r: &mut StdRng
     ) -> Result<usize> {
         if (830305111..=830305115).contains(&e.id) && !c.is_empty() {
             let (choice, _) = self.dynamic_friend_event_choice(g, c)?;

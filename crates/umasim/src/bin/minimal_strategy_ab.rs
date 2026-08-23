@@ -9,7 +9,7 @@ use umasim::{
     gamedata::init_global_with_config,
     output::decision_log::{DecisionLog, DecisionLogRow},
     trainer::{LocalRamenTrainer, LoggingTrainer, RamenHandwrittenTrainer},
-    utils::{get_workspace_root, load_game_config},
+    utils::{get_workspace_root, load_game_config}
 };
 
 const RUNS: usize = 1000;
@@ -18,7 +18,7 @@ const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
-    extra_count: [10, 10, 20, 20, 20, 40],
+    extra_count: [10, 10, 20, 20, 20, 40]
 };
 
 fn fill_ramen_metrics(outcome: &mut GameOutcome, rows: &[DecisionLogRow]) -> Result<()> {
@@ -51,7 +51,7 @@ fn compare_scores(a: i32, b: i32) -> String {
     match a.cmp(&b) {
         Ordering::Less => format!("A比B少{}分", b - a),
         Ordering::Greater => format!("B比A少{}分", a - b),
-        Ordering::Equal => "A与B同分".into(),
+        Ordering::Equal => "A与B同分".into()
     }
 }
 

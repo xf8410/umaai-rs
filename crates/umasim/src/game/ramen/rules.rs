@@ -162,7 +162,7 @@ fn calc_net_recipe(recipe: &[i32; 3], special_targets: &[i32; 3]) -> [i32; 3] {
     [
         recipe[0] - special_targets[0],
         recipe[1] - special_targets[1],
-        recipe[2] - special_targets[2],
+        recipe[2] - special_targets[2]
     ]
 }
 
@@ -279,7 +279,7 @@ pub fn list_special_targets_for(state: &RamenState, ramen_idx: usize) -> Result<
     let min_needed: [i32; 3] = [
         (recipe[0] - state.feeling_stock[0]).max(0),
         (recipe[1] - state.feeling_stock[1]).max(0),
-        (recipe[2] - state.feeling_stock[2]).max(0),
+        (recipe[2] - state.feeling_stock[2]).max(0)
     ];
     let need_sum: i32 = min_needed.iter().sum();
     let budget = 2.min(state.special_feeling) - need_sum;
@@ -346,7 +346,7 @@ pub enum RmjResult {
     /// 成功
     Success,
     /// 大成功（第三年 pt >= 5000）
-    GreatSuccess,
+    GreatSuccess
 }
 
 impl RmjResult {
@@ -436,7 +436,7 @@ pub fn get_turn_special_feeling(turn: i32) -> i32 {
     match turn {
         2 | 24 | 36 | 48 | 60 => 2,
         37 | 38 | 39 | 61 | 62 | 63 => 1,
-        _ => 0,
+        _ => 0
     }
 }
 
@@ -528,7 +528,7 @@ fn fill_gauge_xiahesu_max(state: &mut RamenState) {
 /// 到上限（参见 `fill_gauge_xiahesu_max`）。
 pub fn fill_gauge_after_train(
     state: &mut RamenState, base_dist: &[i32; 3], train_type: FeelingType, train_bonus: i32, is_shining: bool,
-    is_xiahesu: bool,
+    is_xiahesu: bool
 ) {
     if is_xiahesu {
         fill_gauge_xiahesu_max(state);
@@ -573,7 +573,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]
@@ -595,7 +595,7 @@ mod tests {
             ([0, 1, 6], "札幌函館中京"),
             ([0, 4, 6], "札幌東京中京"),
             ([0, 5, 6], "札幌中山中京"),
-            ([5, 6, 7], "中山中京京都"),
+            ([5, 6, 7], "中山中京京都")
         ];
         for &(regions, name) in cases {
             let dist = calc_gauge_base_distribution(&regions);
@@ -1219,7 +1219,7 @@ mod tests {
             FeelingType::A,
             4,
             false,
-            true, // is_xiahesu
+            true // is_xiahesu
         );
 
         println!(
@@ -1246,7 +1246,7 @@ mod tests {
             FeelingType::C,
             3,
             false,
-            false, // is_xiahesu = false
+            false // is_xiahesu = false
         );
 
         // A=5, B=4, C=1+3=4，都没有到上限
@@ -1262,7 +1262,7 @@ mod tests {
             FeelingType::A,
             0,
             true, // 友情训练
-            false,
+            false
         );
         assert_eq!(state2.feeling_slot, [7, 6, 6]);
     }

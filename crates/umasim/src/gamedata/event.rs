@@ -9,7 +9,7 @@ use crate::{
     game::UmaFlags,
     gamedata::{GAMECONSTANTS, GAMEDATA},
     global,
-    utils::Array6,
+    utils::Array6
 };
 
 /// 事件触发类型
@@ -20,7 +20,7 @@ pub enum TriggerType {
     Random {
         /// 最大触发次数, 0为无限
         #[serde(default)]
-        max_time: u32,
+        max_time: u32
     },
     /// 代码生成的临时事件，不会触发仅列出（默认）
     #[default]
@@ -28,8 +28,8 @@ pub enum TriggerType {
     /// 固定回合触发
     Fixed {
         /// 触发回合列表
-        turns: Vec<i32>,
-    },
+        turns: Vec<i32>
+    }
 }
 
 /// 训练或事件数值
@@ -52,7 +52,7 @@ pub struct ActionValue {
     pub hint_level: i32,
     /// 羁绊
     #[serde(default)]
-    pub friendship: i32,
+    pub friendship: i32
 }
 
 impl ActionValue {
@@ -79,7 +79,7 @@ impl ActionValue {
     /// 对五维属性和pt进行映射, 例如全属性x3，用于事件效果提高时的计算
     pub fn map_status<F>(&mut self, f: F) -> &mut Self
     where
-        F: Fn(i32) -> i32,
+        F: Fn(i32) -> i32
     {
         for i in 0..6 {
             self.status_pt[i] = f(self.status_pt[i]);
@@ -112,7 +112,7 @@ pub struct EventData {
     pub player_select: bool,
     /// 属性奖励(随机改为平均) 速耐力根智pt，体力
     #[serde(default)]
-    pub choices: Vec<Vec<EventChoice>>,
+    pub choices: Vec<Vec<EventChoice>>
 }
 
 /// 事件选项结果
@@ -124,7 +124,7 @@ pub enum ChoiceResult {
     Success = 1,
     BigSuccess = 2,
     Fail = 3,
-    BigFail = 4,
+    BigFail = 4
 }
 
 impl std::fmt::Display for ChoiceResult {
@@ -134,7 +134,7 @@ impl std::fmt::Display for ChoiceResult {
             ChoiceResult::Success => write!(f, "[成功]"),
             ChoiceResult::BigSuccess => write!(f, "[大成功]"),
             ChoiceResult::Fail => write!(f, "[失败]"),
-            ChoiceResult::BigFail => write!(f, "[大失败]"),
+            ChoiceResult::BigFail => write!(f, "[大失败]")
         }
     }
 }
@@ -156,7 +156,7 @@ pub struct EventChoice {
     pub add_flags: Option<UmaFlags>,
     /// 移除的状态
     #[serde(default)]
-    pub remove_flags: Option<UmaFlags>,
+    pub remove_flags: Option<UmaFlags>
 }
 
 impl EventChoice {
@@ -167,7 +167,7 @@ impl EventChoice {
             prob: 100,
             value: value.clone(),
             add_flags: None,
-            remove_flags: None,
+            remove_flags: None
         }
     }
 
@@ -191,7 +191,7 @@ impl EventChoice {
     /// 对五维属性和pt进行映射, 例如全属性x3，用于事件效果提高时的计算
     pub fn map_status<F>(&mut self, f: F) -> &mut Self
     where
-        F: Fn(i32) -> i32,
+        F: Fn(i32) -> i32
     {
         self.value.map_status(f);
         self
@@ -222,7 +222,7 @@ impl EventData {
     /// 对所有选项的五维属性和pt进行映射, 例如全属性x3，用于事件效果提高时的计算
     pub fn map_status<F>(&mut self, f: F) -> &mut Self
     where
-        F: Fn(i32) -> i32,
+        F: Fn(i32) -> i32
     {
         for choice_group in self.choices.iter_mut() {
             for choice in choice_group.iter_mut() {
@@ -302,7 +302,7 @@ pub struct EventCollection {
     /// 友人事件
     pub friend_events: HashMap<String, EventData>,
     /// 系统事件
-    pub system_events: HashMap<String, EventData>,
+    pub system_events: HashMap<String, EventData>
 }
 
 #[cfg(test)]
@@ -310,7 +310,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::{GAMECONSTANTS, GameConstants, load_json},
-        utils::get_workspace_root,
+        utils::get_workspace_root
     };
 
     /// 从workspace根目录的gamedata/events.json载入EventCollection，并分别explain各类事件

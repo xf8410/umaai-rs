@@ -14,7 +14,7 @@ use crate::{
     explain::Explain,
     game::*,
     gamedata::{ActionValue, ChoiceResult, EventChoice, EventData, TriggerType},
-    utils::*,
+    utils::*
 };
 
 /// 一局游戏的基本状态，剧本通用，用于计算，不用于通信(例如通信只传递卡组id)
@@ -49,7 +49,7 @@ pub struct BaseGame {
     pub card_type_count: Arc<[i32; 7]>,
     /// 友人事件 ID 集合（base/onsen 从 global_events.friend_events 派生；
     /// ramen 在 `RamenGame::newgame` 中额外合并 `RAMENDATA.friend_events`）
-    pub friend_event_ids: HashSet<u32>,
+    pub friend_event_ids: HashSet<u32>
 }
 
 impl BaseGame {
@@ -143,7 +143,7 @@ impl BaseGame {
             card_type_count: Arc::new(card_type_count),
             // 从 global_events().friend_events.values() 派生友人事件 ID
             // （base/onsen 用；ramen 在 RamenGame::newgame 中额外合并 RAMENDATA.friend_events）
-            friend_event_ids: global_events().friend_events.values().map(|e| e.id).collect(),
+            friend_event_ids: global_events().friend_events.values().map(|e| e.id).collect()
         })
     }
 
@@ -312,7 +312,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::*,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]
@@ -336,14 +336,10 @@ mod tests {
         std::env::set_current_dir(workspace_root)?;
         init_test_logger("info")?;
         init_global()?;
-        let game = BaseGame::new(
-            101901,
-            &[302424, 302464, 302484, 302564, 302574, 302644],
-            InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let game = BaseGame::new(101901, &[302424, 302464, 302484, 302564, 302574, 302644], InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         println!("{}", game.explain()?);
         let score = game.uma.calc_score();
         println!("评分: {} {}", global!(GAMECONSTANTS).get_rank_name(score), score);
@@ -372,7 +368,7 @@ mod tests {
             (74, false),
             (75, false),
             (76, false),
-            (77, false),
+            (77, false)
         ] {
             game.turn = turn;
             let got = game.can_self_race();
@@ -466,7 +462,7 @@ mod tests {
             max_vital: 4,
             motivation: 1,
             hint_level: 2,
-            friendship: 15,
+            friendship: 15
         };
         let mut friend = FriendState::default();
         friend.event_bonus = 50;
@@ -496,7 +492,7 @@ mod tests {
             max_vital: 4,
             motivation: 1,
             hint_level: 2,
-            friendship: 15,
+            friendship: 15
         };
         let friend = FriendState::default(); // event_bonus = 0, vital_bonus = 0
 
@@ -541,14 +537,10 @@ mod tests {
         init_global()?;
 
         // 构造带友人卡的 BaseGame（302574 是 hotaku 友人）
-        let mut game = BaseGame::new(
-            101901,
-            &[302424, 302464, 302484, 302564, 302574, 302644],
-            InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let mut game = BaseGame::new(101901, &[302424, 302464, 302484, 302564, 302574, 302644], InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         // 强制设置可预测的 friend bonus
         game.friend.event_bonus = 30;
         game.friend.vital_bonus = 20;
@@ -624,14 +616,10 @@ mod tests {
         // 实际 card_id=302424 不带友人（card_type<5）
         // 改用一组全部非友人的卡组来保证 friend.event_bonus=0
         // 这里直接用不带友人的卡组：[302424, 302464, 302484, 302564, 302644, 302694]
-        let mut game = BaseGame::new(
-            101901,
-            &[302424, 302464, 302484, 302564, 302644, 302694],
-            InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let mut game = BaseGame::new(101901, &[302424, 302464, 302484, 302564, 302644, 302694], InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         // 验证 friend.event_bonus 和 vital_bonus 都是 0
         assert_eq!(game.friend.event_bonus, 0);
         assert_eq!(game.friend.vital_bonus, 0);

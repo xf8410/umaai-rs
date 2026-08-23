@@ -17,15 +17,15 @@ use anyhow::Result;
 
 use super::{
     effects::calc_ramen_training_effect,
-    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options},
+    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options}
 };
 use crate::{
     game::{
         ramen::{Operation, RamenAction, RamenGame},
-        traits::Game,
+        traits::Game
     },
     gamedata::{EventChoice, FreeRaceData, GAMECONSTANTS, ramen::RAMENDATA},
-    global,
+    global
 };
 
 /// 手写策略参数化配置（权重/阈值常量）
@@ -107,7 +107,7 @@ pub struct RamenPolicyConfig {
     /// 事件干劲每点折算
     pub event_motivation_weight: f32,
     /// 事件获得 bad flag（ill/bad_trainer）的惩罚
-    pub event_bad_flag_penalty: f32,
+    pub event_bad_flag_penalty: f32
 }
 
 impl Default for RamenPolicyConfig {
@@ -139,7 +139,7 @@ impl Default for RamenPolicyConfig {
             region_hint_weight: 15.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
-            event_bad_flag_penalty: 300.0,
+            event_bad_flag_penalty: 300.0
         }
     }
 }
@@ -162,7 +162,7 @@ pub struct RamenPolicyOutput {
     /// 评分分解（调参用，进入决策日志 score_breakdown 列）
     pub breakdown: Vec<(String, f32)>,
     /// 决策原因（人类可读，调试用）
-    pub reason: String,
+    pub reason: String
 }
 
 impl RamenPolicyOutput {
@@ -179,7 +179,7 @@ impl RamenPolicyOutput {
 #[derive(Debug, Clone)]
 pub struct RamenPolicy {
     /// 参数化配置
-    pub config: RamenPolicyConfig,
+    pub config: RamenPolicyConfig
 }
 
 impl Default for RamenPolicy {
@@ -214,14 +214,11 @@ impl RamenPolicy {
 
         // 守门 0：自选比赛达标（优先于一切——不达标直接育成失败）
         if let Some(idx) = self.free_race_gate(game, actions) {
-            return Ok((
-                idx,
-                vec![RamenPolicyOutput {
-                    score: f32::MAX,
-                    reason: format!("守门: {}", self.free_race_gate_reason(game)),
-                    ..Default::default()
-                }],
-            ));
+            return Ok((idx, vec![RamenPolicyOutput {
+                score: f32::MAX,
+                reason: format!("守门: {}", self.free_race_gate_reason(game)),
+                ..Default::default()
+            }]));
         }
         // 守门 1：生病 → 治病（夏合宿无治病候选，休息自动治病）
         if uma.flags.ill || uma.flags.bad_trainer {
@@ -229,39 +226,30 @@ impl RamenPolicy {
                 .iter()
                 .position(|a| a.operation == Operation::Clinic && !is_xiahesu)
             {
-                return Ok((
-                    idx,
-                    vec![RamenPolicyOutput {
-                        score: f32::MAX,
-                        reason: "守门: 生病治病".to_string(),
-                        ..Default::default()
-                    }],
-                ));
+                return Ok((idx, vec![RamenPolicyOutput {
+                    score: f32::MAX,
+                    reason: "守门: 生病治病".to_string(),
+                    ..Default::default()
+                }]));
             }
             if is_xiahesu {
                 if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
-                    return Ok((
-                        idx,
-                        vec![RamenPolicyOutput {
-                            score: f32::MAX,
-                            reason: "守门: 夏合宿休息(自动治病)".to_string(),
-                            ..Default::default()
-                        }],
-                    ));
+                    return Ok((idx, vec![RamenPolicyOutput {
+                        score: f32::MAX,
+                        reason: "守门: 夏合宿休息(自动治病)".to_string(),
+                        ..Default::default()
+                    }]));
                 }
             }
         }
         // 守门 2：体力低 → 休息（防失败率崩盘；优先于心情、训练）
         if uma.vital < self.config.vital_rest {
             if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
-                return Ok((
-                    idx,
-                    vec![RamenPolicyOutput {
-                        score: f32::MAX,
-                        reason: format!("守门: 体力{}<{}休息", uma.vital, self.config.vital_rest),
-                        ..Default::default()
-                    }],
-                ));
+                return Ok((idx, vec![RamenPolicyOutput {
+                    score: f32::MAX,
+                    reason: format!("守门: 体力{}<{}休息", uma.vital, self.config.vital_rest),
+                    ..Default::default()
+                }]));
             }
         }
         // 守门 3：心情低 → 外出（回干劲）
@@ -270,14 +258,11 @@ impl RamenPolicy {
                 .iter()
                 .position(|a| matches!(a.operation, Operation::NormalOuting | Operation::FriendOuting))
             {
-                return Ok((
-                    idx,
-                    vec![RamenPolicyOutput {
-                        score: f32::MAX,
-                        reason: format!("守门: 心情{}<{}外出", uma.motivation, self.config.motivation_outing),
-                        ..Default::default()
-                    }],
-                ));
+                return Ok((idx, vec![RamenPolicyOutput {
+                    score: f32::MAX,
+                    reason: format!("守门: 心情{}<{}外出", uma.motivation, self.config.motivation_outing),
+                    ..Default::default()
+                }]));
             }
         }
 
@@ -323,7 +308,7 @@ impl RamenPolicy {
     /// SpecialSelect 阶段：最省隐藏风味（保留库存）；候选已按 sum(t) 升序，
     /// 这里显式按 -sum(targets) 打分，不依赖排序保证
     pub fn decide_special(
-        &self, _game: &RamenGame, actions: &[RamenAction],
+        &self, _game: &RamenGame, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if actions.is_empty() {
             anyhow::bail!("SpecialSelect 阶段候选为空");
@@ -349,7 +334,7 @@ impl RamenPolicy {
 
     /// RegionSelect 阶段：按地区静态价值打分选组合（含第 3 年 120 组合全枚举，O(360) 便宜）
     pub fn decide_region(
-        &self, game: &RamenGame, _year_idx: usize, actions: &[RamenAction],
+        &self, game: &RamenGame, _year_idx: usize, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if actions.is_empty() {
             anyhow::bail!("RegionSelect 阶段候选为空");
@@ -376,7 +361,7 @@ impl RamenPolicy {
 
     /// 事件选项打分（返回各候选评分分解）
     pub fn decide_event(
-        &self, game: &RamenGame, choices: &[Vec<EventChoice>],
+        &self, game: &RamenGame, choices: &[Vec<EventChoice>]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if choices.is_empty() {
             anyhow::bail!("事件候选为空");
@@ -444,7 +429,7 @@ impl RamenPolicy {
                 let name = ["?", "G1", "G2", "G3", "OP"][g.min(4) as usize];
                 format!("要求{name}及以上")
             }
-            None => "无等级要求".to_string(),
+            None => "无等级要求".to_string()
         };
         if need == 0 {
             format!("自选比赛已达标({grade_note}), 区间剩余回合不再干预")
@@ -761,7 +746,7 @@ mod tests {
     use crate::{
         game::ramen::TrainingType,
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger},
+        utils::{get_workspace_root, init_test_logger}
     };
 
     #[test]
@@ -854,14 +839,10 @@ mod tests {
             deck_w.push(302424);
         }
         let deck_w: [u32; 6] = deck_w.try_into().expect("卡组长度 6");
-        let game_wise = RamenGame::newgame(
-            102601,
-            &deck_w,
-            crate::game::InheritInfo {
-                blue_count: [15, 3, 0, 0, 0],
-                extra_count: [0, 30, 0, 0, 30, 30],
-            },
-        )?;
+        let game_wise = RamenGame::newgame(102601, &deck_w, crate::game::InheritInfo {
+            blue_count: [15, 3, 0, 0, 0],
+            extra_count: [0, 30, 0, 0, 30, 30]
+        })?;
         let (idx_w, outs_w) = policy.decide_region(&game_wise, 2, &actions)?;
         println!(
             "智力向卡组 {:?} → 第3年选中: {:?} score={:.0}",
@@ -877,7 +858,7 @@ mod tests {
         use crate::game::ramen::RamenGame;
         let inherit = crate::game::InheritInfo {
             blue_count: [15, 3, 0, 0, 0],
-            extra_count: [0, 30, 0, 0, 30, 30],
+            extra_count: [0, 30, 0, 0, 30, 30]
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         Ok(RamenGame::newgame(102601, &deck, inherit)?)
@@ -1061,7 +1042,7 @@ mod tests {
     fn make_free_race_game_uma(uma_id: u32) -> anyhow::Result<RamenGame> {
         let inherit = crate::game::InheritInfo {
             blue_count: [15, 3, 0, 0, 0],
-            extra_count: [0, 30, 0, 0, 30, 30],
+            extra_count: [0, 30, 0, 0, 30, 30]
         };
         let deck = [302424, 302894, 303044, 302924, 303024, 303054];
         Ok(RamenGame::newgame(uma_id, &deck, inherit)?)
@@ -1088,7 +1069,7 @@ mod tests {
             end_turn: 26,
             count: 1,
             grade: None,
-            mask: 0,
+            mask: 0
         };
         free.update_turn_mask();
         for (turn, expect) in [(0, 14), (13, 14), (20, 7), (25, 2), (26, 1), (27, 0)] {
