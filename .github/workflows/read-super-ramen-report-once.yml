@@ -19,12 +19,15 @@ jobs:
         with:
           ref: workbench/skill-pt-matrix-distill
       - name: 下载已完成矩阵总报告
-        env:
-          GH_TOKEN: ${{ github.token }}
+        uses: actions/download-artifact@v4
+        with:
+          name: 超级拉面多权重矩阵总报告
+          path: /tmp/ramen-report
+          repository: xf8410/umaai-rs
+          run-id: 32658372240
+          github-token: ${{ github.token }}
+      - name: 保存评分报告
         run: |
-          mkdir -p /tmp/ramen-report
-          gh api repos/xf8410/umaai-rs/actions/artifacts/9498088231/zip > /tmp/ramen-report.zip
-          unzip -o /tmp/ramen-report.zip -d /tmp/ramen-report
           report=$(find /tmp/ramen-report -type f -name '*.md' -print -quit)
           test -n "$report"
           test -s "$report"
