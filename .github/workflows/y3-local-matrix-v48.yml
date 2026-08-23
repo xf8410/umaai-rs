@@ -1,0 +1,73 @@
+name: 3速1耐1智第三年局部矩阵
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/y3-local-matrix-v48.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  matrix:
+    name: ${{ matrix.variant }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [均值基准, 稳健基准, 第三年PT36, 第三年PT40, 第三年PT48, 第三年对盘12, 第三年对盘18, 第三年Hint10, 第三年组合]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三年局部矩阵}
+      - run: cargo run -p umasim --bin y3_local_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-第${{ matrix.shard.human }}片
+          path: 第三年局部矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总第三年局部矩阵
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三年局部矩阵报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/第三年局部矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)): g[r['方案']].append(r)
+          expected={'均值基准','稳健基准','第三年PT36','第三年PT40','第三年PT48','第三年对盘12','第三年对盘18','第三年Hint10','第三年组合'}
+          if set(g)!=expected or any(len(x)!=300 for x in g.values()): raise SystemExit({k:len(v) for k,v in g.items()})
+          def stats(rows,key):
+            x=sorted(float(r[key]) for r in rows); n=len(x)
+            return statistics.mean(x),x[int((n-1)*.1)],x[0]
+          print('# 第三年PT、吃面对盘与Hint局部矩阵\n')
+          print('|方案|平均总分|总分P10|最低总分|平均PT|PT P10|最低PT|')
+          print('|---|---:|---:|---:|---:|---:|---:|')
+          ranked=[]
+          for name,rows in g.items():
+            s=stats(rows,'总分'); p=stats(rows,'技能点')
+            ranked.append((s[0],p[0],name,s,p))
+          for _,_,name,s,p in sorted(ranked,reverse=True):
+            print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|')
+          best=max(ranked)
+          print(f'\n平均总分领先：**{best[2]}**（{best[3][0]:.1f}，PT {best[4][0]:.1f}）')
+          PY
+          cat 第三年局部矩阵报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三年局部矩阵报告
+          path: 第三年局部矩阵报告.md
+          retention-days: 30
