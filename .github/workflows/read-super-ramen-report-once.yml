@@ -1,0 +1,36 @@
+name: 读取超级拉面多权重矩阵评分
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/read-super-ramen-report-once.yml']
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  read:
+    name: 读取并提交评分报告
+    runs-on: ubuntu-latest
+    steps:
+      - name: 读取仓库源码
+        uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - name: 下载已完成矩阵总报告
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/ramen-report
+          gh run download 32658372240 --name 超级拉面多权重矩阵总报告 --dir /tmp/ramen-report
+          test -s /tmp/ramen-report/超级拉面多权重矩阵报告.md
+          cat /tmp/ramen-report/超级拉面多权重矩阵报告.md
+          cp /tmp/ramen-report/超级拉面多权重矩阵报告.md .trae/exports/super-ramen-partner-weight-matrix.md
+      - name: 提交评分报告
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/super-ramen-partner-weight-matrix.md
+          git commit -m '保存超级拉面额外人头多权重矩阵评分'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
