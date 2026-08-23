@@ -32,26 +32,35 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: super-ramen-partner-assignment-ab
-      - name: Compile baseline
-        run: cargo check -p umasim --bin bench_base --no-default-features
-      - name: Run baseline
-        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
-      - name: Apply protocol-derived candidate
-        run: python3 scripts/ramen/experiment_super_ramen_partner_assignment.py
-      - name: Compile and test candidate
+
+      - name: Library tests - current ramen mechanism
+        shell: bash
         run: |
-          cargo check -p umasim --bin bench_base --no-default-features
-          cargo test -p umasim --lib --no-default-features test_ramen_game_full_loop -- --nocapture
-      - name: Run candidate with identical seeds
+          set -o pipefail
+          cargo test -p umasim --lib game::ramen -- --nocapture 2>&1 | tee ramen-library-baseline.log
+
+      - name: Run current ramen score matrix
+        run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/baseline
+
+      - name: Apply protocol-derived URAF candidate
+        run: python3 scripts/ramen/experiment_super_ramen_partner_assignment.py
+
+      - name: Library tests - candidate ramen mechanism
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p umasim --lib game::ramen -- --nocapture 2>&1 | tee ramen-library-candidate.log
+
+      - name: Run candidate ramen score matrix with identical seeds
         run: cargo run -p umasim --bin bench_base --release --no-default-features -- --runs "$AB_RUNS" --seed 771400 --trainer handwritten --out benchmark-results/super-ramen-ab/candidate
+
       - name: Summarize paired score matrix
         run: |
           python3 - <<'PY'
           import csv, pathlib, statistics
           root = pathlib.Path('benchmark-results/super-ramen-ab')
           def load(name):
-              p = root/name/'bench_base_results.csv'
-              with p.open() as f:
+              with (root/name/'bench_base_results.csv').open() as f:
                   rows = list(csv.DictReader(f))
               return {(r['build'], r['seed']): r for r in rows}
           a, b = load('baseline'), load('candidate')
@@ -73,14 +82,18 @@ jobs:
               w=sum(x>0 for x in ds); l=sum(x<0 for x in ds)
               report.append(f'| {build} | {len(ds)} | {statistics.mean(ds):+.2f} | {w}/{len(ds)-w-l}/{l} |')
           keep = statistics.mean(deltas) > 0 and wins > losses
-          report += ['', f'**判定：{"保留候选" if keep else "不保留候选"}**',
-                     '', '候选只在工作区临时应用；本 workflow 不提交机制改动。']
+          report += ['', f'**判定：{"保留候选" if keep else "不保留候选"}**']
           text='\n'.join(report)+'\n'
           (root/'report.md').write_text(text)
           print(text)
           PY
+          cat benchmark-results/super-ramen-ab/report.md >> "$GITHUB_STEP_SUMMARY"
+
       - uses: actions/upload-artifact@v4
         with:
           name: super-ramen-partner-assignment-ab-${{ github.run_id }}
-          path: benchmark-results/super-ramen-ab
+          path: |
+            benchmark-results/super-ramen-ab
+            ramen-library-baseline.log
+            ramen-library-candidate.log
           retention-days: 14
