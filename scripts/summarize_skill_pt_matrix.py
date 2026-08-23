@@ -23,10 +23,17 @@ for variant, rs in rows.items():
     ds=[r["b_status_score"]-r["a_status_score"] for r in rs]
     draw=[r["b_status_sum"]-r["a_status_sum"] for r in rs]
     dscore=[r["b_score"]-r["a_score"] for r in rs]
+    bscores=[r["b_score"] for r in rs]
+    top=max(rs,key=lambda r:r["b_score"])
     both=sum(p>0 and s>=0 and sc>0 for p,s,sc in zip(dp,ds,dscore))/len(rs)*100
     pt_attr_loss=sum(p>0 and s<0 for p,s in zip(dp,ds))/len(rs)*100
     passed=mean(dp)>0 and mean(ds)>=0 and mean(dscore)>0
-    summary.append(dict(variant=variant,n=len(rs),pt=mean([r["b_skill_pt"] for r in rs]),dpt=mean(dp),med=median(dp),p10=pct(dp,.1),p90=pct(dp,.9),ds=mean(ds),draw=mean(draw),dscore=mean(dscore),both=both,loss=pt_attr_loss,passed=passed))
+    summary.append(dict(
+        variant=variant,n=len(rs),pt=mean([r["b_skill_pt"] for r in rs]),dpt=mean(dp),med=median(dp),
+        p10=pct(dp,.1),p90=pct(dp,.9),ds=mean(ds),draw=mean(draw),dscore=mean(dscore),
+        score=mean(bscores),score_p90=pct(bscores,.90),score_p95=pct(bscores,.95),score_p99=pct(bscores,.99),
+        max_score=top["b_score"],max_seed=top["run_idx"],max_pt=top["b_skill_pt"],
+        max_status=top["b_status_sum"],both=both,loss=pt_attr_loss,passed=passed))
 summary.sort(key=lambda x:(x["passed"],x["dscore"],x["dpt"],x["ds"]), reverse=True)
 
 lines=[]
@@ -36,7 +43,13 @@ if not summary:
     lines.append("未找到矩阵结果。\n")
 else:
     best=summary[0]
-    lines.append(f"## 推荐结果\n\n**{esc(best['variant'])}** — 平均 ΔPT **{best['dpt']:+.1f}**，平均 Δ属性评分 **{best['ds']:+.1f}**，平均 Δ最终评分 **{best['dscore']:+.1f}**，验收 **{'✅' if best['passed'] else '❌'}**。\n\n")
+    lines.append(f"## 推荐结果\n\n**{esc(best['variant'])}** — B 平均最终评分 **{best['score']:.1f}**，平均 Δ最终评分 **{best['dscore']:+.1f}**，平均 ΔPT **{best['dpt']:+.1f}**，平均 Δ属性评分 **{best['ds']:+.1f}**，验收 **{'✅' if best['passed'] else '❌'}**。\n\n")
+    lines.append("## 绝对最终评分与单局最高分\n\n")
+    lines.append("|排名|参数变体|B平均最终评分|P90/P95/P99|单局最高分|最高分 run_idx|该局技能PT|该局五维原值和|\n")
+    lines.append("|---:|---|---:|---:|---:|---:|---:|---:|\n")
+    for i,x in enumerate(summary,1):
+        lines.append(f"|{i}|`{esc(x['variant'])}`|{x['score']:.1f}|{x['score_p90']:.0f}/{x['score_p95']:.0f}/{x['score_p99']:.0f}|**{x['max_score']}**|`{x['max_seed']}`|{x['max_pt']}|{x['max_status']}|\n")
+    lines.append("\n> 可复现种子为 `BASE_SEED + run_idx`；本矩阵 `BASE_SEED=61444`。\n\n")
     lines.append("## 全部手写策略参数变体（按验收、最终评分、PT 排序）\n\n")
     lines.append("|排名|参数变体|局数|B平均PT|ΔPT均值|ΔPT中位|P10/P90 ΔPT|Δ五维原值|Δ属性评分|Δ最终评分|PT↑且属性/评分不降|PT↑但属性降|验收|\n")
     lines.append("|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|\n")
