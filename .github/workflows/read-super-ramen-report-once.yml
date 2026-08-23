@@ -28,9 +28,9 @@ jobs:
           github-token: ${{ github.token }}
       - name: 保存评分报告
         run: |
-          report=$(find /tmp/ramen-report -type f -name '*.md' -print -quit)
+          find /tmp/ramen-report -maxdepth 3 -type f -print -exec wc -c {} \;
+          report=$(find /tmp/ramen-report -type f -size +0c -print -quit)
           test -n "$report"
-          test -s "$report"
           cat "$report"
           cp "$report" .trae/exports/super-ramen-partner-weight-matrix.md
       - name: 提交评分报告
