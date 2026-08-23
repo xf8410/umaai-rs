@@ -151,6 +151,14 @@ pub struct LocalRamenConfig {
     /// RamenSelect 直接选择不吃；一旦已经吃面，Train 阶段只在五种训练中比较，
     /// 不允许随后休息而浪费仅本回合生效的拉面加成。
     pub eat_requires_training: bool,
+
+    /// 第三年吃面前要求“吃面后所选训练”结束时至少保留的体力。
+    ///
+    /// 仅在普通第三年回合（48-71）生效。策略会针对每碗候选面预演吃面后的最佳训练；
+    /// 若非智力训练结束后的体力低于该值，就禁止该面，避免虽然本回合因 100% 减失败率
+    /// 能训练，却把体力打空并导致下一回合被迫恢复。智力训练会回体力，不受此门控。
+    /// `0` 表示关闭。
+    pub y3_post_train_vital_floor: i32,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -181,6 +189,7 @@ impl Default for LocalRamenConfig {
             safety_bridge_stock_cost: 0.0,
             cook2_stock_weight: 0.0,
             eat_requires_training: false,
+            y3_post_train_vital_floor: 0,
         }
     }
 }
@@ -225,6 +234,8 @@ impl LocalRamenTrainer {
                 policy.vital_rest = v.parse()?
             } else if token == "eatguard" {
                 local.eat_requires_training = true
+            } else if let Some(v) = token.strip_prefix("y3floor") {
+                local.y3_post_train_vital_floor = v.parse()?
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -499,6 +510,32 @@ impl LocalRamenTrainer {
             .ok_or_else(|| anyhow::anyhow!("吃面前训练决策索引越界: {idx}/{}", actions.len()))
     }
 
+    /// 预演第三年某碗面落地后的最佳训练，返回 `(训练类型, 训练后体力)`。
+    ///
+    /// 不落地随机分身，因此只使用当前已知人头与确定性拉面效果；这是保下限门控，
+    /// 不是用于给候选增加收益的随机 lookahead。
+    fn post_ramen_training_vital(&self, g: &RamenGame, region_id: usize) -> Result<Option<(usize, i32)>> {
+        if self.config.y3_post_train_vital_floor <= 0 || g.current_year() != 3 || g.turn() >= 72 {
+            return Ok(None);
+        }
+        let mut preview = g.clone();
+        preview.stage = RamenStage::Train;
+        preview.ramen.current_ramen = Some(region_id);
+        preview.ramen.clear_pending();
+        let actions = preview.list_actions()?;
+        let (idx, _) = self.decide_train(&preview, &actions)?;
+        let Some(action) = actions.get(idx) else {
+            anyhow::bail!("吃面后预演索引越界: {idx}/{}", actions.len());
+        };
+        let Operation::Train(tt) = action.operation else {
+            return Ok(None);
+        };
+        let train = tt as usize;
+        let buffs = preview.calc_training_buff(train)?;
+        let value = preview.calc_training_value(&buffs, train)?;
+        Ok(Some((train, preview.uma.vital + value.vital)))
+    }
+
     fn best_action_score(&self, g: &RamenGame) -> Result<f32> {
         let actions = g.list_actions()?;
         let (idx, out) = self.decide_train(g, &actions)?;
@@ -711,6 +748,20 @@ impl LocalRamenTrainer {
         let bridge = self.safety_bridge(g, a)?;
         for (act, o) in a.iter().zip(out.iter_mut()) {
             if let Some(region_id) = act.ramen {
+                if let Some((train, post_vital)) = self.post_ramen_training_vital(g, region_id)? {
+                    let wisdom_recovers = train == 4;
+                    if !wisdom_recovers && post_vital < self.config.y3_post_train_vital_floor {
+                        o.score = f32::NEG_INFINITY;
+                        o.reason = format!(
+                            "禁止吃面：第三年预演{}训练后体力{}<保留{}",
+                            ["速", "耐", "力", "根", "智"][train],
+                            post_vital,
+                            self.config.y3_post_train_vital_floor
+                        );
+                        o.add("y3_next_turn_vital_guard", f32::NEG_INFINITY);
+                        continue;
+                    }
+                }
                 let pressure = risk * self.config.overflow_value;
                 o.score += pressure;
                 o.add("local_stock_pressure", pressure);
@@ -767,7 +818,8 @@ impl LocalRamenTrainer {
 /// - Cook2 式诀窍边际库存权重：40；
 /// - 关闭随机分身 lookahead；
 /// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
-/// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成。
+/// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
+/// - 第三年逐碗预演吃面后的训练，非智力训练后至少保留 20 体力，保护下一回合。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -802,6 +854,7 @@ impl RecommendedRamenTrainer {
             local.effective_ramen_failure = false;
             local.cook2_stock_weight = 40.0;
             local.eat_requires_training = true;
+            local.y3_post_train_vital_floor = 20;
             LocalRamenTrainer::with_configs(policy, local)
         }
 
