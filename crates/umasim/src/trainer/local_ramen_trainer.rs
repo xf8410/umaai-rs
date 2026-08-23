@@ -42,6 +42,8 @@ pub struct LocalRamenConfig {
     pub ramen_lookahead_samples: usize,
     /// 积极吃面节奏：存在可制作面时，前向值只负责在面之间排序，不与“不吃”竞争。
     pub eager_eat: bool,
+    /// v8 诊断：吃面前，候选地区覆盖的当前训练窗口价值。
+    pub ramen_window_weight: f32,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -65,6 +67,7 @@ impl Default for LocalRamenConfig {
             ramen_lookahead_weight: 1.0,
             ramen_lookahead_samples: 12,
             eager_eat: false,
+            ramen_window_weight: 0.0,
         }
     }
 }
@@ -138,6 +141,8 @@ impl LocalRamenTrainer {
                 policy.ramen_pt_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("align") {
                 local.ramen_lookahead_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("window") {
+                local.ramen_window_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("look") {
                 local.ramen_lookahead_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("samples") {
@@ -340,6 +345,33 @@ impl LocalRamenTrainer {
         }
         Ok(out.get(idx).map(|x| x.score).unwrap_or(0.0))
     }
+    /// 精确复原 v8 的吃面前窗口信号，用于解释其收益来源。
+    /// 它只查看候选地区 at_trains 当前已有的真实训练窗口，不预测分身。
+    fn ramen_window_alignment(&self, g: &RamenGame, region_id: usize) -> Result<f32> {
+        if self.config.ramen_window_weight <= 0.0 {
+            return Ok(0.0);
+        }
+        let d = RAMENDATA.get().ok_or_else(|| anyhow::anyhow!("RAMENDATA 未初始化"))?;
+        let region = d
+            .ramen_region_effect
+            .get(region_id)
+            .ok_or_else(|| anyhow::anyhow!("地区效果缺失: {region_id}"))?;
+        let mut best = 0.0f32;
+        for &t in &region.at_trains {
+            if !(0..5).contains(&t) {
+                continue;
+            }
+            let tr = t as usize;
+            let buffs = g.calc_training_buff(tr)?;
+            let v = g.calc_training_value(&buffs, tr)?;
+            let raw = v.status_pt[..5].iter().sum::<i32>() as f32 + v.status_pt[5] as f32 * 2.0;
+            let people = g.distribution().get(tr).map(|x| x.len()).unwrap_or(0) as f32;
+            let shining = g.shining_count(tr) as f32;
+            best = best.max(raw + people * 8.0 + shining * 35.0);
+        }
+        let effect = (region.xunlian + region.youqing + region.pt_bonus) as f32 + region.hint_count as f32 * 10.0;
+        Ok(best * effect * self.config.ramen_window_weight / 100.0)
+    }
     /// 在真正吃面前，用状态副本执行候选面并评估其事后最佳动作。
     /// 所有 region_id 走同一逻辑；不按人数、彩圈或拉面名称硬编码排序。
     fn ramen_lookahead(&self, g: &RamenGame, region_id: usize) -> Result<f32> {
@@ -386,11 +418,13 @@ impl LocalRamenTrainer {
                 let y = (g.current_year() - 1) as usize;
                 let post = g.ramen.scenario_pt + calc_ramen_pt_gain(y, g.ramen.eat_count)?;
                 let (ck, rmj, great) = self.scenario_threshold_value(g, post)?;
+                let window = self.ramen_window_alignment(g, region_id)?;
                 let look = self.ramen_lookahead(g, region_id)?;
-                o.score += ck + rmj + great + look;
+                o.score += ck + rmj + great + window + look;
                 o.add("scenario_checkpoint", ck);
                 o.add("rmj_cross", rmj);
                 o.add("great_cross", great);
+                o.add("ramen_window", window);
                 o.add("ramen_lookahead", look)
             }
         }
