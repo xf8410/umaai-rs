@@ -1,0 +1,42 @@
+name: 修复拉面杯策略文件格式
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/fix-local-ramen-format-once.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    name: 修复并提交格式
+    runs-on: ubuntu-latest
+    steps:
+      - name: 读取仓库源码
+        uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - name: 安装夜间版格式化工具
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: 删除测试模块前的多余空行
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/umasim/src/trainer/local_ramen_trainer.rs')
+          text = path.read_text()
+          old = "}\n\n\n#[cfg(test)]"
+          if text.count(old) != 1:
+              raise SystemExit(f'预期找到一处多余空行，实际 {text.count(old)} 处')
+          path.write_text(text.replace(old, "}\n\n#[cfg(test)]"))
+          PY
+          cargo +nightly fmt --all -- --check
+      - name: 提交格式修复
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m '修复拉面杯策略测试模块前的多余空行'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
