@@ -2,7 +2,10 @@ name: Ramen restored strategy matrix v29
 on:
   push:
     branches: [workbench/skill-pt-matrix-distill]
-    paths: [.github/workflows/ramen-restored-strategy-v29.yml]
+    paths:
+      - .github/workflows/ramen-restored-strategy-v29.yml
+      - scripts/restore_simplified_strategy_v29.py
+      - scripts/fix_v29_race_patch.py
   workflow_dispatch:
 permissions: {contents: write}
 jobs:
@@ -11,13 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: python3 scripts/restore_simplified_strategy_v29.py
+      - name: Repair patch matcher and apply v29
+        run: |
+          python3 scripts/fix_v29_race_patch.py
+          python3 scripts/restore_simplified_strategy_v29.py
       - run: cargo fmt -- crates/umasim/src/game/ramen/policy.rs crates/umasim/src/game/ramen/game.rs crates/umasim/src/trainer/local_ramen_trainer.rs
       - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
       - run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/umasim/src/game/ramen/policy.rs crates/umasim/src/game/ramen/game.rs crates/umasim/src/trainer/local_ramen_trainer.rs
+          git add scripts/restore_simplified_strategy_v29.py crates/umasim/src/game/ramen/policy.rs crates/umasim/src/game/ramen/game.rs crates/umasim/src/trainer/local_ramen_trainer.rs
           git commit -m 'fix: restore omitted ramen strategy decisions'
           git push origin HEAD:workbench/skill-pt-matrix-distill
   matrix:
@@ -74,7 +80,7 @@ jobs:
           def pct(v,p):
             v=sorted(v); return v[round((len(v)-1)*p)]
           lines=['# 恢复被简化策略矩阵 v29（每组300局）','',
-            '> 本轮不再逐次记录第三年训练 PT；只汇总最终 PT、低分尾部 PT，避免额外追踪逻辑干扰矩阵。','',
+            '> 本轮不再逐次记录第三年训练 PT；只汇总最终 PT、低分尾部 PT。','',
             '|变体|平均评分|P10/P50/P90|最低分|最低分局PT|底部10%平均PT|平均PT|PT P10|最高分|',
             '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
           for name,rs in sorted(d.items(), key=lambda kv:-statistics.mean(x['b_score'] for x in kv[1])):
