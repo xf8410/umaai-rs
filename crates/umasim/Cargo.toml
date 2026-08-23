@@ -37,10 +37,15 @@ path = "tools/data_collection/y3_train_pt_trace.rs"
 name = "composition_weight_matrix"
 path = "tools/data_collection/composition_weight_matrix.rs"
 
-# 该工具由专项矩阵脚本临时注入候选参数入口，不属于常规发布构建目标。
+# 以下工具由专项脚本临时注入候选参数入口，不属于常规发布构建目标。
 [[bin]]
 name = "exact_weight_confirm"
 path = "tools/data_collection/exact_weight_confirm.rs"
+required-features = ["experiment-tools"]
+
+[[bin]]
+name = "wisdom_structure_diagnostic"
+path = "tools/data_collection/wisdom_structure_diagnostic.rs"
 required-features = ["experiment-tools"]
 
 [features]
