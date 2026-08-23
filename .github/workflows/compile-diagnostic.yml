@@ -1,127 +1,27 @@
-name: Ramen cap confirm and exact progression matrix v44
+name: Publish v44 report
 on:
   workflow_dispatch:
 permissions:
-  contents: read
+  actions: read
+  contents: write
 jobs:
-  cap-confirm:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 100
-    strategy:
-      fail-fast: false
-      matrix: {shard: [0,1,2,3,4]}
-    env:
-      VARIANT: cap135-vs-025
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 200
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest0
-      FRIEND_CAP_A: friendcap135
-      FRIEND_CAP_B: friendcap025
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - run: python3 scripts/ramen/exact_progression_bypass_v44.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-v44}
-      - run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-          cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v44-cap-${{ matrix.shard }}
-          path: matrix-result.csv
-          retention-days: 30
-  cross-screen:
-    runs-on: ubuntu-latest
-    timeout-minutes: 100
-    strategy:
-      fail-fast: false
-      max-parallel: 24
-      matrix:
-        variant:
-          - control
-          - crossrmj
-          - crossgreat
-          - crossstep
-          - crossrmj-crossgreat
-          - crossrmj-crossstep
-          - crossrmj-crossgreat-crossstep
-          - crossrmj-crossgreat-crossstep-crosskeep
-        shard: [0,1,2]
-    env:
-      VARIANT: ${{ matrix.variant }}
-      SHARD: ${{ matrix.shard }}
-      RUNS_PER_SHARD: 100
-      PT1: 16
-      PT2: 64
-      PT3: 64
-      SAC: 140
-      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendspecial4-specialdynamic
-      STRUCTURE_Y1: vrest30
-      STRUCTURE_Y2: vrest30
-      STRUCTURE_Y3: vrest0
-      FRIEND_CAP_A: friendcap025
-      FRIEND_CAP_B: friendcap025-${{ matrix.variant == 'control' && 'base' || matrix.variant }}
-    steps:
-      - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
-      - run: python3 scripts/ramen/exact_progression_bypass_v44.py
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-v44}
-      - run: |
-          cargo fmt --all
-          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-          cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: v44-cross-${{ strategy.job-index }}
-          path: matrix-result.csv
-          retention-days: 30
-  summary:
-    needs: [cap-confirm, cross-screen]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with: {pattern: v44-*, path: results}
-      - name: Summarize
+        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
+      - name: Download report
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: gh run download 32641458558 --repo xf8410/umaai-rs --name cap-and-cross-v44-summary --dir report
+      - name: Commit report
         run: |
-          python3 - <<'PY' | tee cap-and-cross-v44.md
-          import csv,glob,collections,statistics
-          cap=[]; cross=collections.defaultdict(list)
-          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
-            with open(p,newline='') as f:
-              for r in csv.DictReader(f):
-                (cap if r['variant']=='cap135-vs-025' else cross[r['variant']]).append(r)
-          def vals(rs,pre,k):return [int(x[pre+k]) for x in rs]
-          def pct(x,p):return sorted(x)[round((len(x)-1)*p)]
-          print('# 友人 0/2/5 确认与确定跨线矩阵 v44\n')
-          if len(cap)!=1000:raise SystemExit(f'cap={len(cap)}')
-          print('## 1/3/5 → 0/2/5（1000 局）\n|指标|1/3/5 A|0/2/5 B|B-A|\n|---|---:|---:|---:|')
-          for title,k in [('平均总评分','score'),('平均PT','skill_pt'),('平均属性评分','status_score'),('平均五维和','status_sum')]:
-            a,b=vals(cap,'a_',k),vals(cap,'b_',k);am,bm=statistics.mean(a),statistics.mean(b);print(f'|{title}|{am:.1f}|{bm:.1f}|{bm-am:+.1f}|')
-          a,b=vals(cap,'a_','score'),vals(cap,'b_','score')
-          for title,p in [('P10',.1),('P50',.5),('P90',.9)]:av,bv=pct(a,p),pct(b,p);print(f'|{title}|{av}|{bv}|{bv-av:+d}|')
-          print(f'\nB 胜/平/负：{sum(y>x for x,y in zip(a,b))}/{sum(y==x for x,y in zip(a,b))}/{sum(y<x for x,y in zip(a,b))}\n')
-          if len(cross)!=8 or any(len(v)!=300 for v in cross.values()):raise SystemExit({k:len(v) for k,v in cross.items()})
-          print('## 确定跨线例外筛选（各 300 局，基线均为 0/2/5）\n|变体|均分|Δ分|PT|ΔPT|属性评分|Δ属性|P10|ΔP10|\n|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-          ranked=[]
-          for k,rs in cross.items():
-            a,b=vals(rs,'a_','score'),vals(rs,'b_','score'); ap,bp=statistics.mean(vals(rs,'a_','skill_pt')),statistics.mean(vals(rs,'b_','skill_pt')); ast,bst=statistics.mean(vals(rs,'a_','status_score')),statistics.mean(vals(rs,'b_','status_score')); am,bm=statistics.mean(a),statistics.mean(b);p10a,p10b=pct(a,.1),pct(b,.1);ranked.append((bm,k));print(f'|{k}|{bm:.1f}|{bm-am:+.1f}|{bp:.1f}|{bp-ap:+.1f}|{bst:.1f}|{bst-ast:+.1f}|{p10b}|{p10b-p10a:+d}|')
-          print(f'\n筛选最高：**{max(ranked)[1]}**（{max(ranked)[0]:.1f}）')
-          PY
-          cat cap-and-cross-v44.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cap-and-cross-v44-summary
-          path: cap-and-cross-v44.md
-          retention-days: 30
+          test -s report/cap-and-cross-v44.md
+          mkdir -p .trae/exports
+          cp report/cap-and-cross-v44.md .trae/exports/
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .trae/exports/cap-and-cross-v44.md
+          git commit -m 'docs(ramen): 记录 v44 配额与确定跨线矩阵' \
+            -m '固化友人 1/3/5 对 0/2/5 的 1000 局确认，以及低体力确定跨 RMJ、5000、PT 效果阶梯的矩阵结果。'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill
