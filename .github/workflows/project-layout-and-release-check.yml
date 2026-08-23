@@ -1,0 +1,79 @@
+name: 目录结构与发布检查
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths:
+      - '.github/workflows/project-layout-and-release-check.yml'
+      - '.gitignore'
+      - 'crates/umasim/**'
+      - 'scripts/**'
+      - '.trae/documents/**'
+      - '.trae/exports/**'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  layout:
+    name: 目录归类与生成物隔离
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: benchmark结果不得进入版本库
+        run: |
+          tracked="$(git ls-files benchmark-results)"
+          if [ -n "$tracked" ]; then
+            printf '%s\n' "$tracked"
+            echo 'benchmark-results 中存在已跟踪文件' >&2
+            exit 1
+          fi
+          grep -Fxq '/benchmark-results/' .gitignore
+      - name: Python脚本必须位于scripts目录
+        run: |
+          bad="$(git ls-files '*.py' | grep -v '^scripts/' || true)"
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad"
+            echo '发现scripts目录外的Python脚本' >&2
+            exit 1
+          fi
+      - name: 文档与导出必须位于.trae目录
+        run: |
+          bad="$(git ls-files | grep -E '^(docs|exports)/' || true)"
+          if [ -n "$bad" ]; then
+            printf '%s\n' "$bad"
+            echo '发现未归入.trae/documents或.trae/exports的文件' >&2
+            exit 1
+          fi
+      - name: 输出数据工具目录现状
+        run: |
+          echo '### 数据工具目录' >> "$GITHUB_STEP_SUMMARY"
+          git ls-files 'crates/umasim/tools/**' | sed 's/^/- `/' | sed 's/$/`/' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '> MCTS/NN长期数据工具后续继续拆入training_data子目录；一次性策略矩阵不再新增到src/bin。' >> "$GITHUB_STEP_SUMMARY"
+
+  format:
+    name: Nightly格式检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: 只用Nightly检查格式
+        run: cargo +nightly fmt --all -- --check
+
+  release:
+    name: Stable发布构建检查（不运行fmt）
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: project-layout-release}
+      - name: Stable只做发布构建
+        run: cargo check -p umasim --release --no-default-features
