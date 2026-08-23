@@ -85,13 +85,13 @@ jobs:
           retention-days: 30
 
   summary:
-    name: 汇总精确隔离复赛
+    name: 汇总精确隔离复赛及绝对阈值
     needs: confirm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with: {pattern: exact-*, path: results}
-      - name: 生成三项提升报告
+      - name: 生成三项提升及六万分八千PT报告
         run: |
           python3 - <<'PY' | tee exact-recommended-weight-confirm.md
           import csv,glob,collections,statistics
@@ -103,7 +103,7 @@ jobs:
           print('# 正式拉面策略精确隔离权重复赛\n')
           print('> 候选从 RecommendedRamenTrainer::new() 精确复制，只覆盖 PT、缺口、溢出；每组300局同种子。\n')
           print('|方案|配卡|PT分年|缺口|溢出|总分Δ|属性分Δ|技能点Δ|三项通过|')
-          print('|---|---|---|---:|---:|---:|---:|---:|---|')
+          print('|---|---|---|---:|---:|---:|---:|---:|---:|---|')
           passed=[]
           for name,rows in sorted(data.items()):
             avg=lambda a,b: statistics.mean(int(r[b])-int(r[a]) for r in rows)
@@ -113,6 +113,16 @@ jobs:
             print(f"|{name}|{r['composition']}|{r['pt1']}/{r['pt2']}/{r['pt3']}|{float(r['gap'])*100:.0f}%|{float(r['overflow'])*100:.0f}%|{score:+.1f}|{status:+.1f}|{pt:+.1f}|{'是' if ok else '否'}|")
           print(f"\n三项同时提升：{len(passed)}/7。")
           print(f"\n复赛最高通过项：**{max(passed)[1]}**" if passed else '\n没有方案通过，不采纳。')
+          print('\n## 候选绝对值与目标命中\n')
+          print('|方案|平均总分|最高总分|≥60000|平均技能点|最高技能点|≥8000 PT|同局双达标|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|')
+          for name,rows in sorted(data.items()):
+            scores=[int(r['candidate_score']) for r in rows]
+            pts=[int(r['candidate_pt']) for r in rows]
+            score_hits=sum(x>=60000 for x in scores)
+            pt_hits=sum(x>=8000 for x in pts)
+            both=sum(s>=60000 and p>=8000 for s,p in zip(scores,pts))
+            print(f'|{name}|{statistics.mean(scores):.1f}|{max(scores)}|{score_hits}/300 ({score_hits/3:.1f}%)|{statistics.mean(pts):.1f}|{max(pts)}|{pt_hits}/300 ({pt_hits/3:.1f}%)|{both}/300 ({both/3:.1f}%)|')
           PY
           cat exact-recommended-weight-confirm.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
