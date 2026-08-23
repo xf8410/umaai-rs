@@ -1,57 +1,62 @@
-name: Ramen all 101 deck compositions screen v38 repaired
+name: Ramen remove post-eat force training v41
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  screen:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
+    env:
+      VARIANT: no-post-eat-force
+      SHARD: 0
+      RUNS_PER_SHARD: 300
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
+      STRUCTURE_Y1: vrest30
+      STRUCTURE_Y2: vrest30
+      STRUCTURE_Y3: vrest30
     steps:
       - uses: actions/checkout@v4
         with: {ref: workbench/skill-pt-matrix-distill}
-      - name: Apply comparable composition benchmark patch
-        run: python3 scripts/ramen/prepare_composition_screen_v38.py
+      - name: Apply single hard-gate removal
+        run: python3 scripts/ramen/remove_post_eat_force_training_v41.py
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: ramen-deck-screen-v38-repaired}
-      - name: Format and compile target
+        with: {shared-key: ramen-post-eat-removal-v41}
+      - name: Format, compile, and run focused tests
         run: |
           cargo fmt --all
-          cargo check -p umasim --bin bench_compositions --no-default-features
-      - name: Screen 101 compositions
+          cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+          cargo test -p umasim --no-default-features trainer::local_ramen_trainer --lib
+          cargo test -p umasim --no-default-features game::ramen::policy --lib
+      - name: Run 300 paired seeds
+        run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - name: Summarize paired removal
         run: |
-          mkdir -p results
-          cargo run -p umasim --bin bench_compositions --release --no-default-features -- \
-            --runs 50 --seed 61444 --trainer recommended --friend 303054 \
-            --out results/ramen-deck-compositions-v38.csv
-      - name: Build report
-        run: |
-          python3 - <<'PY' | tee results/ramen-deck-compositions-v38.md
-          import csv
-          rows=[]
-          with open('results/ramen-deck-compositions-v38.csv',newline='') as f:
-            for r in csv.DictReader(f):
-              for k in ['completed','failed']: r[k]=int(r[k])
-              for k in ['score_mean','score_median','score_p10','speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean','skill_pt_mean','rmj_all_rate','friend_all_rate']: r[k]=float(r[k])
-              r['status_sum']=sum(r[k] for k in ['speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean']); rows.append(r)
-          if len(rows)!=101 or any(r['completed']!=50 or r['failed'] for r in rows): raise SystemExit('incomplete screen')
-          mins={k:min(r[k] for r in rows) for k in ['score_mean','skill_pt_mean','status_sum','score_p10']}
-          spans={k:max(r[k] for r in rows)-mins[k] or 1 for k in mins}
-          for r in rows: r['joint']=sum(w*(r[k]-mins[k])/spans[k] for k,w in [('score_mean',.4),('skill_pt_mean',.2),('status_sum',.2),('score_p10',.2)])
-          def tab(title,rs):
-            print(f'## {title}\n|#|构成|六卡ID|均分|P10|中位|PT|五维和|RMJ|友人全出行|联合|\n|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-            for i,r in enumerate(rs,1): print(f'|{i}|{r["composition"]}|`{r["deck"]}`|{r["score_mean"]:.1f}|{r["score_p10"]:.1f}|{r["score_median"]:.1f}|{r["skill_pt_mean"]:.1f}|{r["status_sum"]:.1f}|{r["rmj_all_rate"]:.1%}|{r["friend_all_rate"]:.1%}|{r["joint"]:.4f}|')
-            print()
-          print('# 全部 101 种卡组构成筛选 v38（修复版）\n> 每构成 50 个相同 seed，共 5050 局；RecommendedRamenTrainer，统一继承。仅用于初筛。\n')
-          tab('平均总评分前十',sorted(rows,key=lambda r:(r['score_mean'],r['score_p10']),reverse=True)[:10])
-          tab('平均技能 PT 前十',sorted(rows,key=lambda r:(r['skill_pt_mean'],r['score_mean']),reverse=True)[:10])
-          tab('联合指标前十',sorted(rows,key=lambda r:r['joint'],reverse=True)[:10])
+          python3 - <<'PY' | tee remove-post-eat-force-v41.md
+          import csv,statistics
+          with open('matrix-result.csv',newline='') as f:r=list(csv.DictReader(f))
+          if len(r)!=300:raise SystemExit(f'expected 300 rows, got {len(r)}')
+          gi=lambda x,k:int(x[k]); mean=lambda k,p:statistics.mean(gi(x,p+k) for x in r)
+          def pct(vals,p):return sorted(vals)[round((len(vals)-1)*p)]
+          a=[gi(x,'a_score') for x in r]; b=[gi(x,'b_score') for x in r]
+          print('# 移除吃面后强制训练硬门 v41\n')
+          print('|指标|当前正式策略|仅移除吃面后强制训练|变化|\n|---|---:|---:|---:|')
+          for title,k in [('平均总评分','score'),('平均PT','skill_pt'),('平均属性评分','status_score'),('平均五维和','status_sum')]:
+            av,bv=mean(k,'a_'),mean(k,'b_'); print(f'|{title}|{av:.1f}|{bv:.1f}|{bv-av:+.1f}|')
+          for title,p in [('P10',.1),('P50',.5),('P90',.9)]:
+            av,bv=pct(a,p),pct(b,p); print(f'|{title}|{av}|{bv}|{bv-av:+d}|')
+          print(f'\n配对胜/平/负：{sum(x>y for x,y in zip(b,a))}/{sum(x==y for x,y in zip(b,a))}/{sum(x<y for x,y in zip(b,a))}')
           PY
-          cat results/ramen-deck-compositions-v38.md >> "$GITHUB_STEP_SUMMARY"
+          cat remove-post-eat-force-v41.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: ramen-deck-compositions-v38-repaired
-          path: results/
-          if-no-files-found: error
+          name: remove-post-eat-force-v41
+          path: |
+            matrix-result.csv
+            remove-post-eat-force-v41.md
           retention-days: 30
