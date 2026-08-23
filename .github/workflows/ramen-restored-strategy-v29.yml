@@ -1,0 +1,94 @@
+name: Ramen restored strategy matrix v29
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/ramen-restored-strategy-v29.yml]
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/restore_simplified_strategy_v29.py
+      - run: cargo fmt -- crates/umasim/src/game/ramen/policy.rs crates/umasim/src/game/ramen/game.rs crates/umasim/src/trainer/local_ramen_trainer.rs
+      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/game/ramen/policy.rs crates/umasim/src/game/ramen/game.rs crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'fix: restore omitted ramen strategy decisions'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
+  matrix:
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        variant:
+          - {name: restored-base, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4}
+          - {name: special-only, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic}
+          - {name: deadline20, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic-deadline20}
+          - {name: deadline35, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic-deadline35}
+          - {name: deadline50, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic-deadline50}
+        shard: [0, 1, 2]
+    env:
+      VARIANT: ${{ matrix.variant.name }}
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: ${{ matrix.variant.structure }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-restored-v29}
+      - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with: {name: 'v29-${{ matrix.variant.name }}-shard${{ matrix.shard }}', path: matrix-result.csv, retention-days: 14}
+  summary:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with: {pattern: v29-*, path: matrix-results}
+      - name: Summarize score and low tail PT
+        run: |
+          python3 - <<'PY'
+          import csv,glob,collections,statistics,pathlib
+          d=collections.defaultdict(list)
+          for p in glob.glob('matrix-results/*/*.csv'):
+            with open(p) as f:
+              for r in csv.DictReader(f):
+                for k in ['b_score','b_skill_pt','b_status_score','b_status_sum']: r[k]=int(r[k])
+                d[r['variant']].append(r)
+          def pct(v,p):
+            v=sorted(v); return v[round((len(v)-1)*p)]
+          lines=['# 恢复被简化策略矩阵 v29（每组300局）','',
+            '> 本轮不再逐次记录第三年训练 PT；只汇总最终 PT、低分尾部 PT，避免额外追踪逻辑干扰矩阵。','',
+            '|变体|平均评分|P10/P50/P90|最低分|最低分局PT|底部10%平均PT|平均PT|PT P10|最高分|',
+            '|---|---:|---:|---:|---:|---:|---:|---:|---:|']
+          for name,rs in sorted(d.items(), key=lambda kv:-statistics.mean(x['b_score'] for x in kv[1])):
+            rs=sorted(rs,key=lambda x:x['b_score']); n=max(1,len(rs)//10)
+            sc=[x['b_score'] for x in rs]; pt=[x['b_skill_pt'] for x in rs]
+            lines.append(f"|{name}|{statistics.mean(sc):.1f}|{pct(sc,.1)}/{pct(sc,.5)}/{pct(sc,.9)}|{sc[0]}|{rs[0]['b_skill_pt']}|{statistics.mean(x['b_skill_pt'] for x in rs[:n]):.1f}|{statistics.mean(pt):.1f}|{pct(pt,.1)}|{sc[-1]}|")
+          lines += ['', '## 口径', '', '- **最低分局PT**：该变体最终评分最低的一局所持技能 PT。', '- **底部10%平均PT**：按最终评分排序后最低30局的平均技能 PT。', '- **PT P10**：全部300局最终技能 PT 的第10百分位。']
+          out='\n'.join(lines)+'\n';print(out)
+          pathlib.Path('benchmark-results/ramen-restored-v29-${{ github.run_id }}.md').write_text(out)
+          PY
+          cat benchmark-results/ramen-restored-v29-${{ github.run_id }}.md >> "$GITHUB_STEP_SUMMARY"
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/ramen-restored-v29-${{ github.run_id }}.md
+          git commit -m 'bench: publish restored strategy v29'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
