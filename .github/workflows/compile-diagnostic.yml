@@ -1,31 +1,57 @@
-name: Publish yearly dynamic status v40 report
+name: Ramen all 101 deck compositions screen v38 repaired
 on:
   workflow_dispatch:
 permissions:
-  actions: read
-  contents: write
+  contents: read
 jobs:
-  publish:
+  screen:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill, fetch-depth: 0}
-      - name: Download v40 summary
-        env: {GH_TOKEN: '${{ github.token }}'}
-        run: gh run download 32638645128 --repo xf8410/umaai-rs --name yearly-dynamic-status-v40-summary --dir report
-      - name: Validate report
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - name: Apply comparable composition benchmark patch
+        run: python3 scripts/ramen/prepare_composition_screen_v38.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-deck-screen-v38-repaired}
+      - name: Format and compile target
         run: |
-          test -s report/yearly-dynamic-status-v40.md
-          test "$(grep -c '^|' report/yearly-dynamic-status-v40.md)" -ge 14
-          grep -q '晋级' report/yearly-dynamic-status-v40.md
-          mkdir -p .trae/exports
-          cp report/yearly-dynamic-status-v40.md .trae/exports/yearly-dynamic-status-v40.md
-      - name: Commit report
+          cargo fmt --all
+          cargo check -p umasim --bin bench_compositions --no-default-features
+      - name: Screen 101 compositions
         run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .trae/exports/yearly-dynamic-status-v40.md
-          git commit -m 'docs(ramen): 记录 v40 年度与动态权重交叉矩阵' \
-            -m '固化 run 32638645128 的 12 个交叉变体、每变体 300 局同种子结果。报告联合比较总评分、PT、属性评分和 P10；本提交不修改正式策略。'
-          git pull --rebase origin workbench/skill-pt-matrix-distill
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          mkdir -p results
+          cargo run -p umasim --bin bench_compositions --release --no-default-features -- \
+            --runs 50 --seed 61444 --trainer recommended --friend 303054 \
+            --out results/ramen-deck-compositions-v38.csv
+      - name: Build report
+        run: |
+          python3 - <<'PY' | tee results/ramen-deck-compositions-v38.md
+          import csv
+          rows=[]
+          with open('results/ramen-deck-compositions-v38.csv',newline='') as f:
+            for r in csv.DictReader(f):
+              for k in ['completed','failed']: r[k]=int(r[k])
+              for k in ['score_mean','score_median','score_p10','speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean','skill_pt_mean','rmj_all_rate','friend_all_rate']: r[k]=float(r[k])
+              r['status_sum']=sum(r[k] for k in ['speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean']); rows.append(r)
+          if len(rows)!=101 or any(r['completed']!=50 or r['failed'] for r in rows): raise SystemExit('incomplete screen')
+          mins={k:min(r[k] for r in rows) for k in ['score_mean','skill_pt_mean','status_sum','score_p10']}
+          spans={k:max(r[k] for r in rows)-mins[k] or 1 for k in mins}
+          for r in rows: r['joint']=sum(w*(r[k]-mins[k])/spans[k] for k,w in [('score_mean',.4),('skill_pt_mean',.2),('status_sum',.2),('score_p10',.2)])
+          def tab(title,rs):
+            print(f'## {title}\n|#|构成|六卡ID|均分|P10|中位|PT|五维和|RMJ|友人全出行|联合|\n|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+            for i,r in enumerate(rs,1): print(f'|{i}|{r["composition"]}|`{r["deck"]}`|{r["score_mean"]:.1f}|{r["score_p10"]:.1f}|{r["score_median"]:.1f}|{r["skill_pt_mean"]:.1f}|{r["status_sum"]:.1f}|{r["rmj_all_rate"]:.1%}|{r["friend_all_rate"]:.1%}|{r["joint"]:.4f}|')
+            print()
+          print('# 全部 101 种卡组构成筛选 v38（修复版）\n> 每构成 50 个相同 seed，共 5050 局；RecommendedRamenTrainer，统一继承。仅用于初筛。\n')
+          tab('平均总评分前十',sorted(rows,key=lambda r:(r['score_mean'],r['score_p10']),reverse=True)[:10])
+          tab('平均技能 PT 前十',sorted(rows,key=lambda r:(r['skill_pt_mean'],r['score_mean']),reverse=True)[:10])
+          tab('联合指标前十',sorted(rows,key=lambda r:r['joint'],reverse=True)[:10])
+          PY
+          cat results/ramen-deck-compositions-v38.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-deck-compositions-v38-repaired
+          path: results/
+          if-no-files-found: error
+          retention-days: 30
