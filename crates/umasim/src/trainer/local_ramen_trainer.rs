@@ -6,7 +6,7 @@ use crate::{
             Operation, RamenAction, RamenGame, RamenStage,
             effects::calc_ramen_training_effect,
             policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput},
-            rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, list_special_targets_for},
+            rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, list_special_targets_for},
         },
     },
     gamedata::{EventChoice, EventData, ramen::RAMENDATA},
@@ -52,6 +52,8 @@ pub struct LocalRamenConfig {
     pub safety_bridge_min_gain: f32,
     /// Cost per lost post-eat craftable option and per hidden flavor consumed.
     pub safety_bridge_stock_cost: f32,
+    /// Cook2-style marginal resource price, adapted to annual ramen-stock resets.
+    pub cook2_stock_weight: f32,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -80,6 +82,7 @@ impl Default for LocalRamenConfig {
             safety_bridge_min_fail: 101.0,
             safety_bridge_min_gain: 0.0,
             safety_bridge_stock_cost: 0.0,
+            cook2_stock_weight: 0.0,
         }
     }
 }
@@ -118,6 +121,8 @@ impl LocalRamenTrainer {
                 local.safety_bridge_min_gain = v.parse()?
             } else if let Some(v) = token.strip_prefix("bcost") {
                 local.safety_bridge_stock_cost = v.parse()?
+            } else if let Some(v) = token.strip_prefix("cook2") {
+                local.cook2_stock_weight = v.parse()?
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -486,6 +491,40 @@ impl LocalRamenTrainer {
         Ok(if covered { None } else { Some((tr, gain)) })
     }
 
+    /// Adaptation of Cook2::materialEvaluation. A unit from a scarce stock is worth more
+    /// than one from a rich stock (concave sqrt utility). Unlike the farm scenario, ramen stock
+    /// resets yearly, so its shadow price decays toward the RMJ boundary. Before reaching the
+    /// annual success target we discount the price: spending to secure scenario progression is
+    /// deliberately preferred, matching Cook2 Y1's aggressive cooking-until-target rule.
+    fn cook2_ramen_stock_cost(&self, g: &RamenGame, region_id: usize) -> Result<f32> {
+        if self.config.cook2_stock_weight <= 0.0 {
+            return Ok(0.0);
+        }
+        let targets = list_special_targets_for(&g.ramen, region_id)?
+            .into_iter()
+            .min_by_key(|t| t.iter().sum::<i32>())
+            .ok_or_else(|| anyhow::anyhow!("拉面 {region_id} 无合法 targets"))?;
+        let recipe = get_recipe(region_id)?;
+        let net = [recipe[0] - targets[0], recipe[1] - targets[1], recipe[2] - targets[2]];
+        let year_end = Self::year_end(g);
+        let remaining_fraction = ((year_end - g.turn()).max(0) as f32 / 21.0).clamp(0.0, 1.0);
+        let year = (g.current_year() - 1) as usize;
+        let d = RAMENDATA.get().ok_or_else(|| anyhow::anyhow!("RAMENDATA 未初始化"))?;
+        let target = *d.ramen_success_pt.get(year).unwrap_or(&i32::MAX);
+        let progression_discount = if g.ramen.scenario_pt < target { 0.35 } else { 1.0 };
+        let mut marginal = 0.0;
+        for i in 0..3 {
+            let before = g.ramen.feeling_stock[i] as f32;
+            let after = (g.ramen.feeling_stock[i] - net[i]).max(0) as f32;
+            // Bias keeps the derivative finite, as in Cook2's sqrt(count + bias).
+            marginal += (before + 2.0).sqrt() - (after + 2.0).sqrt();
+        }
+        // Hidden flavor is globally flexible, so charge it as two ordinary marginal units.
+        let hidden = targets.iter().sum::<i32>() as f32;
+        marginal += hidden * 0.50;
+        Ok(marginal * self.config.cook2_stock_weight * remaining_fraction * progression_discount)
+    }
+
     fn safety_bridge_candidate(&self, g: &RamenGame, region_id: usize, gain: f32) -> Result<f32> {
         let targets = list_special_targets_for(&g.ramen, region_id)?
             .into_iter()
@@ -531,17 +570,19 @@ impl LocalRamenTrainer {
                 let post = g.ramen.scenario_pt + calc_ramen_pt_gain(y, g.ramen.eat_count)?;
                 let (ck, rmj, great) = self.scenario_threshold_value(g, post)?;
                 let window = self.ramen_window_alignment(g, region_id)?;
+                let cook2_cost = self.cook2_ramen_stock_cost(g, region_id)?;
                 let safety = if let Some((_, gain)) = bridge {
                     self.safety_bridge_candidate(g, region_id, gain)?
                 } else {
                     0.0
                 };
                 let look = self.ramen_lookahead(g, region_id)?;
-                o.score += ck + rmj + great + window + safety + look;
+                o.score += ck + rmj + great + window + safety + look - cook2_cost;
                 o.add("scenario_checkpoint", ck);
                 o.add("rmj_cross", rmj);
                 o.add("great_cross", great);
                 o.add("ramen_window", window);
+                o.add("cook2_stock_cost", -cook2_cost);
                 o.add("safety_bridge", safety);
                 o.add("ramen_lookahead", look)
             }
