@@ -43,6 +43,10 @@ path = "tools/data_collection/skill_pt_phase_matrix.rs"
 name = "y3_train_pt_trace"
 path = "tools/data_collection/y3_train_pt_trace.rs"
 
+[[bin]]
+name = "composition_weight_matrix"
+path = "tools/data_collection/composition_weight_matrix.rs"
+
 [features]
 default = ["cli", "diag"]
 diag = []
@@ -78,7 +82,7 @@ thiserror.workspace = true
 toml.workspace = true
 int-enum = "1.2.0"
 parse-display = "0.11.0"
-# colored 无条件加载（消除 cli 关闭时的双版本 cfg gate 重复代码；非 Windows 纯 std，见顶部）
+# colored 无条件加载（消除 cli 关闭时的双版本 cfg gate 重复；非 Windows 纯 std，见顶部）
 colored.workspace = true
 # 基准工具依赖（平台无关，无条件编译；lexopt 零依赖跨平台 CLI 解析，csv 数据序列化）
 csv.workspace = true
@@ -94,6 +98,6 @@ text-to-ascii-art = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
-# ---- onnx 依赖（仅 feature = "onnx" 时编译；tract-onnx 0.22 自带 tract_ndarray）----
+# ---- onnx 依赖（仅 feature = "onnx" 时编译）----
 tract-onnx = { workspace = true, optional = true }
 indexmap.workspace = true
