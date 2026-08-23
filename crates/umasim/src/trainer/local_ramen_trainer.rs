@@ -1137,7 +1137,9 @@ impl LocalRamenTrainer {
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
 /// - 第三年终盘允许有马前把体力控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管；
 /// - 本来要休息时按 1/3/5 跨年累计节奏使用友人外出；即使万能材料暂时溢出也不禁止；
-/// - 五段事件按当前体力、干劲、属性/PT及完链进度动态估值，第三段不再使用硬体力阈值。
+/// - 五段事件按当前体力、干劲、属性/PT及完链进度动态估值，第三段不再使用硬体力阈值；
+/// - 不使用 RMJ 截止期紧迫度加分：300 局同种子矩阵中 deadline20/35/50 完全同轨，
+///   平均分 56960.7，显著低于 deadline0 的 58881.6；硬目标仍由规则和既有跨线价值保证。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -1181,7 +1183,7 @@ impl RecommendedRamenTrainer {
             local.friend_outing3_recovery_vital = 0;
             local.friend_outing_cumulative_caps = [1, 3, 5];
             local.friend_rest_max_special = 4;
-            local.deadline_urgency_scale = 0.35;
+            local.deadline_urgency_scale = 0.0;
             local.dynamic_special_targets = true;
             LocalRamenTrainer::with_configs(policy, local)
         }
