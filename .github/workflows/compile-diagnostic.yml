@@ -1,71 +1,71 @@
-name: Publish handwritten 8500 PT v37 report
+name: Ramen all 101 deck compositions screen v38
 on:
   workflow_dispatch:
 permissions:
-  actions: read
-  contents: write
+  contents: read
 jobs:
-  publish:
+  screen:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      OUT: results/ramen-deck-compositions-v38.csv
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/skill-pt-matrix-distill
-          fetch-depth: 0
-      - name: Download v37 matrix artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh run download 32637324885 --repo xf8410/umaai-rs --pattern 'v37-*' --dir results
-      - name: Build and validate report
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-deck-screen-v38}
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Screen all 101 compositions with 50 same seeds
         run: |
-          mkdir -p .trae/exports
-          python3 - <<'PY' | tee .trae/exports/handwritten-8500pt-v37.md
-          import csv, glob, collections, statistics
-          data=collections.defaultdict(list)
-          for path in glob.glob('results/**/matrix-result.csv', recursive=True):
-            with open(path, newline='') as f:
-              for row in csv.DictReader(f):
-                data[row['variant']].append({k:int(row[k]) for k in ['b_score','b_skill_pt','b_status_score']})
-          expected={
-            'baseline-16-64-64-s140','pt3-80-s140','pt3-96-s140','pt3-128-s140',
-            'pt2-80-pt3-96-s140','pt2-96-pt3-128-s140',
-            'pt2-80-pt3-96-s180','pt2-96-pt3-128-s180'
-          }
-          if set(data) != expected:
-            raise SystemExit(f'variant mismatch: {sorted(data)}')
-          if any(len(rows) != 300 for rows in data.values()):
-            raise SystemExit(f'incomplete matrix: {[(name,len(rows)) for name,rows in data.items()]}')
-          def mean(rows,key): return statistics.mean(r[key] for r in rows)
-          def pct(values,p):
-            values=sorted(values); return values[round((len(values)-1)*p)]
-          base=data['baseline-16-64-64-s140']; base_score=mean(base,'b_score'); base_pt=mean(base,'b_skill_pt')
-          print('# 手写策略 8500 PT 目标矩阵 v37\n')
-          print('> 来源：[GitHub Actions run 32637324885](https://github.com/xf8410/umaai-rs/actions/runs/32637324885)')
-          print('> 每变体 300 局；固定体力门 30/30/30，并使用相同 seed、马娘、卡组、继承及其余 v36 参数。\n')
-          print('|变体|平均分|相对基线|P10/P50/P90|平均PT|PT差值|PT P10/P90|≥8500占比|属性评分|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
-          rows_out=[]
-          for name,rows in data.items():
-            score=[r['b_score'] for r in rows]; pt=[r['b_skill_pt'] for r in rows]
-            ms=statistics.mean(score); mp=statistics.mean(pt)
-            rows_out.append((mp>=8500, mp, ms, name, score, pt, rows))
-          for hit_target,mp,ms,name,score,pt,rows in sorted(rows_out, reverse=True):
-            hit=sum(x>=8500 for x in pt)/len(pt)*100
-            status=mean(rows,'b_status_score')
-            print(f'|{name}|{ms:.1f}|{ms-base_score:+.1f}|{pct(score,.1)}/{pct(score,.5)}/{pct(score,.9)}|{mp:.1f}|{mp-base_pt:+.1f}|{pct(pt,.1)}/{pct(pt,.9)}|{hit:.1f}%|{status:.1f}|')
+          mkdir -p results
+          cargo run -p umasim --bin bench_compositions --release --no-default-features -- \
+            --runs 50 --seed 61444 --trainer handwritten --friend 303054 --out "$OUT"
+      - name: Build multi-objective report
+        run: |
+          python3 - <<'PY' | tee results/ramen-deck-compositions-v38.md
+          import csv
+          path='results/ramen-deck-compositions-v38.csv'
+          rows=[]
+          with open(path,newline='') as f:
+            for r in csv.DictReader(f):
+              x=dict(r)
+              for k in ['completed','failed']:
+                x[k]=int(x[k])
+              for k in ['score_mean','score_median','score_p10','speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean','skill_pt_mean','rmj_all_rate','friend_all_rate']:
+                x[k]=float(x[k])
+              x['status_sum']=sum(x[k] for k in ['speed_mean','stamina_mean','power_mean','guts_mean','wisdom_mean'])
+              rows.append(x)
+          if len(rows)!=101 or any(r['completed']!=50 or r['failed']!=0 for r in rows):
+            raise SystemExit(f'incomplete screen: rows={len(rows)}, bad={[(r["composition"],r["completed"],r["failed"]) for r in rows if r["completed"]!=50 or r["failed"]]}')
+          score_min=min(r['score_mean'] for r in rows); score_span=max(r['score_mean'] for r in rows)-score_min or 1
+          pt_min=min(r['skill_pt_mean'] for r in rows); pt_span=max(r['skill_pt_mean'] for r in rows)-pt_min or 1
+          status_min=min(r['status_sum'] for r in rows); status_span=max(r['status_sum'] for r in rows)-status_min or 1
+          p10_min=min(r['score_p10'] for r in rows); p10_span=max(r['score_p10'] for r in rows)-p10_min or 1
+          for r in rows:
+            # 总评分权重最高，同时要求 PT、五维与低分尾部均衡；仅用于筛选，不替代 300 局确认。
+            r['joint']=.40*(r['score_mean']-score_min)/score_span + .20*(r['skill_pt_mean']-pt_min)/pt_span + .20*(r['status_sum']-status_min)/status_span + .20*(r['score_p10']-p10_min)/p10_span
+          def table(title, selected):
+            print(f'## {title}\n')
+            print('|排名|构成|六卡 ID|平均分|P10|中位数|平均PT|五维均值和|RMJ全通|友人全出行|联合指标|')
+            print('|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+            for i,r in enumerate(selected,1):
+              print(f'|{i}|{r["composition"]}|`{r["deck"]}`|{r["score_mean"]:.1f}|{r["score_p10"]:.1f}|{r["score_median"]:.1f}|{r["skill_pt_mean"]:.1f}|{r["status_sum"]:.1f}|{r["rmj_all_rate"]:.1%}|{r["friend_all_rate"]:.1%}|{r["joint"]:.4f}|')
+            print()
+          print('# 拉面杯全部 101 种支援卡构成筛选 v38\n')
+          print('> 每种构成 50 个相同 seed，共 5050 局。第一阶段用于筛选；代表卡由确定性规则选择，不等于完整单卡强度排名。\n')
+          table('按平均总评分前十', sorted(rows,key=lambda r:(r['score_mean'],r['score_p10']),reverse=True)[:10])
+          table('按平均技能 PT 前十', sorted(rows,key=lambda r:(r['skill_pt_mean'],r['score_mean']),reverse=True)[:10])
+          table('按总评分/PT/五维/P10联合指标前十', sorted(rows,key=lambda r:r['joint'],reverse=True)[:10])
           PY
-      - name: Commit report with descriptive evidence
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .trae/exports/handwritten-8500pt-v37.md
-          git commit -m 'docs(ramen): 记录 v37 的 8500 PT 目标矩阵' \
-            -m '以 v36 的 30/30/30 体力门为基线，比较第二、三年 PT 权重与 sac140/sac180，评估平均 8500 PT 目标及其评分代价。' \
-            -m '- 8 个变体各包含 3 个 shard × 100 个相同 seed，共 2400 局；
-          - 固定马娘、卡组、继承和其余策略结构；
-          - 报告评分分位数、PT 分位数、8500 PT 命中率和属性评分；
-          - 原始数据来自 Actions run 32637324885，提交前校验每个变体恰好 300 局。
-
-          本提交仅固化实验事实，不修改 RecommendedRamenTrainer；后续参数提升将依据报告另行验证和提交。'
-          git pull --rebase origin workbench/skill-pt-matrix-distill
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          cat results/ramen-deck-compositions-v38.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-deck-compositions-v38
+          path: |
+            results/ramen-deck-compositions-v38.csv
+            results/ramen-deck-compositions-v38.md
+          if-no-files-found: error
+          retention-days: 30
