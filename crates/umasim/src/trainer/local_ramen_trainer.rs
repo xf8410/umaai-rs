@@ -194,6 +194,13 @@ pub struct LocalRamenConfig {
     ///
     /// 否则保留事件通用评分，可选无回复的属性/PT选项。`0` 表示关闭该低体力保护。
     pub friend_outing3_recovery_vital: i32,
+
+    /// 各年结束前允许累计使用的友人外出次数上限。
+    ///
+    /// 五次外出是整局有限资源，每次还产生 2 个万能材料；不能因为第一年休息较多就一次用完。
+    /// 例如 `[1, 3, 5]` 表示第一年最多用 1 次、第二年结束前最多累计 3 次、第三年可用完。
+    /// `[5, 5, 5]` 等价于不做跨年配额；仅在 `friend_outing_replaces_rest=true` 时生效。
+    pub friend_outing_cumulative_caps: [usize; 3],
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -231,6 +238,7 @@ impl Default for LocalRamenConfig {
             y3_recovery_horizon: false,
             friend_outing_replaces_rest: false,
             friend_outing3_recovery_vital: 0,
+            friend_outing_cumulative_caps: [5, 5, 5],
         }
     }
 }
@@ -289,6 +297,20 @@ impl LocalRamenTrainer {
                 local.friend_outing_replaces_rest = true
             } else if let Some(v) = token.strip_prefix("friend3v") {
                 local.friend_outing3_recovery_vital = v.parse()?
+            } else if let Some(v) = token.strip_prefix("friendcap") {
+                let digits = v.as_bytes();
+                if digits.len() != 3 || !digits.iter().all(u8::is_ascii_digit) {
+                    anyhow::bail!("friendcap 必须是三个数字，如 135: {v}");
+                }
+                local.friend_outing_cumulative_caps = [
+                    (digits[0] - b'0') as usize,
+                    (digits[1] - b'0') as usize,
+                    (digits[2] - b'0') as usize,
+                ];
+                let c = local.friend_outing_cumulative_caps;
+                if c[0] > c[1] || c[1] > c[2] || c[2] > 5 {
+                    anyhow::bail!("friendcap 必须单调且不超过5: {v}");
+                }
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -393,9 +415,17 @@ impl LocalRamenTrainer {
     fn vital_factor(t: i32) -> f32 {
         if t >= 72 { 0.25 } else { 3.5 + (t as f32 / 72.) * 2. }
     }
+    /// 本年是否仍有友人外出配额。配额按整局累计次数控制，而不是每年重置。
+    fn friend_outing_within_pacing(&self, g: &RamenGame) -> bool {
+        let year = (g.current_year() - 1).clamp(0, 2) as usize;
+        let used = g.friend.out_used.iter().filter(|&&x| x).count();
+        used < self.config.friend_outing_cumulative_caps[year]
+    }
+
     fn decide_train(&self, g: &RamenGame, a: &[RamenAction]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         let (mut guard, mut out) = self.policy.decide_train(g, a)?;
         if self.config.friend_outing_replaces_rest
+            && self.friend_outing_within_pacing(g)
             && a.get(guard).is_some_and(|x| x.operation == Operation::Rest)
             && let Some(friend_idx) = a.iter().position(|x| x.operation == Operation::FriendOuting)
         {
