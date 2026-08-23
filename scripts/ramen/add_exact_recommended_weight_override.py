@@ -1,10 +1,19 @@
 from pathlib import Path
 import subprocess
 
+path = Path("crates/umasim/src/trainer/local_ramen_trainer.rs")
+text = path.read_text(encoding="utf-8")
+
+# CI 诊断/修复任务可能基于已经注入过实验入口的提交继续运行。
+# 此时完整补丁（含动态属性字段）已经存在，重复调用应当安全地直接成功，
+# 而不是让下游严格单次替换脚本因匹配数为 0 失败。
+if "pub fn with_experiment_overrides(" in text:
+    print("专项参数入口已存在，跳过重复注入")
+    raise SystemExit(0)
+
 # 先加入动态缺口/溢出字段及评分逻辑，再给正式 preset 增加精确隔离的实验入口。
 subprocess.run(["python3", "scripts/ramen/add_dynamic_status_balance_v39.py"], check=True)
 
-path = Path("crates/umasim/src/trainer/local_ramen_trainer.rs")
 text = path.read_text(encoding="utf-8")
 needle = '''impl RecommendedRamenTrainer {
     /// 构造当前正式推荐 preset。
