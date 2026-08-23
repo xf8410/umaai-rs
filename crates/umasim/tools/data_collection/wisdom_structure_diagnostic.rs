@@ -196,7 +196,7 @@ fn main() -> Result<()> {
         let status = game.uma.five_status;
         writeln!(
             file,
-            "{variant},{run_index},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{variant},{run_index},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             game.uma.calc_score(), game.uma.skill_pt,
             metrics.year_skill_pt[0], metrics.year_skill_pt[1], metrics.year_skill_pt[2],
             metrics.year_scenario_pt[0], metrics.year_scenario_pt[1], metrics.year_scenario_pt[2],
