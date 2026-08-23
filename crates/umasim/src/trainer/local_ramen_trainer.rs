@@ -175,6 +175,14 @@ pub struct LocalRamenConfig {
     /// 与软目标分离：正常体力不足只扣分，只有接近打空时才保下限。智力训练也必须满足
     /// `V1 >= 0`，但不受此非智力硬底线。`0` 表示不额外硬拦。
     pub y3_post_train_hard_floor: i32,
+
+    /// 是否按“距离下一次确定恢复前还有几个可训练回合”判断第三年体力崩盘。
+    ///
+    /// 当前规则中 turn=70 训练后，turn=71 为有马纪念，赛后固定恢复 40；随后
+    /// turn=72 起超级拉面每回合开始恢复 20。因此 turn=70 可以把体力控到 0，
+    /// 不应再为训练后低体力付费。更早回合若低体力会影响至少一个普通训练回合，
+    /// 才计入崩盘成本。
+    pub y3_recovery_horizon: bool,
 }
 impl Default for LocalRamenConfig {
     fn default() -> Self {
@@ -209,6 +217,7 @@ impl Default for LocalRamenConfig {
             y3_post_train_vital_target: 0,
             y3_vital_shortfall_weight: 0.0,
             y3_post_train_hard_floor: 0,
+            y3_recovery_horizon: false,
         }
     }
 }
@@ -261,6 +270,8 @@ impl LocalRamenTrainer {
                 local.y3_vital_shortfall_weight = v.parse()?
             } else if let Some(v) = token.strip_prefix("y3hard") {
                 local.y3_post_train_hard_floor = v.parse()?
+            } else if token == "y3horizon" {
+                local.y3_recovery_horizon = true
             } else if token == "failmodel" {
                 local.expected_fail = true
             } else if token == "vital" {
@@ -539,6 +550,14 @@ impl LocalRamenTrainer {
     ///
     /// 训练前体力回答“本回合是否应先恢复”，训练后体力回答“下一回合是否会崩盘”。
     /// 不落地随机分身，只使用当前可知面板与确定性拉面效果。
+    /// 第三年本回合训练后，低体力是否还会伤害下一次普通训练。
+    ///
+    /// turn=70 后紧接 turn=71 有马纪念（赛后 +40），再进入 turn=72 超级拉面（回合开始 +20），
+    /// 所以没有待保护的普通训练回合；此时体力归零也是合理终盘控制。
+    fn y3_collapse_matters(&self, g: &RamenGame) -> bool {
+        !self.config.y3_recovery_horizon || g.turn() < 70
+    }
+
     fn post_ramen_vital_transition(&self, g: &RamenGame, region_id: usize) -> Result<Option<(usize, i32, i32)>> {
         if g.current_year() != 3 || g.turn() >= 72 {
             return Ok(None);
@@ -791,7 +810,11 @@ impl LocalRamenTrainer {
                         continue;
                     }
                     let pre_short = (self.config.y3_pre_train_vital_target - pre_vital).max(0) as f32;
-                    let post_short = (self.config.y3_post_train_vital_target - post_vital).max(0) as f32;
+                    let post_short = if self.y3_collapse_matters(g) {
+                        (self.config.y3_post_train_vital_target - post_vital).max(0) as f32
+                    } else {
+                        0.0
+                    };
                     let transition_cost = (pre_short + post_short) * self.config.y3_vital_shortfall_weight;
                     o.score -= transition_cost;
                     o.add(
@@ -860,7 +883,7 @@ impl LocalRamenTrainer {
 /// - 关闭随机分身 lookahead；
 /// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
-/// - 第三年逐碗预演训练前后体力，以软成本联合评价 `V0` 与 `V1`，避免单端硬门过度保守。
+/// - 第三年只在体力崩盘会损失后续普通训练回合时收费；有马前可控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管。
 ///
 /// 这个结构只负责按年份转发给三份不可变策略；所有字段含义仍由
 /// [`LocalRamenConfig`] 与 [`RamenPolicyConfig`] 的 Rustdoc 定义。
@@ -895,10 +918,11 @@ impl RecommendedRamenTrainer {
             local.effective_ramen_failure = false;
             local.cook2_stock_weight = 40.0;
             local.eat_requires_training = true;
-            local.y3_pre_train_vital_target = 30;
+            local.y3_pre_train_vital_target = 0;
             local.y3_post_train_vital_target = 10;
             local.y3_vital_shortfall_weight = 8.0;
             local.y3_post_train_hard_floor = 0;
+            local.y3_recovery_horizon = true;
             LocalRamenTrainer::with_configs(policy, local)
         }
 
