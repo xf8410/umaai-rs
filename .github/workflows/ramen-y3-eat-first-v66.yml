@@ -1,5 +1,8 @@
 name: 第三年先吃面再判体力配对实验
 on:
+  push:
+    branches: [workbench/ramen-improve-1]
+    paths: ['.github/workflows/ramen-y3-eat-first-v66.yml']
   workflow_dispatch:
     inputs:
       runs_per_shard:
@@ -21,7 +24,7 @@ jobs:
     env:
       方案: ${{ matrix.variant }}
       分片序号: ${{ matrix.shard }}
-      每分片局数: ${{ inputs.runs_per_shard }}
+      每分片局数: ${{ inputs.runs_per_shard || '100' }}
     steps:
       - uses: actions/checkout@v4
       - name: 应用第三年判断顺序补丁
@@ -58,12 +61,12 @@ jobs:
           def values(rows,key): return sorted(float(r[key]) for r in rows)
           def p10(v): return v[int((len(v)-1)*.1)]
           print('# 第三年先吃面再判体力配对实验\n')
-          print('|方案|局数|平均总分|总分P10|平均技能PT|平均第三年PT|RMJ全通率|')
-          print('|---|---:|---:|---:|---:|---:|---:|')
+          print('|方案|局数|平均总分|总分P10|平均技能PT|RMJ全通率|')
+          print('|---|---:|---:|---:|---:|---:|')
           for name,rows in data.items():
-            score=values(rows,'总分'); pt=values(rows,'技能点'); y3=values(rows,'第三年结束PT')
+            score=values(rows,'总分'); pt=values(rows,'技能点')
             rmj=sum(int(r['RMJ成功年数'])==3 for r in rows)/len(rows)
-            print(f'|{name}|{len(rows)}|{statistics.mean(score):.1f}|{p10(score):.0f}|{statistics.mean(pt):.1f}|{statistics.mean(y3):.1f}|{rmj:.3f}|')
+            print(f'|{name}|{len(rows)}|{statistics.mean(score):.1f}|{p10(score):.0f}|{statistics.mean(pt):.1f}|{rmj:.3f}|')
           base={int(r['局序号']):int(r['总分']) for r in data['旧版第三年无门']}
           cand={int(r['局序号']):int(r['总分']) for r in data['先吃面不判体力_不吃门30']}
           delta=[cand[i]-base[i] for i in sorted(base)]
