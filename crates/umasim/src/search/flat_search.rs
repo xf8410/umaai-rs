@@ -228,7 +228,11 @@ where
         if !self.config.crn_stage_reseed {
             return;
         }
-        *rng = StdRng::seed_from_u64(RolloutSeeds::stage_seed(rollout_seed, game.turn(), game.crn_stage_key()));
+        *rng = StdRng::seed_from_u64(RolloutSeeds::stage_seed(
+            rollout_seed,
+            game.turn(),
+            game.crn_stage_key()
+        ));
     }
 
     /// rollout 决策器
@@ -244,7 +248,8 @@ where
     pub fn simulate_common(&self, game: &G, action: &G::Action, seed: u64) -> Result<SearchScore> {
         let rng = &mut StdRng::seed_from_u64(seed);
         let mut sim_game = game.fork_for_rollout(seed);
-        sim_game.apply_action(action, rng)?;
+        // 必须走剧本的真实对局路径（拉面 = 策略流），不能用通用 apply_action
+        sim_game.apply_root_action(action, rng)?;
         while sim_game.next() {
             sim_game.run_stage(&self.rollout_trainer, rng)?;
         }
@@ -304,8 +309,8 @@ where
     /// 返回失败次数（不中断搜索，由调用方汇总告警）。
     #[allow(clippy::too_many_arguments)]
     fn simulate_many<F>(
-        &self, game: &G, action: &G::Action, n: usize, seeds: &RolloutSeeds, offset: usize,
-        result: &mut ActionResult, result_pt: &mut ActionResult, rollout: &F
+        &self, game: &G, action: &G::Action, n: usize, seeds: &RolloutSeeds, offset: usize, result: &mut ActionResult,
+        result_pt: &mut ActionResult, rollout: &F
     ) -> Result<usize>
     where
         F: Fn(&G, &G::Action, u64) -> Result<SearchScore> + Sync
@@ -460,7 +465,6 @@ where
         // println!("--------------------");
         best_idx
     }
-
 }
 
 impl FlatSearch<OnsenGame> {
@@ -479,7 +483,6 @@ impl FlatSearch<OnsenGame> {
             Ok(SearchScore { score, score_pt })
         })
     }
-
 
     /// 模拟单个动作到终局
     ///
@@ -569,7 +572,6 @@ impl FlatSearch<OnsenGame> {
             Ok((score_mean, score_mean + pt_bias))
         }
     }
-
 
     #[cfg(feature = "onnx")]
     /// 单次 rollout，跑到终局或 `max_depth` 截断处（NN leaf 微批路径用）
@@ -697,7 +699,9 @@ impl FlatSearch<RamenGame> {
     pub fn search(
         &self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng
     ) -> Result<SearchOutput<RamenAction>> {
-        self.search_with(game, actions, rng, |game, action, seed| self.simulate_common(game, action, seed))
+        self.search_with(game, actions, rng, |game, action, seed| {
+            self.simulate_common(game, action, seed)
+        })
     }
 }
 
@@ -785,7 +789,8 @@ mod tests {
     use super::*;
     use crate::{
         game::{
-            InheritInfo, Trainer,
+            InheritInfo,
+            Trainer,
             ramen::{RamenAction, RamenGame}
         },
         gamedata::init_global,
@@ -1022,7 +1027,10 @@ mod tests {
         let normal = capture(42, false)?;
         let reversed = capture(42, true)?;
         for (i, (a, b)) in normal.iter().zip(reversed.iter()).enumerate() {
-            println!("动作 {i}: 正序 n={} mean={:.6} | 逆序 n={} mean={:.6}", a.n, a.mean, b.n, b.mean);
+            println!(
+                "动作 {i}: 正序 n={} mean={:.6} | 逆序 n={} mean={:.6}",
+                a.n, a.mean, b.n, b.mean
+            );
         }
         assert_eq!(normal, reversed, "各动作统计量不应随候选顺序变化");
         Ok(())
@@ -1142,7 +1150,12 @@ mod tests {
     #[test]
     fn test_ramen_root_search_reproducible() -> Result<()> {
         let (game, actions) = ramen_root()?;
-        println!("拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个", game.turn(), game.stage, actions.len());
+        println!(
+            "拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个",
+            game.turn(),
+            game.stage,
+            actions.len()
+        );
 
         let a = ramen_search(42)?;
         let b = ramen_search(42)?;
@@ -1182,8 +1195,13 @@ mod tests {
         const ROLLOUTS: usize = 200;
 
         let (game, actions) = ramen_root()?;
-        println!("拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个
-", game.turn(), game.stage, actions.len());
+        println!(
+            "拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个
+",
+            game.turn(),
+            game.stage,
+            actions.len()
+        );
 
         for reseed in [false, true] {
             let cfg = SearchConfig::default().with_crn_stage_reseed(reseed);
@@ -1195,7 +1213,12 @@ mod tests {
             for action in &actions {
                 let col: Vec<Option<f64>> = (0..ROLLOUTS)
                     .into_par_iter()
-                    .map(|j| search.simulate_common(&game, action, seeds.seed_at(j)).ok().map(|v| v.score))
+                    .map(|j| {
+                        search
+                            .simulate_common(&game, action, seeds.seed_at(j))
+                            .ok()
+                            .map(|v| v.score)
+                    })
                     .collect();
                 failed_total += col.iter().filter(|x| x.is_none()).count();
                 scores.push(col.into_iter().flatten().collect());
@@ -1204,7 +1227,11 @@ mod tests {
                 println!("  ⚠ 共 {failed_total} 次 rollout 失败，配对可能错位");
             }
 
-            let label = if reseed { "开启按阶段重播种" } else { "仅共享起始种子" };
+            let label = if reseed {
+                "开启按阶段重播种"
+            } else {
+                "仅共享起始种子"
+            };
             let mut corrs = Vec::new();
             let mut gains = Vec::new();
             for a in 0..scores.len() {
@@ -1258,8 +1285,13 @@ mod tests {
         const ROLLOUTS: usize = 200;
 
         let (game, actions) = root_state()?;
-        println!("根局面: 回合 {} 阶段 {:?}，候选 {} 个
-", game.turn, game.stage, actions.len());
+        println!(
+            "根局面: 回合 {} 阶段 {:?}，候选 {} 个
+",
+            game.turn,
+            game.stage,
+            actions.len()
+        );
 
         for reseed in [false, true] {
             let cfg = SearchConfig::default().with_crn_stage_reseed(reseed);
@@ -1294,7 +1326,11 @@ mod tests {
                 scores.push(ok_scores);
             }
 
-            let label = if reseed { "开启按阶段重播种" } else { "仅共享起始种子" };
+            let label = if reseed {
+                "开启按阶段重播种"
+            } else {
+                "仅共享起始种子"
+            };
             println!("===== {label} =====");
 
             let mut corrs = Vec::new();

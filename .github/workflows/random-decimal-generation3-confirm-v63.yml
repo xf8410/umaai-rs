@@ -1,0 +1,108 @@
+name: 第三代精细小数权重独立复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/random-decimal-generation3-confirm-v63.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.candidate }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [H0, H32, H56, H46, H62, H36, H44, H34]
+        seed: [244949, 264575]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选编号: ${{ matrix.candidate }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: 复原第三代精确参数
+        env: {CID: '${{ matrix.candidate }}'}
+        run: |
+          python3 - <<'PY'
+          import os,random
+          i=int(os.environ['CID'][1:]);r=random.Random(20260825+i*169087)
+          keys=['Y1_PT','Y2_PT','Y3_PT','GAP','OVER','SAC','Y12_WINDOW','Y3_WINDOW','RESERVE','BOND','HINT','CONTINUITY']
+          g39=[31.0594,26.2536,4.3471,1.1311,1.3254,234.9200,.1148,.1999,5.2663,5.2657,11.2926,0.0]
+          g9=[33.4652,34.1807,7.2000,.9949,1.3621,205.1797,.1955,.1284,27.3883,10.6501,5.4575,0.0]
+          scales=[1.8,2.2,1.5,.075,.085,11.,.022,.022,4.,1.4,1.4,0.]
+          lo=[24,20,1,.55,.75,165,.05,.06,1,2,2,0];hi=[40,40,14,1.35,1.6,265,.24,.24,36,16,15,0]
+          if i==0: vals=g39
+          elif i==32: vals=g9
+          elif i<32: vals=[x+r.gauss(0,s) for x,s in zip(g39,scales)]
+          elif i<64: vals=[x+r.gauss(0,s) for x,s in zip(g9,scales)]
+          else:
+            a=r.uniform(.15,.85);center=[a*x+(1-a)*y for x,y in zip(g39,g9)];vals=[x+r.gauss(0,s*.75) for x,s in zip(center,scales)]
+          vals=[min(h,max(l,v)) for v,l,h in zip(vals,lo,hi)]
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in zip(keys,vals):f.write(f'{k}={v:.4f}\n')
+          print(os.environ['CID'],dict(zip(keys,[round(v,4) for v in vals])))
+          PY
+      - name: 注入联合参数入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "random_decimal_matrix"
+          path = "tools/data_collection/random_decimal_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三代精细小数独立复验}
+      - run: cargo run -p umasim --bin random_decimal_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.candidate }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 随机小数权重矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总第三代精细独立复验
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'H*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三代精细小数权重独立复验报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list);bs=collections.defaultdict(list)
+          for p in glob.glob('results/**/随机小数权重矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):g[r['候选']].append(r);bs[(r['候选'],r['基础种子'])].append(r)
+          expected={'H0','H32','H56','H46','H62','H36','H44','H34'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):x=sorted(float(r[key]) for r in rows);return statistics.mean(x),x[59],x[0]
+          anchor=st(g['H32'],'总分')[0]
+          print('# 第三代精细小数权重独立复验\n');print('> 两组全新种子，每候选600局；H0=G39，H32=G9。\n')
+          print('|候选|平均总分|分P10|最低分|平均PT|PT P10|最低PT|种子A|种子B|相对H32|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分');p=st(rows,'技能点');a=st(bs[(name,'244949')],'总分')[0];b=st(bs[(name,'264575')],'总分')[0];out.append((s[0],name,s,p,a,b))
+          for _,name,s,p,a,b in sorted(out,reverse=True):print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{a:.1f}|{b:.1f}|{s[0]-anchor:+.1f}|')
+          print('\n晋级：两个种子均胜H32，并综合均值、P10和PT；随后结束本轮小数迭代，进入P0第5步。')
+          PY
+          cat 第三代精细小数权重独立复验报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三代精细小数权重独立复验报告
+          path: 第三代精细小数权重独立复验报告.md
+          retention-days: 30

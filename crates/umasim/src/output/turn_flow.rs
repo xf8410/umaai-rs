@@ -79,13 +79,8 @@ impl<T> RecordingTrainer<T> {
 
     /// 追加一条决策记录
     fn record(
-        &self,
-        game: &RamenGame,
-        stage: &str,
-        candidates: Vec<String>,
-        candidate_details: Vec<String>,
-        candidate_recipes: Vec<String>,
-        selected: usize
+        &self, game: &RamenGame, stage: &str, candidates: Vec<String>, candidate_details: Vec<String>,
+        candidate_recipes: Vec<String>, selected: usize
     ) {
         let selected_desc = candidates.get(selected).cloned().unwrap_or_default();
         self.log.borrow_mut().push(TurnDecision {
@@ -200,11 +195,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
 
     fn select_choice(&self, game: &RamenGame, choices: &[Vec<EventChoice>], rng: &mut StdRng) -> Result<usize> {
         if self.verbose {
-            println!(
-                "== 候选 [回合 {} · 事件] {} 个 ==",
-                game.turn() + 1,
-                choices.len()
-            );
+            println!("== 候选 [回合 {} · 事件] {} 个 ==", game.turn() + 1, choices.len());
             for (i, x) in choices.iter().enumerate() {
                 let text = x.iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
                 println!("  {}. {}", i + 1, text.bright_yellow());
@@ -212,11 +203,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
         }
         let idx = self.inner.select_choice(game, choices, rng)?;
         if self.verbose {
-            let text = choices[idx]
-                .iter()
-                .map(|y| y.explain())
-                .collect::<Vec<_>>()
-                .join(" | ");
+            let text = choices[idx].iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
             println!("→ 选择: {}\n", text.bright_yellow());
         }
         let candidates: Vec<String> = choices
@@ -246,11 +233,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for RecordingTrainer<T> {
         }
         let idx = self.inner.select_event_choice(game, event, choices, rng)?;
         if self.verbose {
-            let text = choices[idx]
-                .iter()
-                .map(|y| y.explain())
-                .collect::<Vec<_>>()
-                .join(" | ");
+            let text = choices[idx].iter().map(|y| y.explain()).collect::<Vec<_>>().join(" | ");
             println!("→ 选择: {}\n", text.bright_yellow());
         }
         let candidates: Vec<String> = choices
@@ -287,10 +270,7 @@ pub fn render_turn_situation(game: &RamenGame) -> Result<String> {
 pub fn render_decision(d: &TurnDecision) -> String {
     // SpecialSelect 阶段仅 1 个候选且无隐藏风味替换（0 替换）时，玩家没有真实
     // 选择空间，用提示代替"1 个候选"列表
-    if d.stage.starts_with("SpecialSelect")
-        && d.candidates.len() == 1
-        && !d.candidates[0].contains("(替换")
-    {
+    if d.stage.starts_with("SpecialSelect") && d.candidates.len() == 1 && !d.candidates[0].contains("(替换") {
         return format!(
             "== 决策 [回合 {} · SpecialSelect] 无隐藏风味可选，自动 0 替换 ==",
             d.turn + 1
@@ -317,7 +297,11 @@ pub fn render_decision(d: &TurnDecision) -> String {
             parts.push(detail);
         }
         let line = parts.join(" ");
-        lines.push(if mark.is_empty() { line } else { format!("{line} {mark}") });
+        lines.push(if mark.is_empty() {
+            line
+        } else {
+            format!("{line} {mark}")
+        });
     }
     lines.join("\n")
 }
@@ -426,17 +410,21 @@ mod tests {
             anyhow::bail!("应停在回合 31 开始，实际 turn={} stage={:?}", game.turn(), game.stage);
         }
 
-        // 切回 info：第 31 回合的规则层 diag（效果）可见
+        // 切回 info：第 31 回合的规则层 diag（效果）可见。Core-only 测试没有
+        // flexi_logger/LOGGER，保持静默即可；测试验证的是流程与渲染，不依赖日志后端。
+        #[cfg(feature = "cli")]
         if let Some(logger) = crate::gamedata::LOGGER.get() {
-            let handle = logger
-                .lock()
-                .map_err(|_| anyhow::anyhow!("LOGGER 锁中毒"))?;
+            let handle = logger.lock().map_err(|_| anyhow::anyhow!("LOGGER 锁中毒"))?;
             let spec = flexi_logger::LogSpecification::try_from("info")?;
             handle.set_new_spec(spec);
         }
 
         println!("╔════════════════════════════════════════════╗");
-        println!("║  完整回合信息基线（第 {} 回合 · turn={}）   ║", game.turn() + 1, game.turn());
+        println!(
+            "║  完整回合信息基线（第 {} 回合 · turn={}）   ║",
+            game.turn() + 1,
+            game.turn()
+        );
         println!("╚════════════════════════════════════════════╝");
         println!();
         println!("【局面 · 回合开始】");

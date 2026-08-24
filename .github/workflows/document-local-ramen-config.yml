@@ -1,0 +1,38 @@
+name: Promote verified v44 preset once
+on:
+  push:
+    branches:
+      - workbench/skill-pt-matrix-distill
+    paths:
+      - scripts/ramen/promote_v44_preset.py
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ramen-v44-promotion
+      - name: Promote preset and restore unrelated draft
+        run: |
+          python3 scripts/ramen/promote_v44_preset.py
+          git checkout 2aeb7d97144c39d0cce7ed580592c23b8ca9fb8e -- .trae/documents/handwritten_policy/good_bad_labels_draft.md
+      - name: Release regression
+        run: |
+          cargo check -p umasim --release --no-default-features
+          cargo test -p umasim --lib --release --no-default-features recommended_ramen_uses_025_friend_pacing -- --nocapture
+      - name: Commit promotion to PR source branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs .trae/documents/handwritten_policy/good_bad_labels_draft.md
+          git commit -m 'feat: promote v44 friend outing pacing to 0/2/5'
+          git push origin HEAD:workbench/skill-pt-matrix-distill

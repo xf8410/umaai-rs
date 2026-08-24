@@ -15,7 +15,10 @@
 
 use anyhow::Result;
 
-use super::rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options};
+use super::{
+    effects::calc_ramen_training_effect,
+    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options}
+};
 use crate::{
     game::{
         ramen::{Operation, RamenAction, RamenGame},
@@ -44,6 +47,8 @@ pub struct RamenPolicyConfig {
     pub pt_rate: f32,
     /// 训练失败惩罚（期望值中被扣减的固定分）
     pub failure_penalty: f32,
+    /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
+    pub effective_ramen_failure: bool,
     /// 彩圈（友情训练）加成：每个彩圈附加分
     pub shining_bonus: f32,
     /// 训练体力消耗的折算（负值即当前消耗的体力价值；纳入后训练会自减肥力成本）
@@ -96,6 +101,12 @@ pub struct RamenPolicyConfig {
     pub region_pt_weight: f32,
     /// 地区 hint_count→分数折算
     pub region_hint_weight: f32,
+    /// 地区 youqing 加成→分数折算（与 `region_xunlian_weight` 同族，作用于不同年份）
+    ///
+    /// 第 1 年地区只有 `xunlian`、第 2/3 年只有 `youqing`，两项不会同时非零；
+    /// 且同一年内 `pt_bonus` / `hint_count` 恒定，故本权重的绝对值不影响 argmax，
+    /// 只影响打印出来的分数量级。
+    pub region_youqing_weight: f32,
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
@@ -114,6 +125,7 @@ impl Default for RamenPolicyConfig {
             status_rate: 1.0,
             pt_rate: 8.0,
             failure_penalty: 60.0,
+            effective_ramen_failure: true,
             shining_bonus: 60.0,
             train_vital_value: 1.8,
             rest_base: 20.0,
@@ -131,6 +143,7 @@ impl Default for RamenPolicyConfig {
             region_xunlian_weight: 40.0,
             region_pt_weight: 30.0,
             region_hint_weight: 15.0,
+            region_youqing_weight: 1.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
@@ -208,14 +221,11 @@ impl RamenPolicy {
 
         // 守门 0：自选比赛达标（优先于一切——不达标直接育成失败）
         if let Some(idx) = self.free_race_gate(game, actions) {
-            return Ok((
-                idx,
-                vec![RamenPolicyOutput {
-                    score: f32::MAX,
-                    reason: format!("守门: {}", self.free_race_gate_reason(game)),
-                    ..Default::default()
-                }],
-            ));
+            return Ok((idx, vec![RamenPolicyOutput {
+                score: f32::MAX,
+                reason: format!("守门: {}", self.free_race_gate_reason(game)),
+                ..Default::default()
+            }]));
         }
         // 守门 1：生病 → 治病（夏合宿无治病候选，休息自动治病）
         if uma.flags.ill || uma.flags.bad_trainer {
@@ -357,7 +367,9 @@ impl RamenPolicy {
     }
 
     /// 事件选项打分（返回各候选评分分解）
-    pub fn decide_event(&self, game: &RamenGame, choices: &[Vec<EventChoice>]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
+    pub fn decide_event(
+        &self, game: &RamenGame, choices: &[Vec<EventChoice>]
+    ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if choices.is_empty() {
             anyhow::bail!("事件候选为空");
         }
@@ -429,15 +441,11 @@ impl RamenPolicy {
         if need == 0 {
             format!("自选比赛已达标({grade_note}), 区间剩余回合不再干预")
         } else if remain < need {
-            format!(
-                "自选比赛缺{need}场({grade_note})但只剩{remain}个有效回合, 打完也不够(摆烂), 不再强制"
-            )
+            format!("自选比赛缺{need}场({grade_note})但只剩{remain}个有效回合, 打完也不够(摆烂), 不再强制")
         } else if !race_turn_qualified(game.turn(), free) {
             format!("自选比赛缺{need}场({grade_note}), 本回合等级不满足, 不白打")
         } else {
-            format!(
-                "自选比赛缺{need}场/剩{remain}回合({grade_note}), 剩余回合不足需强制补赛",
-            )
+            format!("自选比赛缺{need}场/剩{remain}回合({grade_note}), 剩余回合不足需强制补赛",)
         }
     }
 
@@ -475,7 +483,15 @@ impl RamenPolicy {
                 let train = t as usize;
                 let buffs = game.calc_training_buff(train)?;
                 let value = game.calc_training_value(&buffs, train)?;
-                let fail_rate = game.calc_training_failure_rate(&buffs, train);
+                let base_fail_rate = game.calc_training_failure_rate(&buffs, train);
+                let ramen_effect = calc_ramen_training_effect(game, train, game.shining_count(train) > 0);
+                // fail_rate_drop is a relative percentage reduction shared by every training
+                // while eating: Y1 30%, Y2 50%, Y3 100%.
+                let fail_rate = if self.config.effective_ramen_failure {
+                    (base_fail_rate * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0)
+                } else {
+                    base_fail_rate
+                };
                 // 属性增益（five_status_final_score 差分，与 calc_score 一致）
                 let mut attr_gain = 0.0;
                 for i in 0..5 {
@@ -601,20 +617,21 @@ impl RamenPolicy {
                 bias[t as usize] += 1.0;
             }
         }
-        // 人数最少的训练位置补充倾向（多数拉面效果偏速度）
-        let train_val: f32 = region
+        // 该地区覆盖的训练位在卡组里的分量；0.5 下限避免「一张都没有」直接归零
+        let bias_sum: f32 = region
             .at_trains
             .iter()
             .map(|&t| {
                 let t = t as usize;
-                if t < 5 {
-                    region.xunlian as f32 * bias[t].max(0.5)
-                } else {
-                    0.0
-                }
+                if t < 5 { bias[t].max(0.5) } else { 0.0 }
             })
             .sum();
-        Ok(train_val * self.config.region_xunlian_weight
+        // xunlian（第 1 年）与 youqing（第 2/3 年）都按 bias_sum 缩放：
+        // 第 2/3 年地区的 xunlian 恒为 0，若只算 xunlian 则同年所有候选同分、
+        // argmax 恒取第一个，卡组构成完全不参与决策。
+        Ok(bias_sum
+            * (region.xunlian as f32 * self.config.region_xunlian_weight
+                + region.youqing as f32 * self.config.region_youqing_weight)
             + region.pt_bonus as f32 * self.config.region_pt_weight
             + region.hint_count as f32 * self.config.region_hint_weight)
     }
@@ -632,6 +649,10 @@ impl RamenPolicy {
         val += c.value.status_pt[5] as f32 * self.config.pt_rate;
         val += c.value.vital as f32 * self.config.event_vital_weight;
         val += c.value.motivation as f32 * self.config.event_motivation_weight;
+        // 旧简化器漏掉了 Hint、羁绊和永久最大体力，导致友人/支援事件被系统性低估。
+        val += c.value.hint_level as f32 * global!(GAMECONSTANTS).hint_pt_rate * self.config.pt_rate;
+        val += c.value.friendship as f32 * 5.0;
+        val += c.value.max_vital as f32 * self.config.event_vital_weight * 2.0;
         // flags：ill/bad_trainer 是坏状态，获得惩罚、移除奖励
         if let Some(flags) = &c.add_flags {
             if flags.ill || flags.bad_trainer {
@@ -675,7 +696,7 @@ fn race_turn_qualified(turn: i32, free: &FreeRaceData) -> bool {
 /// `FreeRaceData::mask` 已按区间与等级要求预置（bit *b* 对应回合 *b+11*）。
 /// 这里再叠加 `BaseGame::can_self_race` 的通用限制（回合 13-71 才可自选比赛），
 /// 即去掉 bit 0-1（回合 11-12）与 bit ≥ 61（回合 ≥ 72）。
-fn remaining_race_slots(turn: i32, free: &FreeRaceData) -> u32 {
+pub(crate) fn remaining_race_slots(turn: i32, free: &FreeRaceData) -> u32 {
     /// 回合 13 起才可自选比赛（bit 2）
     const LOW_CUT: u64 = !0b11;
     /// 回合 72 起进入 URA，不可自选比赛（bit 61 及以上）
@@ -782,10 +803,12 @@ mod tests {
 
     // ========== 手写策略核心测试 ==========
 
-    /// 临时验证：score_region 的卡组 bias 是否让不同 build 选出不同的第三年地区
+    /// 第 3 年地区选择必须随卡组构成变化（build 自适应）
     ///
     /// 速度向卡组（3速） vs 智力向卡组（3智），第 3 年 120 组合全枚举打分，
-    /// 观察选中组合是否随卡组变化（验证 build 自适应，为"恢复 all 选项"决策提供依据）。
+    /// 两者选中的组合必须不同。第 3 年地区的 `xunlian` 恒为 0，区分度只能来自
+    /// `youqing × at_trains × 卡组 bias`——若 `score_region` 漏掉 youqing 项，
+    /// 同年所有候选同分、argmax 恒取第一个，本测试即失败。
     #[test]
     fn test_region_build_sensitivity() -> anyhow::Result<()> {
         let workspace_root = get_workspace_root()?;
@@ -837,6 +860,7 @@ mod tests {
         );
 
         println!("两者选择是否不同: {}", combos[idx_s] != combos[idx_w]);
+        assert_ne!(combos[idx_s], combos[idx_w], "不同 build 必须选出不同的第 3 年地区组合");
         Ok(())
     }
 
@@ -1224,6 +1248,102 @@ mod tests {
         let reason = policy.free_race_gate_reason(&game);
         println!("等级不满足原因: {reason}");
         assert!(reason.contains("等级不满足"), "原因应说明等级不满足: {reason}");
+        Ok(())
+    }
+
+    /// 小栗帽 100603 专项：两段区间 + 限 G1 的守门行为
+    ///
+    /// 该马娘是采样空间里最硬的用例——第二段要求回合 48-59 内打满 2 场 G1，
+    /// 可比赛回合数远少于区间长度。逐回合扫描而非硬编码回合号，
+    /// 使测试不随 `race_grades` 常量表调整而失效。
+    #[test]
+    fn test_free_race_gate_oguri_two_intervals() -> anyhow::Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let policy = RamenPolicy::default();
+        let actions = train_actions_with_race();
+        let mut game = make_free_race_game_uma(100603)?;
+
+        // 两段区间必须从 DB 正确读出
+        let intervals: Vec<(u32, u32, u32, Option<u32>)> = game
+            .uma
+            .get_data()?
+            .free_races
+            .iter()
+            .map(|f| (f.start_turn, f.end_turn, f.count, f.grade))
+            .collect();
+        println!("100603 自选比赛区间: {intervals:?}");
+        assert_eq!(intervals.len(), 2);
+        assert_eq!((intervals[0].0, intervals[0].1, intervals[0].2), (12, 23, 1));
+        assert_eq!((intervals[1].0, intervals[1].1, intervals[1].2), (48, 59, 2));
+        assert!(intervals[1].3.is_some(), "第二段应带等级限制");
+
+        // 限 G1 使第二段的可比赛回合数显著少于区间长度（12 回合）
+        let free2 = game
+            .uma
+            .find_free_race(48)
+            .ok_or_else(|| anyhow::anyhow!("回合 48 应落在第二段区间内"))?;
+        let slots2 = remaining_race_slots(48, free2);
+        println!("第二段（48-59，限 G1）可比赛回合数: {slots2}");
+        assert!(slots2 >= 2, "可比赛回合数不足以打满 2 场，规则或掩码有误");
+        assert!(slots2 < 12, "限 G1 未生效：可比赛回合数不应等于区间长度");
+
+        // 逐回合扫描第一段：找到守门首次触发的回合
+        let first_gate = (12..=23).find(|&turn| {
+            game.base.turn = turn;
+            policy.free_race_gate(&game, &actions).is_some()
+        });
+        let first_gate = first_gate.ok_or_else(|| anyhow::anyhow!("第一段守门从未触发"))?;
+        println!("第一段守门首次触发回合: {first_gate}");
+        game.base.turn = first_gate;
+        let idx = policy
+            .free_race_gate(&game, &actions)
+            .ok_or_else(|| anyhow::anyhow!("守门应返回候选下标"))?;
+        assert_eq!(actions[idx].operation, Operation::Race);
+
+        // 打满第一段后，第一段区间内不再干预
+        game.uma.set_race(first_gate);
+        game.base.turn = 23;
+        println!("第一段达标后回合 23 守门: {:?}", policy.free_race_gate(&game, &actions));
+        assert_eq!(policy.free_race_gate(&game, &actions), None);
+
+        // 第二段缺 2 场：扫描触发回合，并确认返回比赛
+        let second_gate = (48..=59).find(|&turn| {
+            game.base.turn = turn;
+            policy.free_race_gate(&game, &actions).is_some()
+        });
+        let second_gate = second_gate.ok_or_else(|| anyhow::anyhow!("第二段守门从未触发"))?;
+        println!("第二段（缺 2 场）守门首次触发回合: {second_gate}");
+        game.base.turn = second_gate;
+        let idx = policy
+            .free_race_gate(&game, &actions)
+            .ok_or_else(|| anyhow::anyhow!("第二段守门应返回候选下标"))?;
+        assert_eq!(actions[idx].operation, Operation::Race);
+        Ok(())
+    }
+
+    /// 守门在候选表不含「比赛」时必须返回 None，不得 panic
+    ///
+    /// 生病 / 体力不足等情形下 `Operation::Race` 可能不在候选中，
+    /// 此时守门只能放弃干预，交由规则层判定育成失败，而不是越界取下标。
+    #[test]
+    fn test_free_race_gate_without_race_candidate() -> anyhow::Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let policy = RamenPolicy::default();
+        let actions = train_actions(); // 不含 Operation::Race
+        let mut game = make_free_race_game_uma(100603)?;
+        // 推到第一段最后一个回合，缺口最紧张
+        game.base.turn = 23;
+        let got = policy.free_race_gate(&game, &actions);
+        println!("无比赛候选时守门结果: {got:?}");
+        assert_eq!(got, None);
         Ok(())
     }
 

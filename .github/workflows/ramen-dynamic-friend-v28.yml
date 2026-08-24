@@ -1,0 +1,71 @@
+name: Ramen dynamic friend outing v28
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/ramen-dynamic-friend-v28.yml]
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/restore_dynamic_friend_outing_v28.py
+      - run: cargo fmt -- crates/umasim/src/trainer/local_ramen_trainer.rs
+      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'fix: restore dynamic friend outing valuation'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
+  matrix:
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        variant:
+          - {name: fixed-135, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friend3v45-friendcap135-friendspecial4}
+          - {name: dynamic-135, structure: structall-rpt200-window10-look0-samples1-rawfail-cook240-vrest30-eatguard-friendrest-friendcap135-friendspecial4}
+        shard: [0, 1, 2]
+    env:
+      VARIANT: ${{ matrix.variant.name }}
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: ${{ matrix.variant.structure }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 100
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-dynamic-friend-v28}
+      - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with: {name: 'v28-${{ matrix.variant.name }}-shard${{ matrix.shard }}', path: matrix-result.csv, retention-days: 14}
+  summary:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with: {pattern: v28-*, path: matrix-results}
+      - name: Generate report
+        env: {REPORT_PATH: 'benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md'}
+        run: |
+          python3 scripts/summarize_skill_pt_matrix.py
+          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md
+          git commit -m 'bench: publish dynamic friend outing v28'
+          git push origin HEAD:workbench/skill-pt-matrix-distill

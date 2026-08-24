@@ -1,0 +1,82 @@
+name: Ramen effective failure-aware lookahead v11
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/ramen-effective-fail-v11.yml]
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/patch_ramen_effective_fail_v11.py
+      - run: cargo fmt -- crates/umasim/src/game/ramen/policy.rs crates/umasim/src/trainer/local_ramen_trainer.rs
+      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/game/ramen/policy.rs crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'fix: score ramen training with effective failure rate'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
+  matrix:
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant:
+          # Keep eat/no-eat eligible: the corrected expected score should naturally value
+          # first-year safety transitions and Y3 zero-failure turns without a named-ramen rule.
+          - {name: fail-look10, structure: structall-rpt200-look10-samples12}
+          - {name: fail-look25, structure: structall-rpt200-look25-samples12}
+          - {name: fail-look50, structure: structall-rpt200-look50-samples12}
+          # Diagnostic only: shows whether forced eager eating still masks ranking differences.
+          - {name: fail-eager-look25, structure: structall-rpt200-eager-look25-samples12}
+        shard: [0, 1, 2]
+    env:
+      VARIANT: ${{ matrix.variant.name }}
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: ${{ matrix.variant.structure }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: 50
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: skill-pt-v11}
+      - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v11-${{ matrix.variant.name }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
+          if-no-files-found: error
+          retention-days: 7
+  summary:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: actions/download-artifact@v4
+        with: {pattern: v11-*, path: matrix-results}
+      - name: Generate report
+        env: {REPORT_PATH: 'benchmark-results/ramen-effective-fail-v11-${{ github.run_id }}.md'}
+        run: |
+          python3 scripts/summarize_skill_pt_matrix.py
+          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit report
+        env: {REPORT_PATH: 'benchmark-results/ramen-effective-fail-v11-${{ github.run_id }}.md'}
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$REPORT_PATH"
+          git commit -m "bench: publish effective failure v11 run ${{ github.run_id }}"
+          git push origin HEAD:workbench/skill-pt-matrix-distill

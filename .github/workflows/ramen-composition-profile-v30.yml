@@ -1,0 +1,54 @@
+name: Ramen stage expert architecture matrix v34
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    env:
+      COUNT: 200
+      ROLLOUTS: 64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ramen-stage-v34
+      - run: cargo fmt --all -- --check
+      - name: Generate architecture labels
+        run: START=$((3000 + ${{ matrix.shard }} * 200)) cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-stage-v34-${{ matrix.shard }}
+          path: ramen-feature-dataset.jsonl
+  train:
+    needs: data
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ramen-stage-v34-*
+          path: data
+      - run: python3 -m pip install --user numpy
+      - run: mkdir -p benchmark-results && python3 scripts/train_ramen_stage_heads_v34.py > benchmark-results/ramen-stage-head-matrix-v34.md
+      - run: cat benchmark-results/ramen-stage-head-matrix-v34.md
+      - name: Commit report
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/ramen-stage-head-matrix-v34.md
+          git commit -m 'bench: publish ramen stage head matrix v34'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill

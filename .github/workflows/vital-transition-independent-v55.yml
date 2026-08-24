@@ -1,0 +1,77 @@
+name: P0第3步吃后体力转移独立确认
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/vital-transition-independent-v55.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.variant }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [无转移预算, 训练后10轻罚]
+        seed: [135791, 246802]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_vital_transition_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 吃后体力转移独立确认}
+      - run: cargo run -p umasim --bin vital_transition_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 吃后体力转移矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总吃后体力转移独立确认
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 吃后体力转移独立确认报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list); byseed=collections.defaultdict(list)
+          for p in glob.glob('results/**/吃后体力转移矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):
+              g[r['方案']].append(r); byseed[(r['方案'],r['基础种子'])].append(r)
+          expected={'无转移预算','训练后10轻罚'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()): raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows); return statistics.mean(x),x[59],x[0]
+          print('# P0第3步：吃后体力转移独立确认\n')
+          print('|方案|平均总分|分P10|最低分|平均PT|PT P10|最低PT|种子A均分|种子B均分|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+          out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分'); p=st(rows,'技能点')
+            a=st(byseed[(name,'135791')],'总分')[0]; b=st(byseed[(name,'246802')],'总分')[0]
+            out.append((s[0],name,s,p,a,b))
+          for _,name,s,p,a,b in sorted(out,reverse=True):
+            print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{a:.1f}|{b:.1f}|')
+          base=next(x for x in out if x[1]=='无转移预算'); soft=next(x for x in out if x[1]=='训练后10轻罚')
+          print(f'\n软预算相对无预算：平均总分 {soft[2][0]-base[2][0]:+.1f}，总分P10 {soft[2][1]-base[2][1]:+.0f}，平均PT {soft[3][0]-base[3][0]:+.1f}，PT P10 {soft[3][1]-base[3][1]:+.0f}。')
+          print('\n完成规则：若软预算不能在合并均值与两个独立种子上稳定获胜，第3步结论为不加额外体力转移预算，随后进入第4步配方续航。')
+          PY
+          cat 吃后体力转移独立确认报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 吃后体力转移独立确认报告
+          path: 吃后体力转移独立确认报告.md
+          retention-days: 30

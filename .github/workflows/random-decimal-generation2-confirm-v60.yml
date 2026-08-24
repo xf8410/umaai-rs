@@ -1,0 +1,109 @@
+name: 第二代小数权重独立复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/random-decimal-generation2-confirm-v60.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.candidate }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [BASE, C49, C33, G2, G39, G9, G44, G54, G3, G25]
+        seed: [161803, 141421]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选编号: ${{ matrix.candidate }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: 复原第二代候选精确参数
+        env: {CID: '${{ matrix.candidate }}'}
+        run: |
+          python3 - <<'PY'
+          import os,random
+          cid=os.environ['CID'];keys=['Y1_PT','Y2_PT','Y3_PT','GAP','OVER','SAC','Y12_WINDOW','Y3_WINDOW','RESERVE','BOND','HINT','CONTINUITY']
+          c49=[35.3246,29.8550,8.6504,.9104,.9388,195.2500,.1774,.1448,26.0227,11.4982,5.8373,4.8570]
+          c33=[29.2738,27.8439,10.3608,1.0194,1.1997,243.4316,.1036,.1696,12.2170,7.9297,11.3079,8.6700]
+          if cid=='BASE': vals=[32.,32.,16.,.75,1.,220.,.15,.12,20.,12.,8.,0.]
+          elif cid=='C49': vals=c49
+          elif cid=='C33': vals=c33
+          else:
+            i=int(cid[1:]);r=random.Random(20260824+i*130363)
+            scales=[3.,3.,2.5,.12,.14,18.,.035,.035,6.,2.,2.,8.];lo=[20,20,2,.3,.4,150,.03,.03,2,3,1,0];hi=[44,44,24,1.3,1.6,280,.25,.25,44,20,16,60]
+            if i==0: vals=c49
+            elif i==24: vals=c33
+            elif i<24: vals=[x+r.gauss(0,s) for x,s in zip(c49,scales)]
+            elif i<48: vals=[x+r.gauss(0,s) for x,s in zip(c33,scales)]
+            else:
+              a=r.uniform(.2,.8);center=[a*x+(1-a)*y for x,y in zip(c49,c33)];vals=[x+r.gauss(0,s*.65) for x,s in zip(center,scales)]
+            vals=[min(h,max(l,v)) for v,l,h in zip(vals,lo,hi)]
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in zip(keys,vals):f.write(f'{k}={v:.4f}\n')
+          print(cid,dict(zip(keys,[round(v,4) for v in vals])))
+          PY
+      - name: 注入联合参数入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "random_decimal_matrix"
+          path = "tools/data_collection/random_decimal_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第二代小数独立复验}
+      - run: cargo run -p umasim --bin random_decimal_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.candidate }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 随机小数权重矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总第二代独立复验
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第二代小数权重独立复验报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list);bs=collections.defaultdict(list)
+          for p in glob.glob('results/**/随机小数权重矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):g[r['候选']].append(r);bs[(r['候选'],r['基础种子'])].append(r)
+          expected={'BASE','C49','C33','G2','G39','G9','G44','G54','G3','G25'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):x=sorted(float(r[key]) for r in rows);return statistics.mean(x),x[59],x[0]
+          base=st(g['BASE'],'总分')[0];print('# 第二代小数权重独立复验\n');print('|候选|平均总分|分P10|最低分|平均PT|PT P10|最低PT|种子A|种子B|相对BASE|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分');p=st(rows,'技能点');a=st(bs[(name,'161803')],'总分')[0];b=st(bs[(name,'141421')],'总分')[0];out.append((s[0],name,s,p,a,b))
+          for _,name,s,p,a,b in sorted(out,reverse=True):print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{a:.1f}|{b:.1f}|{s[0]-base:+.1f}|')
+          print('\n完成规则：胜者须合并均值及两个种子均领先BASE；再对胜者做配方续航0消融，完成P0第4步归因。')
+          PY
+          cat 第二代小数权重独立复验报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第二代小数权重独立复验报告
+          path: 第二代小数权重独立复验报告.md
+          retention-days: 30

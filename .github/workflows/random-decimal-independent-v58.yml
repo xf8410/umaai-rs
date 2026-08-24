@@ -1,0 +1,105 @@
+name: 小数随机权重前列独立复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/random-decimal-independent-v58.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.candidate }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [BASE, C49, C62, C57, C33, C8, C5]
+        seed: [112358, 271828]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选编号: ${{ matrix.candidate }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: 复原候选精确小数参数
+        env: {CID: '${{ matrix.candidate }}'}
+        run: |
+          python3 - <<'PY'
+          import os,random
+          cid=os.environ['CID']
+          if cid=='BASE':
+            vals={'Y1_PT':32.,'Y2_PT':32.,'Y3_PT':16.,'GAP':.75,'OVER':1.,'SAC':220.,'Y12_WINDOW':.15,'Y3_WINDOW':.12,'RESERVE':20.,'BOND':12.,'HINT':8.,'CONTINUITY':0.}
+          else:
+            i=int(cid[1:]);r=random.Random(20260823+i*104729)
+            vals={'Y1_PT':r.uniform(24,40),'Y2_PT':r.uniform(24,40),'Y3_PT':r.uniform(8,24),'GAP':r.uniform(.45,1.05),'OVER':r.uniform(.65,1.35),'SAC':r.uniform(180,260),'Y12_WINDOW':r.uniform(.08,.20),'Y3_WINDOW':r.uniform(.06,.18),'RESERVE':r.uniform(8,36),'BOND':r.uniform(7,16),'HINT':r.uniform(4,12),'CONTINUITY':r.uniform(0,60)}
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in vals.items():f.write(f'{k}={v:.4f}\n')
+          print(cid,{k:round(v,4) for k,v in vals.items()})
+          PY
+      - name: 注入联合参数入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "random_decimal_matrix"
+          path = "tools/data_collection/random_decimal_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 小数随机前列复验}
+      - run: cargo run -p umasim --bin random_decimal_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.candidate }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 随机小数权重矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总小数随机权重独立复验
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 小数随机权重独立复验报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list);bs=collections.defaultdict(list)
+          for p in glob.glob('results/**/随机小数权重矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):
+              g[r['候选']].append(r);bs[(r['候选'],r['基础种子'])].append(r)
+          expected={'BASE','C49','C62','C57','C33','C8','C5'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows);return statistics.mean(x),x[59],x[0]
+          print('# 小数随机权重前列独立复验\n')
+          print('> 两组全新种子，每候选600局；BASE为进入随机搜索前的共同基线。\n')
+          print('|候选|平均总分|分P10|最低分|平均PT|PT P10|最低PT|种子A均分|种子B均分|相对BASE|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          base=st(g['BASE'],'总分')[0];out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分');p=st(rows,'技能点');a=st(bs[(name,'112358')],'总分')[0];b=st(bs[(name,'271828')],'总分')[0]
+            out.append((s[0],name,s,p,a,b))
+          for _,name,s,p,a,b in sorted(out,reverse=True):print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{a:.1f}|{b:.1f}|{s[0]-base:+.1f}|')
+          print('\n晋级标准：合并均分领先BASE，两个新种子均不反向，且P10/PT无明显退化。胜者只作为下一轮随机分布中心，不直接固化。')
+          PY
+          cat 小数随机权重独立复验报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 小数随机权重独立复验报告
+          path: 小数随机权重独立复验报告.md
+          retention-days: 30

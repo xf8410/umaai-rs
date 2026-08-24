@@ -224,9 +224,7 @@ impl<A> Default for SearchOutput<A> {
 
 impl<A> SearchOutput<A> {
     /// 创建搜索输出
-    pub fn new(
-        actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64
-    ) -> Self {
+    pub fn new(actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64) -> Self {
         // 找到加权平均分最高的动作
         let best_action_idx = action_results
             .iter()
@@ -254,8 +252,17 @@ impl<A> SearchOutput<A> {
 
     /// 获取 PT 口径下的最优动作
     pub fn best_action_pt(&self) -> &A {
-        let best_action_idx = self
-            .action_results
+        &self.actions[self.best_action_pt_idx()]
+    }
+
+    /// 获取 PT 口径下最优动作的**下标**
+    ///
+    /// 与 [`best_action_pt`](Self::best_action_pt) 同一套排序，只是返回下标。
+    /// 调用方（如 `RamenMctsTrainer`）要把选择结果作为 `Trainer::select_action`
+    /// 的返回值，需要的是下标而不是动作本身；靠 `PartialEq` 反查会在存在等价
+    /// 候选时选错那一个。
+    pub fn best_action_pt_idx(&self) -> usize {
+        self.action_results
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| {
@@ -264,15 +271,13 @@ impl<A> SearchOutput<A> {
                 wa.partial_cmp(&wb).unwrap_or(std::cmp::Ordering::Equal)
             })
             .map(|(i, _)| i)
-            .unwrap_or(0);
-        &self.actions[best_action_idx]
+            .unwrap_or(0)
     }
 
     /// 获取最优动作的搜索结果
     pub fn best_result(&self) -> &ActionResult {
         &self.action_results[self.best_action_idx].0
     }
-
 }
 
 impl SearchOutput<OnsenAction> {

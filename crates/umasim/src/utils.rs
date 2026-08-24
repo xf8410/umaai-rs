@@ -142,6 +142,13 @@ pub fn init_test_logger(spec: &str) -> Result<()> {
     Ok(())
 }
 
+/// Core-only 测试不携带 CLI 日志后端；保留同一公开签名，让测试无需按 feature
+/// 重复分支。`log` facade 在未安装 logger 时会安全地丢弃记录。
+#[cfg(all(test, not(feature = "cli")))]
+pub fn init_test_logger(_spec: &str) -> Result<()> {
+    Ok(())
+}
+
 /// 把当前工作目录修改为exe所在目录
 pub fn check_working_dir() -> Result<()> {
     let exe_path = std::env::current_exe()?;
@@ -173,6 +180,50 @@ pub fn get_workspace_root() -> Result<std::path::PathBuf> {
         .and_then(|p| p.parent())
         .ok_or_else(|| anyhow!("无法定位workspace根目录，请确保在正确的crate中运行"))?;
     Ok(workspace_root.to_path_buf())
+}
+
+/// 测试观测收集器：全程只打印，末尾汇总失败
+///
+/// `AGENTS.md` 规定测试用 `println` 而非 `assert` 宏——中途 panic 会丢掉后续诊断信息。
+/// 但只打印不失败的话，回归时 `cargo test` 仍报 ok，等于没有防线。
+/// 折中方案：每条观测都打印 `OK` / `NG`，**末尾**用 [`Checks::finish`] 汇总，
+/// 有 NG 才返回 `Err`——既保留完整诊断输出，又保留失败能力。
+///
+/// # 示例
+/// ```ignore
+/// let mut c = Checks::new();
+/// c.check(v.len() == INPUT_DIM, "维度等于 INPUT_DIM");
+/// c.check(v.iter().all(|x| x.is_finite()), "不含 NaN / Inf");
+/// c.finish()   // 有 NG 则 Err，列出全部失败项
+/// ```
+#[cfg(test)]
+#[derive(Default)]
+pub struct Checks {
+    failed: Vec<String>
+}
+
+#[cfg(test)]
+impl Checks {
+    /// 新建一个空的观测收集器
+    pub fn new() -> Self {
+        Self { failed: Vec::new() }
+    }
+
+    /// 记录一条观测并打印 `OK` / `NG`
+    pub fn check(&mut self, ok: bool, what: &str) {
+        println!("  [{}] {what}", if ok { "OK" } else { "NG" });
+        if !ok {
+            self.failed.push(what.to_string());
+        }
+    }
+
+    /// 汇总：有 NG 则返回 `Err`（列出全部失败项）
+    pub fn finish(self) -> Result<()> {
+        if self.failed.is_empty() {
+            return Ok(());
+        }
+        Err(anyhow!("{} 项观测未通过: {}", self.failed.len(), self.failed.join(" / ")))
+    }
 }
 
 /// 检测终端类型（Windows 平台彩色提示）
@@ -485,6 +536,10 @@ mod tests {
         let p = resolve_user_config_path();
         println!("用户配置路径: {}", p.display());
         assert!(p.ends_with("game_config.toml"));
-        assert!(!p.to_string_lossy().contains(".."), "不应含上级目录跳转: {}", p.display());
+        assert!(
+            !p.to_string_lossy().contains(".."),
+            "不应含上级目录跳转: {}",
+            p.display()
+        );
     }
 }

@@ -1,0 +1,70 @@
+name: P0第3步吃后体力转移结构诊断
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/vital-transition-diagnostic-v54.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  diagnostic:
+    name: ${{ matrix.variant }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [无转移预算, 训练后10轻罚, 无恢复视野后15, 训练后硬底线0]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: 602303
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_vital_transition_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 吃后体力转移诊断}
+      - run: cargo run -p umasim --bin vital_transition_diagnostic --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-第${{ matrix.shard.human }}片
+          path: 吃后体力转移结构.csv
+          retention-days: 30
+  summary:
+    name: 汇总体力转移结构
+    needs: diagnostic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 吃后体力转移结构诊断报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/吃后体力转移结构.csv',recursive=True):
+            for r in csv.DictReader(open(p)): g[r['方案']].append(r)
+          expected={'无转移预算','训练后10轻罚','无恢复视野后15','训练后硬底线0'}
+          if set(g)!=expected or any(len(v)!=300 for v in g.values()): raise SystemExit({k:len(v) for k,v in g.items()})
+          print('# P0第3步：吃后体力转移结构诊断\n')
+          print('|方案|均分|平均吃面训练|吃后<0|吃后<10|吃后<15|吃后<20|即时收益/次|即时PT/次|次回合休息率|友人率|训练率|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for name,rows in sorted(g.items()):
+            sm=lambda k:sum(float(r[k]) for r in rows)
+            n=len(rows); eats=sm('吃面训练'); obs=sm('次回合已观察')
+            pct=lambda k,d:100*sm(k)/d if d else 0
+            score=statistics.mean(float(r['总分']) for r in rows)
+            print(f'|{name}|{score:.1f}|{eats/n:.2f}|{pct("吃后负体力",eats):.1f}%|{pct("吃后低于10",eats):.1f}%|{pct("吃后低于15",eats):.1f}%|{pct("吃后低于20",eats):.1f}%|{sm("吃面即时收益")/eats:.1f}|{sm("吃面即时PT")/eats:.1f}|{pct("次回合休息",obs):.1f}%|{pct("次回合友人",obs):.1f}%|{pct("次回合训练",obs):.1f}%|')
+          print('\n判断重点：软预算是否实际减少次回合恢复；若只减少高价值吃面训练而恢复率不降，则第3步应保持无预算。')
+          PY
+          cat 吃后体力转移结构诊断报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 吃后体力转移结构诊断报告
+          path: 吃后体力转移结构诊断报告.md
+          retention-days: 30
