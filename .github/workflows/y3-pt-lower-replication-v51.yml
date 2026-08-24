@@ -1,0 +1,79 @@
+name: 第三年PT下界双样本复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/y3-pt-lower-replication-v51.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  replicate:
+    name: ${{ matrix.variant }}｜${{ matrix.sample.name }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [PT24对盘12, PT26对盘12, PT27对盘12, PT28对盘12, PT29对盘12, PT30对盘12, PT32对盘12]
+        sample:
+          - {name: 选参样本, seed: 995100}
+          - {name: 新确认样本, seed: 771337}
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: ${{ matrix.sample.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三年PT下界复验}
+      - run: cargo run -p umasim --bin y3_narrow_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-${{ matrix.sample.name }}-第${{ matrix.shard.human }}片
+          path: 第三年窄邻域.csv
+          retention-days: 30
+  summary:
+    name: 汇总PT下界双样本
+    needs: replicate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*样本-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三年PT下界双样本报告.md
+          import csv,glob,collections,statistics
+          allg=collections.defaultdict(list); byseed=collections.defaultdict(list)
+          for p in glob.glob('results/**/第三年窄邻域.csv',recursive=True):
+            for r in csv.DictReader(open(p)):
+              allg[r['方案']].append(r); byseed[(r['方案'],r['基础种子'])].append(r)
+          expected={'PT24对盘12','PT26对盘12','PT27对盘12','PT28对盘12','PT29对盘12','PT30对盘12','PT32对盘12'}
+          if set(allg)!=expected or any(len(v)!=600 for v in allg.values()): raise SystemExit({k:len(v) for k,v in allg.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows); return statistics.mean(x),x[max(0,int(len(x)*.1)-1)]
+          print('# 第三年PT下界双样本复验\n')
+          print('|方案|合并平均分|合并分P10|合并平均PT|合并PT P10|选参均分|新样本均分|新样本PT|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|')
+          out=[]
+          for name,rows in allg.items():
+            s=st(rows,'总分'); p=st(rows,'技能点')
+            old=st(byseed[(name,'995100')],'总分')[0]
+            fresh_s=st(byseed[(name,'771337')],'总分')[0]
+            fresh_p=st(byseed[(name,'771337')],'技能点')[0]
+            out.append((s[0],name,s,p,old,fresh_s,fresh_p))
+          for _,name,s,p,old,fs,fp in sorted(out,reverse=True):
+            print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{old:.1f}|{fs:.1f}|{fp:.1f}|')
+          print('\n选择要求：合并均值领先，并且在新样本中不反向落后 PT28。')
+          PY
+          cat 第三年PT下界双样本报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三年PT下界双样本报告
+          path: 第三年PT下界双样本报告.md
+          retention-days: 30

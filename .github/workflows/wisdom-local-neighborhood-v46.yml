@@ -1,0 +1,109 @@
+name: 3速1耐1智局部邻域复赛
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/wisdom-local-neighborhood-v46.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  screen:
+    name: ${{ matrix.variant.name }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        variant:
+          - {id: 综合增强基准, name: 综合增强基准｜让分200｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 15, reserve: 20, bond: 12, hint: 8}
+          - {id: 收紧长期结构160, name: 收紧长期结构｜让分160｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 160, window: 15, reserve: 20, bond: 12, hint: 8}
+          - {id: 收紧长期结构180, name: 收紧长期结构｜让分180｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 180, window: 15, reserve: 20, bond: 12, hint: 8}
+          - {id: 放宽长期结构220, name: 放宽长期结构｜让分220｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 220, window: 15, reserve: 20, bond: 12, hint: 8}
+          - {id: 对盘权重12, name: 降低吃面对盘｜让分200｜对盘12%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 12, reserve: 20, bond: 12, hint: 8}
+          - {id: 对盘权重18, name: 提高吃面对盘｜让分200｜对盘18%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 18, reserve: 20, bond: 12, hint: 8}
+          - {id: 属性预留40, name: 恢复属性预留｜让分200｜对盘15%｜预留40｜羁绊12｜提示8, sacrifice: 200, window: 15, reserve: 40, bond: 12, hint: 8}
+          - {id: 点卡价值10提示7, name: 温和前期点卡｜让分200｜对盘15%｜预留20｜羁绊10｜提示7, sacrifice: 200, window: 15, reserve: 20, bond: 10, hint: 7}
+          - {id: 点卡价值14提示10, name: 激进前期点卡｜让分200｜对盘15%｜预留20｜羁绊14｜提示10, sacrifice: 200, window: 15, reserve: 20, bond: 14, hint: 10}
+          - {id: 尾部保护, name: 尾部保护组合｜让分180｜对盘12%｜预留40｜羁绊10｜提示7, sacrifice: 180, window: 12, reserve: 40, bond: 10, hint: 7}
+          - {id: 均值进攻, name: 均值进攻组合｜让分220｜对盘18%｜预留20｜羁绊14｜提示10, sacrifice: 220, window: 18, reserve: 20, bond: 14, hint: 10}
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      方案标识: ${{ matrix.variant.id }}
+      配卡索引: 97
+      属性缺口权重百分比: 75
+      属性溢出权重百分比: 100
+      第一年技能点权重: 32
+      第二年技能点权重: 32
+      第三年技能点权重: 32
+      长期结构最大让分: ${{ matrix.variant.sacrifice }}
+      吃面对盘权重百分比: ${{ matrix.variant.window }}
+      属性空间预留: ${{ matrix.variant.reserve }}
+      早期羁绊每点价值: ${{ matrix.variant.bond }}
+      诀窍提示价值: ${{ matrix.variant.hint }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: 注入专项参数入口
+        run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 3速1耐1智局部邻域}
+      - name: 运行100局同种子分片
+        run: cargo run -p umasim --bin exact_weight_confirm --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant.id }}-第${{ matrix.shard.human }}片
+          path: 专项矩阵结果.csv
+          retention-days: 30
+
+  summary:
+    name: 汇总局部邻域与尾部表现
+    needs: screen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-第*片', path: results}
+      - name: 生成均值和分位数报告
+        run: |
+          python3 - <<'PY' | tee 3速1耐1智局部邻域报告.md
+          import csv,glob,collections,statistics
+          data=collections.defaultdict(list)
+          for path in glob.glob('results/**/专项矩阵结果.csv',recursive=True):
+            for row in csv.DictReader(open(path)):
+              data[row['方案标识']].append(row)
+          if len(data)!=11 or any(len(rows)!=300 for rows in data.values()):
+            raise SystemExit({name:len(rows) for name,rows in data.items()})
+          def percentile(values,p):
+            values=sorted(values)
+            return values[round((len(values)-1)*p)]
+          print('# 3速1耐1智局部邻域复赛\n')
+          print('> 每组300局同种子。先看平均值，再以P10约束尾部；最低单局仅作风险告警。\n')
+          print('|方案|平均总分|总分P10|最低总分|平均技能点|技能点P10|最低技能点|相对正式总分|相对正式技能点|平均双达标|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---|')
+          ranked=[]
+          for name,rows in sorted(data.items()):
+            scores=[int(r['候选总分']) for r in rows]; pts=[int(r['候选技能点']) for r in rows]
+            mean_score=statistics.mean(scores); mean_pt=statistics.mean(pts)
+            score_p10=percentile(scores,.10); pt_p10=percentile(pts,.10)
+            delta_score=statistics.mean(int(r['候选总分'])-int(r['基线总分']) for r in rows)
+            delta_pt=statistics.mean(int(r['候选技能点'])-int(r['基线技能点']) for r in rows)
+            rank=mean_score+mean_pt*2+score_p10*.25+pt_p10*.5
+            ranked.append((rank,name,mean_score,mean_pt,score_p10,pt_p10))
+            print(f'|{name}|{mean_score:.1f}|{score_p10}|{min(scores)}|{mean_pt:.1f}|{pt_p10}|{min(pts)}|{delta_score:+.1f}|{delta_pt:+.1f}|{"是" if mean_score>=60000 and mean_pt>=8000 else "否"}|')
+          winner=max(ranked)
+          print(f'\n综合领先方案：**{winner[1]}**（平均总分{winner[2]:.1f}，平均技能点{winner[3]:.1f}，总分P10 {winner[4]}，技能点P10 {winner[5]}）')
+          PY
+          cat 3速1耐1智局部邻域报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3速1耐1智局部邻域报告
+          path: 3速1耐1智局部邻域报告.md
+          retention-days: 30

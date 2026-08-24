@@ -1,0 +1,95 @@
+name: Skill PT strategy boundary refinement v3
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/skill-pt-strategy-matrix-v3.yml]
+  workflow_dispatch:
+    inputs:
+      runs_per_shard:
+        description: Paired seeds per shard
+        required: false
+        default: "100"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      runs: ${{ steps.c.outputs.runs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        run: |
+          runs="${{ github.event.inputs.runs_per_shard }}"; [[ -n "$runs" ]] || runs=100
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+          echo "# v3：继续探索第二轮最优点所在的上边界" >> "$GITHUB_STEP_SUMMARY"
+          echo "固定 long/fail0；6 个 PT 权重 × 6 个保护上限 × 4 个分片，共 144 jobs、每个参数变体 400 组配对。" >> "$GITHUB_STEP_SUMMARY"
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check -p umasim --bin skill_pt_matrix --no-default-features
+
+  boundary:
+    name: pt${{ matrix.pt }}-sac${{ matrix.sac }}-long / shard ${{ matrix.shard }}
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        pt: [32, 36, 40, 48, 56, 64]
+        sac: [140, 200, 260, 320, 400, 520]
+        shard: [0, 1, 2, 3]
+    env:
+      VARIANT: pt${{ matrix.pt }}-sac${{ matrix.sac }}-long-fail0
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: ${{ needs.prep.outputs.runs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: skill-pt-matrix
+      - run: cargo run -p umasim --bin skill_pt_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v3-${{ env.VARIANT }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
+          if-no-files-found: error
+          retention-days: 7
+
+  final-summary:
+    if: always()
+    needs: [prep, boundary]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: v3-*
+          path: matrix-results
+      - name: Generate and show persistent report
+        env:
+          REPORT_PATH: benchmark-results/skill-pt-matrix-v3-${{ github.run_id }}.md
+        run: |
+          python3 scripts/summarize_skill_pt_matrix.py
+          cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit report to experiment branch
+        if: success()
+        env:
+          REPORT_PATH: benchmark-results/skill-pt-matrix-v3-${{ github.run_id }}.md
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add "$REPORT_PATH"
+          git commit -m "bench: publish skill PT boundary v3 run ${{ github.run_id }}"
+          git push origin HEAD:workbench/skill-pt-matrix-distill

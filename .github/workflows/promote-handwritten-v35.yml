@@ -1,0 +1,38 @@
+name: Promote handwritten policy v35 (deadline0)
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  promote-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/skill-pt-matrix-distill
+          fetch-depth: 0
+      - name: Apply evidence-based preset update
+        run: python3 scripts/ramen/promote_deadline0_v35.py
+      - uses: dtolnay/rust-toolchain@nightly
+        with: {components: rustfmt}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: handwritten-v35}
+      - name: Format with nightly
+        run: cargo +nightly fmt --all
+      - name: Core tests
+        run: cargo test -p umasim --lib --no-default-features
+      - name: Workspace check
+        run: cargo check --workspace
+      - name: Verify focused change
+        run: |
+          grep -q 'local.deadline_urgency_scale = 0.0;' crates/umasim/src/trainer/local_ramen_trainer.rs
+          git diff --check
+      - name: Commit v35 preset
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'feat(ramen): promote deadline-free handwritten preset v35'
+          git pull --rebase origin workbench/skill-pt-matrix-distill
+          git push origin HEAD:workbench/skill-pt-matrix-distill

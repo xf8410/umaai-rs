@@ -315,11 +315,9 @@ fn main() -> Result<()> {
         // 打印卡组信息（含卡名）
         let cards_desc = deck
             .iter()
-            .map(|id| {
-                match data.get_card(id / 10) {
-                    Ok(card) => format!("{} {}", id, card.card_name),
-                    Err(_) => id.to_string()
-                }
+            .map(|id| match data.get_card(id / 10) {
+                Ok(card) => format!("{} {}", id, card.card_name),
+                Err(_) => id.to_string()
             })
             .collect::<Vec<_>>()
             .join(", ");
@@ -384,10 +382,7 @@ fn main() -> Result<()> {
             rmj_mean,
             free_race_rate(&outcomes) * 100.0,
         );
-        all_results.push(BuildResults {
-            name: build.name(),
-            outcomes
-        });
+        all_results.push(BuildResults { name: build.name(), outcomes });
     }
 
     // ===== 落盘结果 CSV（合并单文件，build 列为第一列）=====

@@ -14,9 +14,10 @@ use anyhow::Result;
 use rand::rngs::StdRng;
 
 use crate::game::{
-    Game, Trainer,
+    Game,
+    Trainer,
     onsen::{OnsenTurnStage, game::OnsenGame},
-    ramen::{RamenStage, RamenGame}
+    ramen::{RamenGame, RamenStage}
 };
 
 /// 一次 rollout 的两种终局评分口径
@@ -123,13 +124,14 @@ impl FlatSearchGame for OnsenGame {
 }
 
 impl FlatSearchGame for RamenGame {
-    type RolloutTrainer = crate::trainer::RamenHandwrittenTrainer;
+    type RolloutTrainer = crate::trainer::RecommendedRamenTrainer;
 
     /// 拉面暂无 leaf 估值器，Phase 1 只允许跑到终局
     const SUPPORTS_TRUNCATED_LEAF: bool = false;
 
     /// rollout 专用实例：关闭分解文本采集，避免 24 线程争一把 `Mutex`
     fn default_rollout_trainer() -> Self::RolloutTrainer {
+        // MERGE NOTE: 暂时保持RamenHandwrittenTrainer, 等手写逻辑确认后再使用RamenRecommendedTrainer
         crate::trainer::RamenHandwrittenTrainer::for_rollout()
     }
 

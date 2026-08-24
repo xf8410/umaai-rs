@@ -1,0 +1,76 @@
+name: 第三年候选独立种子确认
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/y3-independent-confirm-v50.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  confirm:
+    name: ${{ matrix.variant }}｜独立种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [对盘12, PT28对盘12, PT30对盘12]
+        seed: [440021, 880043]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三年独立确认}
+      - run: cargo run -p umasim --bin y3_narrow_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 第三年窄邻域.csv
+          retention-days: 30
+  summary:
+    name: 汇总独立确认
+    needs: confirm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三年独立种子确认报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/第三年窄邻域.csv',recursive=True):
+            for r in csv.DictReader(open(p)): g[r['方案']].append(r)
+          expected={'对盘12','PT28对盘12','PT30对盘12'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()): raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows); return statistics.mean(x),x[59],x[0]
+          print('# 第三年候选独立种子确认\n')
+          print('> 两组从未参与选参的基础种子，每候选各300局，共600局。\n')
+          print('|方案|平均总分|总分P10|最低总分|平均PT|PT P10|最低PT|')
+          print('|---|---:|---:|---:|---:|---:|---:|')
+          out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分'); p=st(rows,'技能点'); out.append((s[0],p[0],name,s,p))
+          for _,_,name,s,p in sorted(out,reverse=True):
+            print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|')
+          base=next(x for x in out if x[2]=='对盘12')
+          print('\n## 相对PT32/对盘12基准\n')
+          for x in sorted(out,reverse=True):
+            if x[2]!='对盘12': print(f'- {x[2]}：平均总分 {x[3][0]-base[3][0]:+.1f}，平均PT {x[4][0]-base[4][0]:+.1f}，总分P10 {x[3][1]-base[3][1]:+.0f}，PT P10 {x[4][1]-base[4][1]:+.0f}')
+          PY
+          cat 第三年独立种子确认报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三年独立种子确认报告
+          path: 第三年独立种子确认报告.md
+          retention-days: 30

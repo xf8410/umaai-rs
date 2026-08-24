@@ -1,0 +1,146 @@
+name: 3速1耐1智专项优化
+
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths:
+      - '.github/workflows/exact-recommended-weight-confirm.yml'
+      - 'scripts/ramen/add_exact_recommended_weight_override.py'
+      - 'crates/umasim/tools/data_collection/exact_weight_confirm.rs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  neutral:
+    name: 3速1耐1智｜正式参数必须逐局一致
+    runs-on: ubuntu-latest
+    env:
+      方案标识: 正式参数一致性检查
+      配卡索引: 97
+      属性缺口权重百分比: 0
+      属性溢出权重百分比: 0
+      第一年技能点权重: 16
+      第二年技能点权重: 64
+      第三年技能点权重: 64
+      长期结构最大让分: 140
+      吃面对盘权重百分比: 10
+      属性空间预留: 40
+      早期羁绊每点价值: 8
+      诀窍提示价值: 6
+      分片序号: 0
+      每分片局数: 300
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 3速1耐1智专项优化}
+      - run: cargo check -p umasim --bin exact_weight_confirm --features experiment-tools --no-default-features
+      - run: cargo run -p umasim --bin exact_weight_confirm --release --features experiment-tools --no-default-features
+      - name: 检查300局完全一致
+        run: |
+          python3 - <<'PY'
+          import csv
+          rows=list(csv.DictReader(open('专项矩阵结果.csv')))
+          assert len(rows)==300
+          bad=[r for r in rows if r['完全一致']!='true']
+          if bad: raise SystemExit(f'正式参数有{len(bad)}局不一致')
+          print('3速1耐1智：300/300局完全一致')
+          PY
+
+  optimize:
+    name: ${{ matrix.display_name }}｜第${{ matrix.shard_human }}片
+    needs: neutral
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        include:
+          # 共同参数：3速1耐1智；缺口75%；溢出100%；技能点32/32/32。
+          - {id: 当前最佳, display_name: 当前最佳｜让分140｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 40, bond: 8, hint: 6, shard: 0, shard_human: 1}
+          - {id: 当前最佳, display_name: 当前最佳｜让分140｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 40, bond: 8, hint: 6, shard: 1, shard_human: 2}
+          - {id: 当前最佳, display_name: 当前最佳｜让分140｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 40, bond: 8, hint: 6, shard: 2, shard_human: 3}
+          - {id: 放宽长期结构, display_name: 放宽长期结构｜让分200｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 200, window: 10, reserve: 40, bond: 8, hint: 6, shard: 0, shard_human: 1}
+          - {id: 放宽长期结构, display_name: 放宽长期结构｜让分200｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 200, window: 10, reserve: 40, bond: 8, hint: 6, shard: 1, shard_human: 2}
+          - {id: 放宽长期结构, display_name: 放宽长期结构｜让分200｜对盘10%｜预留40｜羁绊8｜提示6, sacrifice: 200, window: 10, reserve: 40, bond: 8, hint: 6, shard: 2, shard_human: 3}
+          - {id: 强化吃面对盘, display_name: 强化吃面对盘｜让分140｜对盘15%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 15, reserve: 40, bond: 8, hint: 6, shard: 0, shard_human: 1}
+          - {id: 强化吃面对盘, display_name: 强化吃面对盘｜让分140｜对盘15%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 15, reserve: 40, bond: 8, hint: 6, shard: 1, shard_human: 2}
+          - {id: 强化吃面对盘, display_name: 强化吃面对盘｜让分140｜对盘15%｜预留40｜羁绊8｜提示6, sacrifice: 140, window: 15, reserve: 40, bond: 8, hint: 6, shard: 2, shard_human: 3}
+          - {id: 降低属性预留, display_name: 降低属性预留｜让分140｜对盘10%｜预留20｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 20, bond: 8, hint: 6, shard: 0, shard_human: 1}
+          - {id: 降低属性预留, display_name: 降低属性预留｜让分140｜对盘10%｜预留20｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 20, bond: 8, hint: 6, shard: 1, shard_human: 2}
+          - {id: 降低属性预留, display_name: 降低属性预留｜让分140｜对盘10%｜预留20｜羁绊8｜提示6, sacrifice: 140, window: 10, reserve: 20, bond: 8, hint: 6, shard: 2, shard_human: 3}
+          - {id: 强化前期点卡, display_name: 强化前期点卡｜让分180｜对盘10%｜预留40｜羁绊12｜提示8, sacrifice: 180, window: 10, reserve: 40, bond: 12, hint: 8, shard: 0, shard_human: 1}
+          - {id: 强化前期点卡, display_name: 强化前期点卡｜让分180｜对盘10%｜预留40｜羁绊12｜提示8, sacrifice: 180, window: 10, reserve: 40, bond: 12, hint: 8, shard: 1, shard_human: 2}
+          - {id: 强化前期点卡, display_name: 强化前期点卡｜让分180｜对盘10%｜预留40｜羁绊12｜提示8, sacrifice: 180, window: 10, reserve: 40, bond: 12, hint: 8, shard: 2, shard_human: 3}
+          - {id: 综合增强, display_name: 综合增强｜让分200｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 15, reserve: 20, bond: 12, hint: 8, shard: 0, shard_human: 1}
+          - {id: 综合增强, display_name: 综合增强｜让分200｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 15, reserve: 20, bond: 12, hint: 8, shard: 1, shard_human: 2}
+          - {id: 综合增强, display_name: 综合增强｜让分200｜对盘15%｜预留20｜羁绊12｜提示8, sacrifice: 200, window: 15, reserve: 20, bond: 12, hint: 8, shard: 2, shard_human: 3}
+    env:
+      方案标识: ${{ matrix.id }}
+      配卡索引: 97
+      属性缺口权重百分比: 75
+      属性溢出权重百分比: 100
+      第一年技能点权重: 32
+      第二年技能点权重: 32
+      第三年技能点权重: 32
+      长期结构最大让分: ${{ matrix.sacrifice }}
+      吃面对盘权重百分比: ${{ matrix.window }}
+      属性空间预留: ${{ matrix.reserve }}
+      早期羁绊每点价值: ${{ matrix.bond }}
+      诀窍提示价值: ${{ matrix.hint }}
+      分片序号: ${{ matrix.shard }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/ramen/add_exact_recommended_weight_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 3速1耐1智专项优化}
+      - run: cargo run -p umasim --bin exact_weight_confirm --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.id }}-第${{ matrix.shard_human }}片
+          path: 专项矩阵结果.csv
+          retention-days: 30
+
+  summary:
+    name: 汇总3速1耐1智专项优化
+    needs: optimize
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-第*片', path: results}
+      - name: 生成中文报告
+        run: |
+          python3 - <<'PY' | tee 3速1耐1智专项优化报告.md
+          import csv,glob,collections,statistics
+          data=collections.defaultdict(list)
+          for path in glob.glob('results/**/专项矩阵结果.csv',recursive=True):
+            for row in csv.DictReader(open(path)):
+              data[row['方案标识']].append(row)
+          if len(data)!=6 or any(len(rows)!=300 for rows in data.values()):
+            raise SystemExit({name:len(rows) for name,rows in data.items()})
+          print('# 3速1耐1智专项优化\n')
+          print('> 每组300局同种子；完整保留正式手写逻辑、吃面事务门、体力硬门和友人0/2/5节奏。\n')
+          print('|方案|平均总分|最低总分|平均技能点|最低技能点|总分变化|技能点变化|平均双达标|')
+          print('|---|---:|---:|---:|---:|---:|---:|---|')
+          ranked=[]
+          for name,rows in data.items():
+            scores=[int(r['候选总分']) for r in rows]; pts=[int(r['候选技能点']) for r in rows]
+            ds=statistics.mean(int(r['候选总分'])-int(r['基线总分']) for r in rows)
+            dp=statistics.mean(int(r['候选技能点'])-int(r['基线技能点']) for r in rows)
+            ms=statistics.mean(scores); mp=statistics.mean(pts)
+            ranked.append((ms+mp*2,name))
+            print(f'|{name}|{ms:.1f}|{min(scores)}|{mp:.1f}|{min(pts)}|{ds:+.1f}|{dp:+.1f}|{"是" if ms>=60000 and mp>=8000 else "否"}|')
+          print(f'\n综合领先方案：**{max(ranked)[1]}**')
+          PY
+          cat 3速1耐1智专项优化报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 3速1耐1智专项优化报告
+          path: 3速1耐1智专项优化报告.md
+          retention-days: 30

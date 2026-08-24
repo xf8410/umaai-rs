@@ -67,7 +67,7 @@ pub enum StreamTag {
     /// 事件流（回合开始事件链）
     Event,
     /// 探测流（MCTS 预留）
-    Probe,
+    Probe
 }
 
 impl StreamTag {
@@ -77,7 +77,7 @@ impl StreamTag {
             Self::TurnFixed => 0,
             Self::Strategy => STRATEGY_TAG,
             Self::Event => EVENT_TAG,
-            Self::Probe => PROBE_TAG,
+            Self::Probe => PROBE_TAG
         }
     }
 }
@@ -95,7 +95,7 @@ pub struct SplitmixRng {
     /// 流主种子（本流随机序列的确定性来源）
     master: u64,
     /// 本回合内已消费次数（第 N 次随机 = N）
-    counter: u64,
+    counter: u64
 }
 
 impl SplitmixRng {
@@ -316,7 +316,10 @@ mod tests {
         let after_skip = skip.next_u64();
         println!("n=0: {first:#018x}");
         println!("n=1: {second:#018x}");
-        println!("消费1次后第2次: {after_skip:#018x} == 直接第2次: {}", second == after_skip);
+        println!(
+            "消费1次后第2次: {after_skip:#018x} == 直接第2次: {}",
+            second == after_skip
+        );
     }
 
     /// 层1：Clone 值语义——克隆后各自推进互不影响（MCTS 隔离原子验证）
@@ -367,8 +370,16 @@ mod tests {
         let mut strategy = StrategyRng::new(42);
         let f0 = fixed.next_u64();
         let s0 = strategy.next_u64();
-        println!("回合固定流[0]: {f0:#018x} (master={:#x} counter={})", fixed.master(), fixed.counter() - 1);
-        println!("策略流[0]: {s0:#018x} (master={:#x} counter={})", strategy.master(), strategy.counter() - 1);
+        println!(
+            "回合固定流[0]: {f0:#018x} (master={:#x} counter={})",
+            fixed.master(),
+            fixed.counter() - 1
+        );
+        println!(
+            "策略流[0]: {s0:#018x} (master={:#x} counter={})",
+            strategy.master(),
+            strategy.counter() - 1
+        );
         fixed.reset(7);
         let f1 = fixed.next_u64();
         println!("固定流 reset(7) 后[0]: {f1:#018x} (counter={})", fixed.counter() - 1);

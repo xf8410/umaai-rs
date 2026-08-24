@@ -1,0 +1,85 @@
+name: P0第5步年末保线严格复验
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/year-end-craft-reserve-confirm-v65.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  matrix:
+    name: ${{ matrix.variant }}｜种子${{ matrix.seed }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 18
+      matrix:
+        variant: [保线关, W3P160, W5P160, W3硬保线, W5硬保线]
+        seed: [316227, 447213]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: ${{ matrix.seed }}
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 scripts/ramen/add_year_end_craft_reserve_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "year_end_craft_reserve_matrix"
+          path = "tools/data_collection/year_end_craft_reserve_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: P0第5步年末保线严格复验}
+      - run: cargo run -p umasim --bin year_end_craft_reserve_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-种子${{ matrix.seed }}-第${{ matrix.shard.human }}片
+          path: 年末保线矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总P0第5步严格复验
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-种子*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee P0第5步年末保线严格复验报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list);bs=collections.defaultdict(list)
+          for p in glob.glob('results/**/年末保线矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):g[r['方案']].append(r);bs[(r['方案'],r['基础种子'])].append(r)
+          expected={'保线关','W3P160','W5P160','W3硬保线','W5硬保线'}
+          if set(g)!=expected or any(len(v)!=600 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):x=sorted(float(r[key]) for r in rows);return statistics.mean(x),x[59],x[0]
+          base=st(g['保线关'],'总分')[0];print('# P0第5步：年末保线严格复验\n');print('> 两组新种子；硬保线用百万惩罚验证目标状态是否实际可达。\n')
+          print('|方案|平均总分|分P10|最低分|平均PT|PT P10|RMJ成功年数|种子A|种子B|相对关闭|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|');out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分');p=st(rows,'技能点');rmj=statistics.mean(float(r['RMJ成功年数']) for r in rows);a=st(bs[(name,'316227')],'总分')[0];b=st(bs[(name,'447213')],'总分')[0];out.append((s[0],name,s,p,rmj,a,b))
+          for _,name,s,p,rmj,a,b in sorted(out,reverse=True):print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{rmj:.3f}|{a:.1f}|{b:.1f}|{s[0]-base:+.1f}|')
+          print('\n若硬保线仍与关闭同轨，可判定当前H0基线从未命中“未过线且吃掉最后配方”的坏状态，第5步不新增规则。')
+          PY
+          cat P0第5步年末保线严格复验报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: P0第5步年末保线严格复验报告
+          path: P0第5步年末保线严格复验报告.md
+          retention-days: 30

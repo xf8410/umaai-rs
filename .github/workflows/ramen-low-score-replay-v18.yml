@@ -1,0 +1,42 @@
+name: Detailed ramen low-score replay v18
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: [.github/workflows/ramen-low-score-replay-v18.yml]
+  workflow_dispatch:
+    inputs:
+      run_idx:
+        description: Reproducible run_idx from low-score report
+        required: true
+        default: '131'
+permissions: {contents: write}
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python3 scripts/add_detailed_low_score_replay_v18.py
+      - run: cargo fmt -- crates/umasim/src/bin/ramen_low_score_diagnostic.rs
+      - run: cargo check -p umasim --bin ramen_low_score_diagnostic --no-default-features --features diag
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add crates/umasim/src/bin/ramen_low_score_diagnostic.rs
+          git commit -m 'bench: support detailed low-score replay'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
+  replay:
+    needs: patch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DIAG_REPLAY_IDX: ${{ inputs.run_idx || '131' }}
+      RUST_LOG: info
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-low-score-replay-v18}
+      - name: Full in-game replay (expand this step)
+        run: cargo run -p umasim --bin ramen_low_score_diagnostic --release --no-default-features --features diag

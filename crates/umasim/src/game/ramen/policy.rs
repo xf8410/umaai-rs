@@ -15,7 +15,10 @@
 
 use anyhow::Result;
 
-use super::rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options};
+use super::{
+    effects::calc_ramen_training_effect,
+    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options}
+};
 use crate::{
     game::{
         ramen::{Operation, RamenAction, RamenGame},
@@ -44,6 +47,8 @@ pub struct RamenPolicyConfig {
     pub pt_rate: f32,
     /// 训练失败惩罚（期望值中被扣减的固定分）
     pub failure_penalty: f32,
+    /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
+    pub effective_ramen_failure: bool,
     /// 彩圈（友情训练）加成：每个彩圈附加分
     pub shining_bonus: f32,
     /// 训练体力消耗的折算（负值即当前消耗的体力价值；纳入后训练会自减肥力成本）
@@ -120,6 +125,7 @@ impl Default for RamenPolicyConfig {
             status_rate: 1.0,
             pt_rate: 8.0,
             failure_penalty: 60.0,
+            effective_ramen_failure: true,
             shining_bonus: 60.0,
             train_vital_value: 1.8,
             rest_base: 20.0,
@@ -215,14 +221,11 @@ impl RamenPolicy {
 
         // 守门 0：自选比赛达标（优先于一切——不达标直接育成失败）
         if let Some(idx) = self.free_race_gate(game, actions) {
-            return Ok((
-                idx,
-                vec![RamenPolicyOutput {
-                    score: f32::MAX,
-                    reason: format!("守门: {}", self.free_race_gate_reason(game)),
-                    ..Default::default()
-                }],
-            ));
+            return Ok((idx, vec![RamenPolicyOutput {
+                score: f32::MAX,
+                reason: format!("守门: {}", self.free_race_gate_reason(game)),
+                ..Default::default()
+            }]));
         }
         // 守门 1：生病 → 治病（夏合宿无治病候选，休息自动治病）
         if uma.flags.ill || uma.flags.bad_trainer {
@@ -364,7 +367,9 @@ impl RamenPolicy {
     }
 
     /// 事件选项打分（返回各候选评分分解）
-    pub fn decide_event(&self, game: &RamenGame, choices: &[Vec<EventChoice>]) -> Result<(usize, Vec<RamenPolicyOutput>)> {
+    pub fn decide_event(
+        &self, game: &RamenGame, choices: &[Vec<EventChoice>]
+    ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if choices.is_empty() {
             anyhow::bail!("事件候选为空");
         }
@@ -436,15 +441,11 @@ impl RamenPolicy {
         if need == 0 {
             format!("自选比赛已达标({grade_note}), 区间剩余回合不再干预")
         } else if remain < need {
-            format!(
-                "自选比赛缺{need}场({grade_note})但只剩{remain}个有效回合, 打完也不够(摆烂), 不再强制"
-            )
+            format!("自选比赛缺{need}场({grade_note})但只剩{remain}个有效回合, 打完也不够(摆烂), 不再强制")
         } else if !race_turn_qualified(game.turn(), free) {
             format!("自选比赛缺{need}场({grade_note}), 本回合等级不满足, 不白打")
         } else {
-            format!(
-                "自选比赛缺{need}场/剩{remain}回合({grade_note}), 剩余回合不足需强制补赛",
-            )
+            format!("自选比赛缺{need}场/剩{remain}回合({grade_note}), 剩余回合不足需强制补赛",)
         }
     }
 
@@ -482,7 +483,15 @@ impl RamenPolicy {
                 let train = t as usize;
                 let buffs = game.calc_training_buff(train)?;
                 let value = game.calc_training_value(&buffs, train)?;
-                let fail_rate = game.calc_training_failure_rate(&buffs, train);
+                let base_fail_rate = game.calc_training_failure_rate(&buffs, train);
+                let ramen_effect = calc_ramen_training_effect(game, train, game.shining_count(train) > 0);
+                // fail_rate_drop is a relative percentage reduction shared by every training
+                // while eating: Y1 30%, Y2 50%, Y3 100%.
+                let fail_rate = if self.config.effective_ramen_failure {
+                    (base_fail_rate * (100.0 - ramen_effect.fail_rate_drop as f32) / 100.0).clamp(0.0, 100.0)
+                } else {
+                    base_fail_rate
+                };
                 // 属性增益（five_status_final_score 差分，与 calc_score 一致）
                 let mut attr_gain = 0.0;
                 for i in 0..5 {
@@ -640,6 +649,10 @@ impl RamenPolicy {
         val += c.value.status_pt[5] as f32 * self.config.pt_rate;
         val += c.value.vital as f32 * self.config.event_vital_weight;
         val += c.value.motivation as f32 * self.config.event_motivation_weight;
+        // 旧简化器漏掉了 Hint、羁绊和永久最大体力，导致友人/支援事件被系统性低估。
+        val += c.value.hint_level as f32 * global!(GAMECONSTANTS).hint_pt_rate * self.config.pt_rate;
+        val += c.value.friendship as f32 * 5.0;
+        val += c.value.max_vital as f32 * self.config.event_vital_weight * 2.0;
         // flags：ill/bad_trainer 是坏状态，获得惩罚、移除奖励
         if let Some(flags) = &c.add_flags {
             if flags.ill || flags.bad_trainer {

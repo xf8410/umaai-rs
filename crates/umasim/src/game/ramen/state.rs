@@ -385,7 +385,10 @@ impl RamenGame {
             Some(master) => {
                 let turn = self.base.turn as u64;
                 self.turn_fixed = Some(TurnFixedRng::new(derive_seed(master, &[turn])));
-                self.strategy = Some(StrategyRng::new(derive_seed(master, &[turn, StreamTag::Strategy.tag()])));
+                self.strategy = Some(StrategyRng::new(derive_seed(master, &[
+                    turn,
+                    StreamTag::Strategy.tag()
+                ])));
                 self.event = Some(EventRng::new(derive_seed(master, &[turn, StreamTag::Event.tag()])));
             }
             None => {

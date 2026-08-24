@@ -224,9 +224,7 @@ impl<A> Default for SearchOutput<A> {
 
 impl<A> SearchOutput<A> {
     /// 创建搜索输出
-    pub fn new(
-        actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64
-    ) -> Self {
+    pub fn new(actions: Vec<A>, action_results: Vec<(ActionResult, ActionResult)>, radical_factor: f64) -> Self {
         // 找到加权平均分最高的动作
         let best_action_idx = action_results
             .iter()
@@ -280,7 +278,6 @@ impl<A> SearchOutput<A> {
     pub fn best_result(&self) -> &ActionResult {
         &self.action_results[self.best_action_idx].0
     }
-
 }
 
 impl SearchOutput<OnsenAction> {

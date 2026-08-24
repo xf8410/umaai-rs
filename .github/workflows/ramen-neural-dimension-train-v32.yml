@@ -1,0 +1,56 @@
+name: Ramen neural dimension training matrix v32
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ramen-neural-dimension-v32
+  cancel-in-progress: false
+jobs:
+  data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {shard: 0, start: 1000}
+          - {shard: 1, start: 1150}
+          - {shard: 2, start: 1300}
+          - {shard: 3, start: 1450}
+          - {shard: 4, start: 1600}
+    env:
+      START: ${{ matrix.start }}
+      COUNT: 150
+      ROLLOUTS: 32
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with: {components: rustfmt}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: ramen-neural-v32}
+      - run: cargo +nightly fmt --all -- --check
+      - run: cargo run -p umasim --bin ramen_feature_dataset --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-neural-v32-${{ matrix.shard }}
+          path: ramen-feature-dataset.jsonl
+          retention-days: 7
+  train:
+    needs: data
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: {pattern: ramen-neural-v32-*, path: data}
+      - run: python3 -m pip install --user numpy
+      - name: Train input-dimension and hidden-width matrix
+        run: python3 scripts/ramen/train_ramen_dimension_matrix_v32.py data | tee ramen-neural-dimension-training-v32.md
+      - run: cat ramen-neural-dimension-training-v32.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-neural-dimension-training-v32
+          path: ramen-neural-dimension-training-v32.md
+          retention-days: 14

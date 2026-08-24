@@ -1,0 +1,32 @@
+name: Verify upstream experiment layout
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.gitignore'
+      - 'crates/umasim/Cargo.toml'
+      - 'crates/umasim/tools/**'
+      - 'scripts/**'
+      - '.trae/**'
+permissions:
+  contents: read
+jobs:
+  verify-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify generated results are excluded
+        run: |
+          grep -qx '/benchmark-results/' .gitignore
+          test ! -d benchmark-results
+      - name: Verify data collection tools
+        run: |
+          test -f crates/umasim/tools/data_collection/ramen_feature_dataset.rs
+          test -f crates/umasim/tools/data_collection/skill_pt_phase_matrix.rs
+          test ! -f crates/umasim/src/bin/ramen_feature_dataset.rs
+      - name: Verify scripts and documents
+        run: |
+          test -f scripts/ramen/train_ramen_stage_heads_v34.py
+          test -f .trae/documents/legacy-ai-gap-audit.md
+          test -f .trae/exports/ramen-strategy-snapshot-v29.txt
+          ! find scripts -maxdepth 1 -type f -name '*.py' | grep -q .

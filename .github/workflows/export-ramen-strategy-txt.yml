@@ -1,0 +1,32 @@
+name: Export ramen strategy TXT
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths:
+      - .github/workflows/export-ramen-strategy-txt.yml
+      - scripts/export_ramen_strategy_txt.py
+  workflow_dispatch:
+permissions: {contents: write}
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: workbench/skill-pt-matrix-distill}
+      - run: python3 scripts/export_ramen_strategy_txt.py
+      - name: Verify snapshot is isolated from production source
+        run: |
+          test -s exports/ramen-strategy-snapshot-v29.txt
+          test "$(git diff --name-only | grep -v '^exports/' | wc -l)" -eq 0
+      - run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -f exports/ramen-strategy-snapshot-v29.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'docs: publish ramen strategy TXT snapshot'
+          git push origin HEAD:workbench/skill-pt-matrix-distill
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-strategy-snapshot-v29-txt
+          path: exports/ramen-strategy-snapshot-v29.txt
+          retention-days: 30

@@ -867,8 +867,9 @@ impl OverrideGameConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use anyhow::ensure;
+
+    use super::*;
 
     /// 构造全 None 的覆盖配置（= 不覆盖任何字段）。
     fn empty_override() -> OverrideConfig {

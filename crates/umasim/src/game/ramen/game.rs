@@ -7,9 +7,9 @@
 //! - `Game::next()`：负责跨阶段流转（AfterTrain → NextTurn → Begin/特殊阶段）
 
 use anyhow::{Result, anyhow};
+use colored::Colorize;
 #[cfg(feature = "cli")]
 use comfy_table::{ColumnConstraint, Table, Width};
-use colored::Colorize;
 use rand::{Rng, SeedableRng, prelude::IndexedRandom, rngs::StdRng};
 use rand_distr::{Distribution, weighted::WeightedIndex};
 
@@ -21,7 +21,6 @@ use super::{
     RamenStage,
     effects::calc_ramen_training_effect,
     events::assign_train_feeling_type,
-    policy::fixed_super_ramen_selection,
     rules::{self, get_turn_special_feeling}
 };
 use crate::{
@@ -244,7 +243,7 @@ impl Game for RamenGame {
 
     fn list_actions(&self) -> Result<Vec<Self::Action>> {
         // race_turn 短路：仅"比赛"一个动作，跳过 RamenSelect/SpecialSelect
-        if self.is_race_turn() {
+        if self.is_race_turn() && self.stage == RamenStage::Train {
             return Ok(vec![RamenAction::no_ramen(Operation::Race)]);
         }
 
@@ -1174,12 +1173,12 @@ impl RamenGame {
         // 友人解锁判定（触发条件依赖 friend.out_state——是否点击友人）
         let unlock_event = match ev.as_mut() {
             Some(s) => self.try_friend_unlock(s),
-            None => self.try_friend_unlock(rng),
+            None => self.try_friend_unlock(rng)
         };
         // 事件生成（随机部分；Fixed 剧本事件无随机，天然逐位一致）
         let mut events = match ev.as_mut() {
             Some(s) => self.generate_events(s),
-            None => self.generate_events(rng),
+            None => self.generate_events(rng)
         };
         if unlock_event.is_some() {
             // 解锁触发时取代一般随机事件（与原语义一致）
@@ -1190,7 +1189,7 @@ impl RamenGame {
         for event in &events {
             match ev.as_mut() {
                 Some(s) => self.run_event_on(event, trainer, rng, s)?,
-                None => self.run_event(event, trainer, rng)?,
+                None => self.run_event(event, trainer, rng)?
             }
         }
         self.event = ev;
@@ -1271,7 +1270,7 @@ impl RamenGame {
                 let mut strat = self.strategy.take();
                 match strat.as_mut() {
                     Some(s) => super::action::RamenAction::distribute_super_ramen_clones(self, s)?,
-                    None => super::action::RamenAction::distribute_super_ramen_clones(self, rng)?,
+                    None => super::action::RamenAction::distribute_super_ramen_clones(self, rng)?
                 }
                 self.strategy = strat;
             }
@@ -1298,7 +1297,7 @@ impl RamenGame {
         let mut strat = self.strategy.take();
         let result = match strat.as_mut() {
             Some(s) => self.apply_action(action, s),
-            None => self.apply_action(action, rng),
+            None => self.apply_action(action, rng)
         };
         self.strategy = strat;
         result
@@ -1310,20 +1309,7 @@ impl RamenGame {
     /// 否则由 trainer 从候选面（不含/含至少一面）中选一个，apply 写 pending_ramen。
     fn run_ramen_select<T: Trainer<Self>>(&mut self, trainer: &T, rng: &mut StdRng) -> Result<()> {
         // race_turn 短路：直接执行比赛，stage 切到 AfterTrain
-        if self.is_race_turn() {
-            let actions = self.list_actions()?;
-            // actions 此时仅含 [no_ramen(Race)]，但 trainer 不必要再选；
-            // 直接应用比赛行为（与旧行为兼容，比赛无随机，走策略流无副作用）。
-            self.apply_action_with_strategy(&actions[0], rng)?;
-            // race_turn 不进入 SpecialSelect/Train，直接跳到 AfterTrain
-            self.stage = RamenStage::AfterTrain;
-            // 立即处理 AfterTrain 阶段遗留的 unresolved_events（如 race_career）
-            // 否则下次 next() 会跳过 run_after_train，直接到 NextTurn
-            self.run_after_train(trainer, rng)?;
-            self.stage = RamenStage::NextTurn;
-            return Ok(());
-        }
-
+        // 固定比赛回合仍先经过选面/隐藏风味阶段；Train 阶段只提供比赛动作。
         let actions = self.list_actions()?;
         let selection = trainer.select_action(self, &actions, rng)?;
         self.apply_action_with_strategy(&actions[selection], rng)?;
@@ -1375,11 +1361,18 @@ impl RamenGame {
         diag!("【事件】#{} {}", event.id, event.name);
         if event.player_select && event.choices.len() > 1 {
             for (index, choice) in event.choices.iter().enumerate() {
-                diag!("  选项 {}: {}", index + 1, crate::explain::Explain::event_choice(choice));
+                diag!(
+                    "  选项 {}: {}",
+                    index + 1,
+                    crate::explain::Explain::event_choice(choice)
+                );
             }
             let selection = trainer.select_event_choice(self, event, &event.choices, decision_rng)?;
             if selection >= event.choices.len() {
-                return Err(anyhow!("事件选项索引超出范围: selection={selection}, choices_len={}", event.choices.len()));
+                return Err(anyhow!(
+                    "事件选项索引超出范围: selection={selection}, choices_len={}",
+                    event.choices.len()
+                ));
             }
             diag!("  → 选择 选项 {}", selection + 1);
             self.apply_event(&event, selection, rule_rng)
@@ -1428,9 +1421,27 @@ impl RamenGame {
 
     /// SuperRamenSelect 阶段：超级拉面选择
     fn run_super_ramen_select(&mut self) -> Result<()> {
-        let _option = fixed_super_ramen_selection()?;
-        self.ramen.super_ramen = Some(1); // 选项二（索引 1）
-        diag!("超级拉面选择: 选项二");
+        let options = rules::get_super_ramen_clone_train_options()?;
+        let mut best = 0usize;
+        let mut best_value = f32::NEG_INFINITY;
+        for (idx, trains) in options.iter().enumerate() {
+            let mut value = 0.0;
+            for &t in trains {
+                if !(0..5).contains(&t) {
+                    continue;
+                }
+                let t = t as usize;
+                let gap = (self.uma.five_status_limit[t] - self.uma.five_status[t]).max(0) as f32;
+                let cards = self.deck.iter().filter(|c| c.card_type == t as i32).count() as f32;
+                value += gap.min(600.0) + cards * 120.0;
+            }
+            if value > best_value {
+                best_value = value;
+                best = idx;
+            }
+        }
+        self.ramen.super_ramen = Some(best);
+        diag!("超级拉面动态选择: 选项{} value={:.0}", best + 1, best_value);
         Ok(())
     }
 
@@ -1820,7 +1831,12 @@ impl RamenGame {
 
         let gauge_detail = format!("诀窍槽 A+{} B+{} C+{}", gauge_a, gauge_b, gauge_c);
         if effective_fail > 0.0 {
-            Ok(format!("{label} {} 失败率: {}% {}", value.explain(), effective_fail, gauge_detail))
+            Ok(format!(
+                "{label} {} 失败率: {}% {}",
+                value.explain(),
+                effective_fail,
+                gauge_detail
+            ))
         } else {
             Ok(format!("{label} {} {}", value.explain(), gauge_detail))
         }

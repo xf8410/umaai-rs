@@ -1,0 +1,114 @@
+name: 第三代精细小数随机权重矩阵
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/random-decimal-generation3-v62.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  search:
+    name: H${{ matrix.candidate }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        candidate: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+    env:
+      候选编号: H${{ matrix.candidate }}
+      基础种子: 424264
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 50
+    steps:
+      - uses: actions/checkout@v4
+      - name: 围绕G39和G9精细变异
+        env: {CID: '${{ matrix.candidate }}'}
+        run: |
+          python3 - <<'PY'
+          import os,random
+          i=int(os.environ['CID']);r=random.Random(20260825+i*169087)
+          keys=['Y1_PT','Y2_PT','Y3_PT','GAP','OVER','SAC','Y12_WINDOW','Y3_WINDOW','RESERVE','BOND','HINT','CONTINUITY']
+          g39=[31.0594,26.2536,4.3471,1.1311,1.3254,234.9200,.1148,.1999,5.2663,5.2657,11.2926,0.0]
+          g9 =[33.4652,34.1807,7.2000,.9949,1.3621,205.1797,.1955,.1284,27.3883,10.6501,5.4575,0.0]
+          # 第三代缩小扰动半径；续航严格消融为完全无差异，固定0，不浪费维度。
+          scales=[1.8,2.2,1.5,.075,.085,11.0,.022,.022,4.0,1.4,1.4,0.0]
+          lo=[24,20,1,.55,.75,165,.05,.06,1,2,2,0];hi=[40,40,14,1.35,1.6,265,.24,.24,36,16,15,0]
+          if i==0: vals=g39
+          elif i==32: vals=g9
+          elif i<32: vals=[x+r.gauss(0,s) for x,s in zip(g39,scales)]
+          elif i<64: vals=[x+r.gauss(0,s) for x,s in zip(g9,scales)]
+          else:
+            a=r.uniform(.15,.85);center=[a*x+(1-a)*y for x,y in zip(g39,g9)]
+            vals=[x+r.gauss(0,s*.75) for x,s in zip(center,scales)]
+          vals=[min(h,max(l,v)) for v,l,h in zip(vals,lo,hi)]
+          with open(os.environ['GITHUB_ENV'],'a') as f:
+            for k,v in zip(keys,vals):f.write(f'{k}={v:.4f}\n')
+          print('H'+str(i),dict(zip(keys,[round(v,4) for v in vals])))
+          PY
+      - name: 注入联合参数入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "random_decimal_matrix"
+          path = "tools/data_collection/random_decimal_matrix.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 第三代精细小数矩阵}
+      - run: cargo run -p umasim --bin random_decimal_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: H${{ matrix.candidate }}-第${{ matrix.shard.human }}片
+          path: 随机小数权重矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总第三代精细小数矩阵
+    needs: search
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'H*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 第三代精细小数权重矩阵报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/随机小数权重矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)):g[r['候选']].append(r)
+          if len(g)!=96 or any(len(v)!=100 for v in g.values()):raise SystemExit({k:len(v) for k,v in g.items()})
+          def q(x,p):x=sorted(x);return x[max(0,int(len(x)*p)-1)]
+          out=[]
+          for name,rows in g.items():
+            s=[float(r['总分']) for r in rows];pt=[float(r['技能点']) for r in rows]
+            # 均值主榜，同时提供稳健分，避免只追PT塌陷的极端点
+            mean=statistics.mean(s);p10=q(s,.1);pm=statistics.mean(pt);pp10=q(pt,.1)
+            robust=mean+.08*(p10-54000)+.04*(pm-7350)
+            out.append((mean,robust,p10,pm,pp10,name,rows[0]))
+          out.sort(reverse=True)
+          print('# 第三代精细小数权重矩阵\n')
+          print('> 96组：G39邻域32组、G9邻域32组、交叉邻域32组；每组100局。H0=G39(续航0)，H32=G9(续航0)。\n')
+          print('|排名|候选|均分|稳健分|分P10|平均PT|PT P10|Y1PT|Y2PT|Y3PT|缺口|溢出|让分|Y12对盘|Y3对盘|预留|羁绊|Hint|')
+          print('|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          keys=['Y1PT','Y2PT','Y3PT','缺口','溢出','让分','前两年对盘','第三年对盘','预留','羁绊','Hint']
+          for rank,(mean,rob,p10,pm,pp10,name,r) in enumerate(out[:24],1):print(f'|{rank}|{name}|{mean:.1f}|{rob:.1f}|{p10:.0f}|{pm:.1f}|{pp10:.0f}|'+ '|'.join(r[k] for k in keys)+'|')
+          print('\n复验池：均值前6、稳健分前4、P10前2，与H0/H32锚点去重后使用全新种子复验。')
+          PY
+          cat 第三代精细小数权重矩阵报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 第三代精细小数权重矩阵报告
+          path: 第三代精细小数权重矩阵报告.md
+          retention-days: 30

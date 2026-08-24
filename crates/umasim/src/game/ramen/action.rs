@@ -1421,15 +1421,16 @@ mod tests {
     /// = 基础分配 + (1 + 支援卡数 + floor(NPC数/2))，与 game.rs 显示层一致。
     #[test]
     fn test_train_gauge_uses_actual_npc_count() -> anyhow::Result<()> {
+        use rand::{SeedableRng, rngs::StdRng};
+
         use crate::{
             game::{
                 ramen::{FeelingType, RamenGame, RamenStage, rules::calc_gauge_base_distribution},
                 traits::Game
             },
-            gamedata::{init_global},
+            gamedata::init_global,
             utils::{get_workspace_root, init_test_logger}
         };
-        use rand::{SeedableRng, rngs::StdRng};
 
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(&workspace_root)?;

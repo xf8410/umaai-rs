@@ -1,0 +1,73 @@
+name: P0第4步配方续航初筛
+on:
+  push:
+    branches: [workbench/skill-pt-matrix-distill]
+    paths: ['.github/workflows/recipe-continuity-step4-v56.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  matrix:
+    name: ${{ matrix.variant }}｜第${{ matrix.shard.human }}片
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        variant: [续航0, 续航5, 续航10, 续航15, 续航20, 续航30, 续航40, 续航60]
+        shard:
+          - {index: 0, human: 1}
+          - {index: 1, human: 2}
+          - {index: 2, human: 3}
+    env:
+      候选方案: ${{ matrix.variant }}
+      基础种子: 481516
+      分片序号: ${{ matrix.shard.index }}
+      每分片局数: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: 配方续航初筛}
+      - run: cargo run -p umasim --bin recipe_continuity_matrix --release --features experiment-tools --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.variant }}-第${{ matrix.shard.human }}片
+          path: 配方续航矩阵.csv
+          retention-days: 30
+  summary:
+    name: 汇总配方续航初筛
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '*-第*片', path: results}
+      - run: |
+          python3 - <<'PY' | tee 配方续航初筛报告.md
+          import csv,glob,collections,statistics
+          g=collections.defaultdict(list)
+          for p in glob.glob('results/**/配方续航矩阵.csv',recursive=True):
+            for r in csv.DictReader(open(p)): g[r['方案']].append(r)
+          expected={'续航0','续航5','续航10','续航15','续航20','续航30','续航40','续航60'}
+          if set(g)!=expected or any(len(v)!=300 for v in g.values()): raise SystemExit({k:len(v) for k,v in g.items()})
+          def st(rows,key):
+            x=sorted(float(r[key]) for r in rows);return statistics.mean(x),x[29],x[0]
+          print('# P0第4步：配方续航初筛\n')
+          print('> 每减少一种吃后仍可制作的已选地区面，按候选权重收费。\n')
+          print('|方案|平均总分|分P10|最低分|平均PT|PT P10|最低PT|平均拉面点|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|')
+          out=[]
+          for name,rows in g.items():
+            s=st(rows,'总分');p=st(rows,'技能点');rp=statistics.mean(float(r['最终拉面点']) for r in rows);out.append((s[0],name,s,p,rp))
+          for _,name,s,p,rp in sorted(out,reverse=True):print(f'|{name}|{s[0]:.1f}|{s[1]:.0f}|{s[2]:.0f}|{p[0]:.1f}|{p[1]:.0f}|{p[2]:.0f}|{rp:.1f}|')
+          print('\n下一轮检查领先权重是否减少真正卡配方的状态，而不是单纯推迟高价值吃面。')
+          PY
+          cat 配方续航初筛报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 配方续航初筛报告
+          path: 配方续航初筛报告.md
+          retention-days: 30

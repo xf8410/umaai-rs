@@ -1,0 +1,18 @@
+name: Skill PT handwritten strategy matrix (legacy)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs_per_shard:
+        description: Paired seeds per matrix shard
+        required: false
+        default: "50"
+
+permissions:
+  contents: read
+
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Legacy v1 matrix is dispatch-only; use the structural policy workflows for new experiments.' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,79 @@
+name: Handwritten phase-specific controls v36
+on:
+  workflow_dispatch:
+    inputs:
+      runs_per_shard:
+        description: Same-seed games per shard
+        required: false
+        default: '100'
+permissions:
+  contents: read
+jobs:
+  matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - {name: control-v35, y1: '', y2: '', y3: ''}
+          - {name: y1-rest45, y1: 'vrest45', y2: '', y3: ''}
+          - {name: y1-rest45-y2-rest45, y1: 'vrest45', y2: 'vrest45', y3: ''}
+          - {name: y3-rest20, y1: '', y2: '', y3: 'vrest20'}
+          - {name: y3-rest30, y1: '', y2: '', y3: 'vrest30'}
+        shard: [0, 1, 2]
+    env:
+      VARIANT: ${{ matrix.name }}
+      PT1: 16
+      PT2: 64
+      PT3: 64
+      SAC: 140
+      STRUCTURE: structall-rpt200-window10-look0-samples1-rawfail-cook240-eatguard-friendrest-friendcap135-friendspecial4-specialdynamic
+      STRUCTURE_Y1: ${{ matrix.y1 }}
+      STRUCTURE_Y2: ${{ matrix.y2 }}
+      STRUCTURE_Y3: ${{ matrix.y3 }}
+      SHARD: ${{ matrix.shard }}
+      RUNS_PER_SHARD: ${{ inputs.runs_per_shard }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: handwritten-phase-v36}
+      - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v36-${{ matrix.name }}-shard${{ matrix.shard }}
+          path: matrix-result.csv
+          if-no-files-found: error
+          retention-days: 14
+  summary:
+    if: always()
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: v36-*, path: results}
+      - name: Summarize absolute score and tails
+        run: |
+          python3 - <<'PY' | tee handwritten-phase-v36.md
+          import csv,glob,collections,statistics
+          data=collections.defaultdict(list)
+          for p in glob.glob('results/**/matrix-result.csv',recursive=True):
+            with open(p,newline='') as f:
+              for r in csv.DictReader(f): data[r['variant']].append({k:int(r[k]) for k in ['b_score','b_skill_pt','b_status_score']})
+          def pct(v,p):
+            v=sorted(v); return v[round((len(v)-1)*p)]
+          print('# Handwritten phase-specific controls v36\n')
+          print('|variant|games|mean score|P10|P50|P90|mean PT|PT P10|mean status score|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for name,rs in sorted(data.items(),key=lambda x:-statistics.mean(r['b_score'] for r in x[1])):
+            sc=[r['b_score'] for r in rs]; pt=[r['b_skill_pt'] for r in rs]; ss=[r['b_status_score'] for r in rs]
+            print(f'|{name}|{len(rs)}|{statistics.mean(sc):.1f}|{pct(sc,.1)}|{pct(sc,.5)}|{pct(sc,.9)}|{statistics.mean(pt):.1f}|{pct(pt,.1)}|{statistics.mean(ss):.1f}|')
+          PY
+          cat handwritten-phase-v36.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: handwritten-phase-v36-summary
+          path: handwritten-phase-v36.md
+          retention-days: 30
