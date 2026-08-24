@@ -180,8 +180,8 @@ fn test_layer2_cross_strategy_consistency() -> Result<()> {
     let _ = crate::gamedata::init_global();
 
     let master = 20260822u64;
-    let mut rt = SnapTrainer::new(RandomTrainer);
-    let mut ht = SnapTrainer::new(RamenHandwrittenTrainer::new());
+    let rt = SnapTrainer::new(RandomTrainer);
+    let ht = SnapTrainer::new(RamenHandwrittenTrainer::new());
     run_turns(&rt, master, 20)?;
     run_turns(&ht, master, 20)?;
 
@@ -285,8 +285,8 @@ fn test_layer3_turn_reset_isolation() -> Result<()> {
     }
 
     let master = 777u64;
-    let mut ta = SnapTrainer::new(TrainAll);
-    let mut ra = SnapTrainer::new(RestAll);
+    let ta = SnapTrainer::new(TrainAll);
+    let ra = SnapTrainer::new(RestAll);
     run_turns(&ta, master, 20)?;
     run_turns(&ra, master, 20)?;
 

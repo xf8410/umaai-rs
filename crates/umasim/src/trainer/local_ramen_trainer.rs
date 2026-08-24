@@ -597,7 +597,7 @@ impl LocalRamenTrainer {
             // 已吃面但旧硬守门想休息/外出：重新计算全部候选，并只允许五种训练。
             // 生病/自选比赛通常不会经过吃面前门控；这里仍以“拉面只为训练使用”为最终不变量。
             out = self.policy.score_train_actions(g, a)?;
-            guard = out
+            let _ = out
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))

@@ -5,7 +5,7 @@
 //! - 均匀分配：每个动作平均分配搜索次数（并行化）
 //! - UCB 分配：根据 UCB 公式动态分配搜索资源（C++ UmaAi 风格）
 
-use anyhow::{Result, anyhow, bail, ensure};
+use anyhow::{Result, bail, ensure};
 use log::{debug, warn};
 use rand::{SeedableRng, rngs::StdRng};
 use rayon::prelude::*;
@@ -709,7 +709,7 @@ impl FlatSearch<RamenGame> {
 ///
 /// 显式 match 而非依赖枚举判别值：`OnsenTurnStage` 的变体顺序若调整，
 /// 这里会编译报错提醒同步，而不是静默改变所有历史种子。
-fn stage_id(stage: &OnsenTurnStage) -> u64 {
+fn _stage_id(stage: &OnsenTurnStage) -> u64 {
     match stage {
         OnsenTurnStage::Begin => 0,
         OnsenTurnStage::Distribute => 1,
@@ -785,7 +785,7 @@ mod tests {
     use std::cell::RefCell;
 
     use rand::SeedableRng;
-
+    use anyhow::anyhow;
     use super::*;
     use crate::{
         game::{
