@@ -3,6 +3,7 @@
 本文件用于简要记录每次任务的修改内容。
 
 ## 2026-08-25
+- **手写策略四项提分机制落地（RecommendedRamenTrainer preset）**：吃面-训练联动（`ramen_train_coupling_weight=2.0`）、吃面必成价值（`eat_guarantee_weight=3.0`）、友人隐藏风味饥饿加成（`friend_hidden_starve_weight=300`，扣除未来 2 回合固定发放防夏合宿溢出）、动态属性平衡（`gap/over=0.5`）；新增 `matrix_variant` token（`couple`/`starve`/`guarantee`/`fh`）与单元测试。**base_seed=61444 配对 100 局总加权 +749**（友人 2.8→4.6/5，友人不足 build 大幅正收益）。"友人 5 次必完成"强假设被"未来供给缺口"估值实验否定（`friend_future_hidden_weight` 100 局扫描单调负收益，preset 关闭）。**改变手写策略行为，需重抓 bench 快照**
 - **地区选择组合级指标实验**：三个候选指标（净获得 / 配方失衡 / 吃出碗数）经整局对比与终局评分无稳定相关（`base_dist` 总量守恒），全部弃用。**默认打分行为不变（既有基准有效）**
 - **地区选择修正公式落地 + low_count_youqing 弃用**：`score_region` 改用 `bias_sum × youqing - waste×10`，核心语义为「`youqing` 在 `at_trains` 内每个训练位独立生效」（三点组合 youqing=40 在覆盖的 3 个位各给你qing=40），用「无卡位惩罚」替代 `max(0.5)` 兜底。`low_count_youqing` 全 101 种验证智向 build 严重受伤（-3447）已弃用，相关字段/函数/调用全部删除；`with_region_overrides` 过渡方案直接删除。**地区基线作废，需重抓 bench 快照**；`test_region_build_sensitivity` 继续通过
 - **修正公式全 101 种验证**：`deck_can_split=true`（玩家真实 build，420 局）上 +99.9 正向、`deck_can_split=false`（残缺 build，1600 局）上 -7.3 中性略负；之前 `/n_trains` 公式在该类上 -337 已被本次修正

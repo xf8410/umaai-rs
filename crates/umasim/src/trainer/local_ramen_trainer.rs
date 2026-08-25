@@ -18,7 +18,10 @@ use crate::{
             RamenStage,
             effects::calc_ramen_training_effect,
             policy::{RamenPolicy, RamenPolicyConfig, RamenPolicyOutput},
-            rules::{calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, list_special_targets_for}
+            rules::{
+                calc_ramen_pt_gain, calc_region_bonus, consume_for_ramen, get_recipe, get_turn_special_feeling,
+                list_special_targets_for
+            }
         }
     },
     gamedata::{EventChoice, EventData, GAMECONSTANTS, ramen::RAMENDATA},
@@ -140,6 +143,43 @@ pub struct LocalRamenConfig {
     /// 窗口由当前训练原始收益、人数和彩圈数构成，再乘地区效果强度。
     /// 这是 v8 高收益的主要来源；配置 token `window10` 对应 `0.10`。
     pub ramen_window_weight: f32,
+
+    /// 吃面-训练联动权重（训练侧显式项），无量纲。
+    ///
+    /// 当前吃面且训练位落在该面 `at_trains` 内时，`decide_train` 为该训练候选
+    /// 加 `地区效果强度 × 本权重` 的显式加分。`calc_training_value` 已隐含地区效果
+    /// （吃面覆盖位的训练数值更高），本项是**显式强化**：让策略在彩圈/羁绊/属性缺口
+    /// 等其它收益占优时仍倾向兑现已付出的吃面成本。`0.0` 表示关闭（仅隐含）。
+    /// 配置 token `couple50` 对应 `0.50`。
+    pub ramen_train_coupling_weight: f32,
+
+    /// 隐藏风味饥饿加成权重，单位为策略评分/缺口点。
+    ///
+    /// 友人外出固定 +2 隐藏风味（上限 4，见 `RamenGame::do_friend_outing`）。
+    /// 隐藏风味是吃面资源，被吃面持续消耗；`special_feeling` 缺口越大，
+    /// 友人外出的补给价值越高，本权重把该价值计入 `dynamic_friend_outing_value`。
+    /// 计算时扣除"未来 2 回合内固定发放量"（夏合宿 +2 / 年末 +1），避免在
+    /// 即将自然补足时仍为饥饿付费（溢出浪费）。`0.0` 表示关闭。
+    /// 配置 token `starve15` 对应 `15.0`。
+    pub friend_hidden_starve_weight: f32,
+
+    /// 隐藏风味"未来供给缺口"权重，无量纲。
+    ///
+    /// 饥饿加成只估当前库存缺口；本项前瞻未来吃面供需：按剩余回合 × 平均吃面频率 ×
+    /// 每次消耗估算需求，减去未来固定发放（夏合宿/年末）与友人剩余次数供给，
+    /// 得出未来缺口（风味数）。本次外出的 +2 风味按 `min(2, 缺口) × 每风味吃面收益
+    /// (≈800，每次吃面评分约 1200 ÷ 平均消耗 1.5)` 计入友人价值——"友人 5 次 =
+    /// 10 个隐藏风味 = 吃面资源"的长期估值。`0.0` 表示关闭。配置 token `fh1` 对应 `1.0`。
+    pub friend_future_hidden_weight: f32,
+
+    /// 吃面必成价值权重，无量纲。
+    ///
+    /// 吃面回合训练失败率下降（`fail_rate_drop`：Y1 30% / Y2 50% / Y3 100%，
+    /// 吃面后训练必成）。`decide_ramen` 按"本回合基础动作若是训练"计算其失败
+    /// 期望损失（训练收益 × 失败率 + 失败惩罚 × 失败率），乘本权重计入吃面候选。
+    /// 第三年低体力吃面训练已被 `y3_post_train_hard_floor` 等门禁兜底，
+    /// 必成价值可以放心计入。`0.0` 表示关闭。配置 token `guarantee100` 对应 `1.0`。
+    pub eat_guarantee_weight: f32,
 
     /// 策略评分是否采用吃面后的实际失败率下降。
     ///
@@ -263,6 +303,10 @@ impl Default for LocalRamenConfig {
             ramen_lookahead_samples: 12,
             eager_eat: false,
             ramen_window_weight: 0.0,
+            ramen_train_coupling_weight: 0.0,
+            friend_hidden_starve_weight: 0.0,
+            friend_future_hidden_weight: 0.0,
+            eat_guarantee_weight: 0.0,
             effective_ramen_failure: true,
             safety_bridge_min_fail: 101.0,
             safety_bridge_min_gain: 0.0,
@@ -426,6 +470,14 @@ impl LocalRamenTrainer {
                 local.ramen_lookahead_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("window") {
                 local.ramen_window_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("couple") {
+                local.ramen_train_coupling_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("starve") {
+                local.friend_hidden_starve_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("fh") {
+                local.friend_future_hidden_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("guarantee") {
+                local.eat_guarantee_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("look") {
                 local.ramen_lookahead_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("samples") {
@@ -547,7 +599,30 @@ impl LocalRamenTrainer {
         let chain_urgency = 0.70 + used as f32 * 0.12 + (g.current_year() - 1) as f32 * 0.18;
         let chain = self.policy.config.friend_outing_bonus * (1.0 / 3.0) * chain_urgency;
         let base = self.policy.config.outing_base;
-        let total = base + event_value + material + chain;
+        // 隐藏风味饥饿加成：隐藏风味是吃面资源（上限 4，友人外出固定 +2），
+        // 缺口越大补给价值越高；扣除未来 2 回合内固定发放（夏合宿 +2 / 年末 +1），
+        // 避免在即将自然补足时仍为饥饿付费、导致溢出浪费。
+        let starve = if self.config.friend_hidden_starve_weight > 0.0 {
+            let gap = (4 - g.ramen.special_feeling).max(0) as f32;
+            let future_gain = [1, 2]
+                .iter()
+                .map(|&d| get_turn_special_feeling(g.turn() + d).max(0) as f32)
+                .sum::<f32>();
+            (gap - future_gain).max(0.0) * self.config.friend_hidden_starve_weight
+        } else {
+            0.0
+        };
+        // 未来供给缺口：本次外出的 +2 风味按"未来吃面供需缺口"估值——
+        // 需求 = 剩余回合 × 平均吃面频率 × 每次消耗；供给 = 未来固定发放 +
+        // 友人剩余次数 × 2 + 当前库存。缺口越大，本次补给越接近"保住一次吃面"。
+        // 每风味吃面收益 ≈ 800（每次吃面评分 ~1200 ÷ 平均消耗 1.5）。
+        let supply = if self.config.friend_future_hidden_weight > 0.0 {
+            let gap = self.hidden_future_gap(g);
+            gap.min(2.0) * 800.0 * self.config.friend_future_hidden_weight
+        } else {
+            0.0
+        };
+        let total = base + event_value + material + chain + starve + supply;
         Ok((
             total,
             vec![
@@ -555,15 +630,42 @@ impl LocalRamenTrainer {
                 ("friend_event_dynamic".to_string(), event_value),
                 ("friend_material_required".to_string(), material),
                 ("friend_chain_dynamic".to_string(), chain),
+                ("friend_hidden_starve".to_string(), starve),
+                ("friend_hidden_future".to_string(), supply),
             ],
             format!(
-                "友人外出#{} 选项{} 动态事件{:.0} 材料+2(库存{}也不禁用)",
+                "友人外出#{} 选项{} 动态事件{:.0} 材料+2(库存{}也不禁用) 饥饿+{:.0} 未来+{:.0}",
                 used + 1,
                 choice + 1,
                 event_value,
-                g.ramen.special_feeling
+                g.ramen.special_feeling,
+                starve,
+                supply
             )
         ))
+    }
+
+    /// 未来隐藏风味供需缺口（风味数）：剩余普通回合的吃面需求 - 未来固定发放 -
+    /// 友人剩余次数供给 - 当前库存。
+    ///
+    /// 平均吃面频率取 0.35 次/回合（实测 25~31 次/70 回合）、每次消耗 1.5 风味；
+    /// 固定发放按 `get_turn_special_feeling` 对剩余回合逐回合累计（夏合宿 +2 / 年末 +1）。
+    /// 负值截为 0（供给充足时本次外出的补给没有额外价值）。
+    fn hidden_future_gap(&self, g: &RamenGame) -> f32 {
+        let rem = (71 - g.turn()).max(0) as i32;
+        if rem <= 0 {
+            return 0.0;
+        }
+        let demand = rem as f32 * 0.35 * 1.5;
+        let mut supply = g.ramen.special_feeling as f32;
+        for d in 1..=rem {
+            supply += get_turn_special_feeling(g.turn() + d).max(0) as f32;
+        }
+        let used = g.friend.out_used.iter().filter(|&&x| x).count();
+        // 本次外出之后的剩余次数（本次 +2 不计入，因其价值正是本项在估）
+        let remaining = (5 - used - 1).max(0) as f32;
+        supply += remaining * 2.0;
+        (demand - supply).max(0.0)
     }
 
     /// 按当前状态给友人事件选项评分。先复用通用事件评分，再扣除体力/干劲实际无法获得的
@@ -729,6 +831,25 @@ impl LocalRamenTrainer {
                 let z = -((fr - 15.) / 85.).clamp(0., 1.) * self.config.high_fail_penalty;
                 o.score += z;
                 o.add("local_high_fail_tail", z)
+            }
+            // 吃面-训练联动（显式项）：当前吃面且 at_trains 覆盖该训练位 →
+            // 加地区效果强度 × 权重。calc_training_value 已隐含数值加成，本项让
+            // 策略在彩圈/羁绊/属性缺口占优时仍倾向兑现吃面成本。
+            if self.config.ramen_train_coupling_weight > 0.0 {
+                if let Some(rid) = g.ramen.current_ramen {
+                    if let Some(region) = RAMENDATA
+                        .get()
+                        .and_then(|d| d.ramen_region_effect.get(rid))
+                    {
+                        if region.at_trains.contains(&(tt as i32)) {
+                            let effect = (region.xunlian + region.youqing + region.pt_bonus) as f32
+                                + region.hint_count as f32 * 10.0;
+                            let bonus = effect * self.config.ramen_train_coupling_weight;
+                            o.score += bonus;
+                            o.add("ramen_train_coupling", bonus);
+                        }
+                    }
+                }
             }
         }
         let lb = Self::choose(&out);
@@ -1117,6 +1238,30 @@ impl LocalRamenTrainer {
         }
         let risk = (g.ramen.feeling_stock.iter().sum::<i32>() - self.config.feeling_overflow_threshold).max(0) as f32;
         let bridge = self.safety_bridge(g, a)?;
+        // 吃面必成价值：本回合基础动作若是训练，吃面使训练必成（fail_rate_drop 生效），
+        // 消除失败期望损失 = 失败率 ×（训练收益 × 0.5 + 失败惩罚）。所有吃面候选共享
+        // 同一年度 fail_rate_drop，故在循环外统一计算一次。
+        let guarantee = if self.config.eat_guarantee_weight > 0.0 {
+            match pre_action {
+                Operation::Train(tt) => {
+                    let tr = tt as usize;
+                    let buffs = g.calc_training_buff(tr)?;
+                    let base_fr = g.calc_training_failure_rate(&buffs, tr);
+                    if base_fr > 0.0 {
+                        let val = g.calc_training_value(&buffs, tr)?;
+                        let gain_val: f32 =
+                            val.status_pt[..5].iter().sum::<i32>() as f32 + val.status_pt[5] as f32 * 2.0;
+                        let loss = base_fr / 100.0 * (gain_val * 0.5 + self.policy.config.failure_penalty);
+                        loss * self.config.eat_guarantee_weight
+                    } else {
+                        0.0
+                    }
+                }
+                _ => 0.0
+            }
+        } else {
+            0.0
+        };
         for (act, o) in a.iter().zip(out.iter_mut()) {
             if let Some(region_id) = act.ramen {
                 if let Some((train, pre_vital, post_vital)) = self.post_ramen_vital_transition(g, region_id)? {
@@ -1167,7 +1312,7 @@ impl LocalRamenTrainer {
                     0.0
                 };
                 let look = self.ramen_lookahead(g, region_id)?;
-                o.score += ck + rmj + great + deadline + window + safety + look - cook2_cost;
+                o.score += ck + rmj + great + deadline + window + safety + look - cook2_cost + guarantee;
                 o.add("scenario_checkpoint", ck);
                 o.add("rmj_cross", rmj);
                 o.add("great_cross", great);
@@ -1175,7 +1320,8 @@ impl LocalRamenTrainer {
                 o.add("ramen_window", window);
                 o.add("cook2_stock_cost", -cook2_cost);
                 o.add("safety_bridge", safety);
-                o.add("ramen_lookahead", look)
+                o.add("ramen_lookahead", look);
+                o.add("eat_guarantee", guarantee)
             }
         }
         // 吃不吃与吃哪碗分层：eager 模式下，只要 RamenSelect 已列出可制作面，
@@ -1206,6 +1352,8 @@ impl LocalRamenTrainer {
 /// - 启用属性预留、动态体力、概率 Hint 与连续失败期望；
 /// - 吃面 PT 权重：2.0；
 /// - 当前真实训练窗口权重：0.10；
+/// - 吃面-训练联动（训练侧显式项）权重：0.50；吃面必成价值权重：1.0；
+/// - 动态属性平衡：五维完成度修正训练边际价值（短板追赶 0.5 + 近上限衰减 0.5）；
 /// - 使用基础失败率作为保守决策风险预算（游戏规则仍应用真实减失败率）；
 /// - Cook2 式诀窍边际库存权重：40；
 /// - 关闭随机分身 lookahead；
@@ -1213,6 +1361,7 @@ impl LocalRamenTrainer {
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
 /// - 第三年终盘允许有马前把体力控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管；
 /// - 本来要休息时按 0/2/5 跨年累计节奏使用友人外出；第一年不消耗次数，第二年累计 2 次，第三年完成 5 次；
+///   隐藏风味缺口大时友人外出价值提高（饥饿加成 300，扣除未来 2 回合固定发放防溢出）；
 /// - 五段事件按当前体力、干劲、属性/PT及完链进度动态估值，第三段不再使用硬体力阈值；
 /// - 不使用 RMJ 截止期紧迫度加分：300 局同种子矩阵中 deadline20/35/50 完全同轨，
 ///   平均分 56960.7，显著低于 deadline0 的 58881.6；硬目标仍由规则和既有跨线价值保证。
@@ -1274,6 +1423,20 @@ impl RecommendedRamenTrainer {
             local.expected_fail = true;
             local.max_base_score_sacrifice = 140.0;
             local.ramen_window_weight = 0.10;
+            // 吃面-训练联动（训练侧显式项）+ 吃面必成价值 + 隐藏风味饥饿加成：
+            // 见 LocalRamenConfig 对应字段注释；数值经 base_seed=61444 配对矩阵调优
+            // （starve 100 局峰值在 300，couple 保持 2.0，gap/over 0.5 最优）。
+            local.ramen_train_coupling_weight = 2.0;
+            local.eat_guarantee_weight = 3.0;
+            local.friend_hidden_starve_weight = 300.0;
+            // 未来供给缺口估值（方案2）经 100 局扫描为单调负收益（fh=0.2 -125 ~ fh=1.0 -767）：
+            // 追求友人 5/5 的边际代价超过隐藏风味边际收益，4.6/5 是 starve=300 下的最优平衡。
+            // 字段保留可配（matrix_variant `fh`），preset 关闭。
+            local.friend_future_hidden_weight = 0.0;
+            // 动态属性平衡：按五维完成度修正训练边际价值（短板追赶 + 近上限衰减）。
+            local.dynamic_status_balance = true;
+            local.status_gap_strength = 0.5;
+            local.status_overflow_strength = 0.5;
             local.ramen_lookahead_weight = 0.0;
             local.ramen_lookahead_samples = 1;
             local.effective_ramen_failure = false;
@@ -1410,9 +1573,9 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
 mod tests {
     use anyhow::Result;
 
-    use crate::game::Trainer;
+    use crate::game::{Game, Trainer};
 
-    use super::{LocalRamenTrainer, RecommendedRamenTrainer};
+    use super::{LocalRamenConfig, LocalRamenTrainer, RamenPolicyConfig, RecommendedRamenTrainer};
 
     /// 第1年地区选择（turn 2 在 run_begin 内联触发、stage=Begin）必须走 decide_region 打分。
     ///
@@ -1530,5 +1693,281 @@ mod tests {
         if actual != expected {
             panic!("正式 preset 应使用 {expected:?}，实际为 {actual:?}");
         }
+    }
+
+    /// 吃面-训练联动：当前吃面覆盖速位时，速训练候选获得显式 `ramen_train_coupling` 加分，
+    /// 非覆盖位不加。`calc_training_value` 的隐含加成之外，策略应倾向兑现吃面成本。
+    #[test]
+    #[allow(clippy::panic)]
+    fn train_coupling_bonus_on_eating() -> Result<()> {
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame, RamenStage}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut local = LocalRamenConfig::default();
+        local.ramen_train_coupling_weight = 1.0;
+        let trainer = LocalRamenTrainer::with_configs(RamenPolicyConfig::default(), local);
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        game.ramen.current_ramen = Some(10); // 札幌-速 at_trains=[0]，youqing=50
+        let mut preview = game.clone();
+        preview.stage = RamenStage::Train;
+        let actions = preview.list_actions()?;
+        let (idx, outs) = trainer.decide_train(&preview, &actions)?;
+
+        let mut speed_coupling = 0.0f32;
+        let mut other_coupling_max = 0.0f32;
+        let mut speed_found = false;
+        for (act, o) in actions.iter().zip(outs.iter()) {
+            if let Operation::Train(t) = act.operation {
+                let c = o
+                    .breakdown
+                    .iter()
+                    .find(|(k, _)| k == "ramen_train_coupling")
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0.0);
+                if t as usize == 0 {
+                    speed_found = true;
+                    speed_coupling = c;
+                } else {
+                    other_coupling_max = other_coupling_max.max(c);
+                }
+            }
+        }
+        println!(
+            "吃面(速)状态: 速位 coupling={speed_coupling} 其它位 max={other_coupling_max} 选中={:?}",
+            actions[idx].operation
+        );
+        if !speed_found || speed_coupling <= 0.0 {
+            panic!("吃面覆盖速位时速训练应有 ramen_train_coupling>0，实际 {speed_coupling}");
+        }
+        if other_coupling_max != 0.0 {
+            panic!("非覆盖位不应有 ramen_train_coupling，实际 {other_coupling_max}");
+        }
+        Ok(())
+    }
+
+    /// 友人隐藏风味饥饿加成：special_feeling 缺口越大友人外出价值越高；
+    /// 夏合宿（turn 24 开始 +2）前缺口将被自然补足，饥饿加成应归零（防溢出）。
+    #[test]
+    #[allow(clippy::panic)]
+    fn friend_hidden_starve_and_overflow_guard() -> Result<()> {
+        use crate::{
+            game::{InheritInfo, ramen::RamenGame},
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut local = LocalRamenConfig::default();
+        local.friend_hidden_starve_weight = 15.0;
+        let trainer = LocalRamenTrainer::with_configs(RamenPolicyConfig::default(), local);
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+
+        // 饥饿：special=0，无近期固定发放 → starve ≈ 4×15 = 60
+        game.ramen.special_feeling = 0;
+        game.base.turn = 30;
+        let (total0, bd0, _) = trainer.dynamic_friend_outing_value(&game)?;
+        let starve0 = bd0
+            .iter()
+            .find(|(k, _)| k == "friend_hidden_starve")
+            .map(|(_, v)| *v)
+            .unwrap_or(0.0);
+        println!("special=0 turn=30: starve={starve0} total={total0:.0}");
+
+        // 防溢出：turn=23（turn 24 夏合宿 +2），special=2 → 缺口 2 被未来发放 2 扣除 → starve=0
+        game.base.turn = 23;
+        game.ramen.special_feeling = 2;
+        let (total1, bd1, _) = trainer.dynamic_friend_outing_value(&game)?;
+        let starve1 = bd1
+            .iter()
+            .find(|(k, _)| k == "friend_hidden_starve")
+            .map(|(_, v)| *v)
+            .unwrap_or(0.0);
+        println!("special=2 turn=23: starve={starve1} total={total1:.0}");
+
+        if starve0 < 45.0 {
+            panic!("隐藏风味耗尽时友人饥饿加成应显著（>=45），实际 {starve0}");
+        }
+        if starve1 > 0.5 {
+            panic!("夏合宿前缺口将被自然补足，饥饿加成应归零，实际 {starve1}");
+        }
+        Ok(())
+    }
+
+    /// 吃面必成价值：本回合基础动作是训练且失败率>0 时，吃面候选应计入
+    /// `eat_guarantee`（消除失败期望损失）；体力充足失败率为 0 时不计。
+    #[test]
+    #[allow(clippy::panic)]
+    fn eat_guarantee_value_on_risky_train() -> Result<()> {
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{RamenAction, RamenGame, action::list_ramen_select_actions, policy::RamenPolicyConfig}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut policy = RamenPolicyConfig::default();
+        policy.vital_rest = 0; // 取消体力守门，让低体力训练进入打分
+        let mut local = LocalRamenConfig::default();
+        local.eat_guarantee_weight = 1.0;
+        let trainer = LocalRamenTrainer::with_configs(policy, local);
+
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        game.base.turn = 50; // 第三年
+        game.uma.vital = 45; // 速位失败率 (100-45)*(52-45)/40 ≈ 9.6% > 0
+        // 智已满上限（训练边际≈0），其余中段属性训练收益高且失败率>0，
+        // 策略本回合打算训练（而非休息）→ 吃面必成价值应>0
+        game.uma.five_status = [1000, 1000, 1000, 1000, 2400];
+        game.ramen.selected_regions = [6, 7, 8];
+        game.ramen.special_feeling = 2;
+        game.ramen.feeling_stock = [2, 2, 2]; // 库存充足，确保候选面可做
+
+        let actions = list_ramen_select_actions(&game.ramen, &game.ramen.selected_regions);
+        let pre = trainer.pre_eat_action(&game)?;
+        let (_, outs) = trainer.decide_ramen(&game, &actions)?;
+        let mut guarantee = 0.0f32;
+        let mut has_eat = false;
+        for (act, o) in actions.iter().zip(outs.iter()) {
+            if act.ramen.is_some() {
+                has_eat = true;
+                let g = o
+                    .breakdown
+                    .iter()
+                    .find(|(k, _)| k == "eat_guarantee")
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0.0);
+                guarantee = guarantee.max(g);
+            }
+        }
+        println!(
+            "turn=50 vital=45: 吃面候选={has_eat} eat_guarantee={guarantee} 候选数={} pre_action={:?}",
+            actions.len(),
+            pre
+        );
+        if !has_eat {
+            panic!("测试构造失败：无吃面候选（special={} selected_regions={:?}）", game.ramen.special_feeling, game.ramen.selected_regions);
+        }
+        if guarantee <= 0.0 {
+            panic!("低体力训练失败率>0 时吃面必成价值应>0，实际 {guarantee}");
+        }
+        Ok(())
+    }
+
+    /// 正式 preset 应启用四项新机制：吃面-训练联动、必成价值、隐藏风味饥饿、动态属性平衡。
+    #[test]
+    #[allow(clippy::panic)]
+    fn recommended_ramen_new_mechanisms_enabled() {
+        let trainer = RecommendedRamenTrainer::new();
+        for (i, year) in trainer.years.each_ref().iter().enumerate() {
+            let c = &year.config;
+            println!(
+                "year{i}: couple={} starve={} guarantee={} statusdyn={} gap={} over={}",
+                c.ramen_train_coupling_weight,
+                c.friend_hidden_starve_weight,
+                c.eat_guarantee_weight,
+                c.dynamic_status_balance,
+                c.status_gap_strength,
+                c.status_overflow_strength
+            );
+            if c.ramen_train_coupling_weight <= 0.0
+                || c.friend_hidden_starve_weight <= 0.0
+                || c.eat_guarantee_weight <= 0.0
+                || !c.dynamic_status_balance
+                || c.status_gap_strength <= 0.0
+                || c.status_overflow_strength <= 0.0
+            {
+                panic!("year{i} 未启用全部新机制: {c:?}");
+            }
+        }
+    }
+
+    /// 未来供给缺口：早期剩余回合多、需求大且友人未用完时 gap>0，本次外出的
+    /// +2 风味计入"保住吃面"价值；后期固定发放 + 剩余次数供给充足时 gap=0。
+    #[test]
+    #[allow(clippy::panic)]
+    fn friend_future_hidden_supply() -> Result<()> {
+        use crate::{
+            game::{InheritInfo, ramen::RamenGame},
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut local = LocalRamenConfig::default();
+        local.friend_future_hidden_weight = 1.0;
+        let trainer = LocalRamenTrainer::with_configs(RamenPolicyConfig::default(), local);
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+
+        // 早期：turn=30（第二年），特殊=0，未用过友人 → 剩余回合多、需求大 → gap>0
+        game.base.turn = 30;
+        game.ramen.special_feeling = 0;
+        let (_, bd1, _) = trainer.dynamic_friend_outing_value(&game)?;
+        let supply1 = bd1
+            .iter()
+            .find(|(k, _)| k == "friend_hidden_future")
+            .map(|(_, v)| *v)
+            .unwrap_or(0.0);
+        println!("turn=30 special=0 used=0: friend_hidden_future={supply1}");
+
+        // 后期：turn=55（第三年），特殊=2，已用 3 次友人 → 固定发放+剩余供给充足 → gap=0
+        game.base.turn = 55;
+        game.ramen.special_feeling = 2;
+        game.friend.out_used = vec![true, true, true, false, false];
+        let (_, bd2, _) = trainer.dynamic_friend_outing_value(&game)?;
+        let supply2 = bd2
+            .iter()
+            .find(|(k, _)| k == "friend_hidden_future")
+            .map(|(_, v)| *v)
+            .unwrap_or(0.0);
+        println!("turn=55 special=2 used=3: friend_hidden_future={supply2}");
+
+        if supply1 <= 0.0 {
+            panic!("早期友人未用时未来缺口应>0，实际 {supply1}");
+        }
+        if supply2 > 0.5 {
+            panic!("后期供给充足时未来缺口应为0，实际 {supply2}");
+        }
+        Ok(())
     }
 }
