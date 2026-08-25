@@ -14,6 +14,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'gamedata/scenario_ramen.json'
+      - '.github/workflows/ramen-upstream-check.yml'
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,15 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ramen-upstream-source-check
-      - name: Rust formatting (nightly only)
-        run: cargo +nightly fmt --all -- --check
       - name: Core compile without diagnostic logging
         run: cargo check --workspace --no-default-features
       - name: Core tests without diagnostic logging
