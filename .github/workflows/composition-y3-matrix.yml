@@ -38,11 +38,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: sync-upstream-41fae1d}
-      - name: 编译并验证地区策略
+      - name: 编译库并验证地区策略
         run: |
-          cargo check -p umasim --no-default-features
-          cargo test -p umasim test_region_build_sensitivity --no-default-features -- --nocapture
-          cargo test -p umasim test_region_selection_per_build --no-default-features -- --nocapture
+          cargo check -p umasim --lib --no-default-features
+          cargo test -p umasim --lib test_region_build_sensitivity --no-default-features -- --nocapture
+          cargo test -p umasim --lib test_region_selection_per_build --no-default-features -- --nocapture
       - name: 提交到当前工作分支
         run: |
           if git diff --quiet; then echo '已同步，无变化'; exit 0; fi
