@@ -1,4 +1,4 @@
-name: 读取修正公式小数权重独立复验报告
+name: 读取同步上游后小数权重初筛报告
 on: {workflow_dispatch: {}}
 permissions: {actions: read, contents: read}
 jobs:
@@ -7,9 +7,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: 修正公式小数权重独立复验总报告
+          name: 修正公式小数权重重搜总报告
           path: report
           github-token: ${{ github.token }}
           repository: xf8410/umaai-rs
-          run-id: 32845572442
-      - run: cat report/修正公式小数权重独立复验报告.md
+          run-id: 32848737545
+      - run: cat report/修正公式小数权重重搜报告.md
