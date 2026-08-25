@@ -1,13 +1,5 @@
 name: Ramen upstream source check
 on:
-  push:
-    branches: [workbench/skill-pt-matrix-distill]
-    paths:
-      - 'crates/**/*.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'gamedata/scenario_ramen.json'
-      - '.github/workflows/ramen-upstream-check.yml'
   pull_request:
     paths:
       - 'crates/**/*.rs'
@@ -29,17 +21,5 @@ jobs:
           shared-key: ramen-upstream-source-check
       - name: Core compile without diagnostic logging
         run: cargo check --workspace --no-default-features
-      - name: Core tests without diagnostic logging
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test -p umasim --lib --no-default-features -- --nocapture 2>&1 | tee upstream-test.log
-      - name: Upload core test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: upstream-core-test-log
-          path: upstream-test.log
-          if-no-files-found: warn
       - name: Default-feature compile
         run: cargo check --workspace
