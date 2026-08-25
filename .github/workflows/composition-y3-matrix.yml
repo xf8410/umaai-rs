@@ -1,126 +1,59 @@
-name: 两种指定配卡×120地区×各100局
+name: 修复并验证吃面后必须训练
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: requested-decks-120x100-${{ github.ref }}
-  cancel-in-progress: true
+  group: fix-post-eat-training-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  matrix:
-    name: 地区${{ matrix.start }}-${{ matrix.end }}（两配卡各600局）
+  fix:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      max-parallel: 20
-      matrix:
-        include:
-          - { start: 0, end: 6 }
-          - { start: 6, end: 12 }
-          - { start: 12, end: 18 }
-          - { start: 18, end: 24 }
-          - { start: 24, end: 30 }
-          - { start: 30, end: 36 }
-          - { start: 36, end: 42 }
-          - { start: 42, end: 48 }
-          - { start: 48, end: 54 }
-          - { start: 54, end: 60 }
-          - { start: 60, end: 66 }
-          - { start: 66, end: 72 }
-          - { start: 72, end: 78 }
-          - { start: 78, end: 84 }
-          - { start: 84, end: 90 }
-          - { start: 90, end: 96 }
-          - { start: 96, end: 102 }
-          - { start: 102, end: 108 }
-          - { start: 108, end: 114 }
-          - { start: 114, end: 120 }
-    env:
-      COMBO_START: ${{ matrix.start }}
-      COMBO_END: ${{ matrix.end }}
-      RUNS: 100
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - name: 修复最佳训练索引未写回
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/src/trainer/local_ramen_trainer.rs')
+          s=p.read_text(encoding='utf-8')
+          old='''            let _ = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| anyhow::anyhow!("已吃面但 Train 阶段没有训练候选"))?;'''
+          new='''            guard = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
+                .map(|(i, _)| i)
+                .ok_or_else(|| anyhow::anyhow!("已吃面但 Train 阶段没有训练候选"))?;'''
+          if s.count(old)!=1: raise SystemExit(f'回归代码应命中1处，实际{s.count(old)}处')
+          p.write_text(s.replace(old,new),encoding='utf-8')
+          print('已恢复最佳训练索引写回 guard')
+          PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: requested-decks-region-120x100
-      - run: cargo run -p umasim --bin requested_decks_region_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: 地区${{ matrix.start }}-${{ matrix.end }}-原始结果
-          path: requested-decks-region-matrix.csv
-          retention-days: 30
-
-  summary:
-    name: 汇总240方案共24000局
-    needs: matrix
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: 地区*-原始结果
-          path: results
-      - name: Validate and summarize
+          shared-key: post-eat-training-regression
+      - name: 编译及策略回归
         run: |
-          python3 - <<'PY' | tee 两配卡120地区各100局报告.md
-          import csv,glob,statistics,collections
-          rows=[]
-          files=glob.glob('results/**/requested-decks-region-matrix.csv',recursive=True)
-          if len(files)!=20: raise SystemExit(f'应有20个分片，实际{len(files)}')
-          for p in files: rows += list(csv.DictReader(open(p,encoding='utf-8',newline='')))
-          if len(rows)!=24000: raise SystemExit(f'应有24000局，实际{len(rows)}')
-          groups=collections.defaultdict(list)
-          for r in rows: groups[(r['build'],int(r['combo_index']),r['region_ids'],r['deck'])].append(r)
-          if len(groups)!=240 or any(len(v)!=100 for v in groups.values()): raise SystemExit('240个方案中存在缺失或重复')
-          builds=['3速1耐1智','2速2耐1智']
-          for b in builds:
-              if {k[1] for k in groups if k[0]==b}!=set(range(120)): raise SystemExit(f'{b}未覆盖全部120组合')
-          print('# 两种指定配卡 × 第三年120地区组合 × 每组合100局')
-          print('\n- 总计：**240个方案，24,000局**')
-          print('- 两套配卡、全部地区组合均使用相同的100个seed')
-          print('- 第三年地区固定；其余决策使用 RecommendedRamenTrainer')
-          print('\n## 各配卡最优地区组合')
-          print('|配卡|实体卡组|最优组合|地区ID|均分|P10|中位数|P90|平均PT|')
-          print('|---|---|---:|---|---:|---:|---:|---:|---:|')
-          ranked={}
-          for build in builds:
-              entries=[]
-              for k,rs in groups.items():
-                  if k[0]!=build: continue
-                  scores=sorted(int(r['score']) for r in rs); pts=[int(r['skill_pt']) for r in rs]
-                  q=lambda p:scores[round((len(scores)-1)*p)]
-                  entries.append((statistics.mean(scores),k,statistics.mean(pts),q(.1),statistics.median(scores),q(.9)))
-              entries.sort(reverse=True); ranked[build]=entries
-              mean,k,pt,p10,p50,p90=entries[0]
-              print(f'|{build}|{k[3]}|{k[1]}|{k[2]}|{mean:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
-          print('\n## 每套配卡前10名')
-          for build in builds:
-              print(f'\n### {build}\n\n|排名|组合|地区ID|均分|P10|中位数|P90|平均PT|')
-              print('|---:|---:|---|---:|---:|---:|---:|---:|')
-              for rank,(mean,k,pt,p10,p50,p90) in enumerate(ranked[build][:10],1):
-                  print(f'|{rank}|{k[1]}|{k[2]}|{mean:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
-          combo_deltas=[]
-          for ci in range(120):
-              aa=next(v for k,v in groups.items() if k[0]==builds[0] and k[1]==ci)
-              bb=next(v for k,v in groups.items() if k[0]==builds[1] and k[1]==ci)
-              a={int(r['run']):int(r['score']) for r in aa}; b={int(r['run']):int(r['score']) for r in bb}
-              combo_deltas.append(statistics.mean(b[i]-a[i] for i in range(100)))
-          print('\n## 同地区配对总览')
-          print(f'\n- 2速2耐1智领先的地区组合：**{sum(x>0 for x in combo_deltas)}/120**')
-          print(f'- 持平：**{sum(x==0 for x in combo_deltas)}/120**')
-          print(f'- 3速1耐1智领先的地区组合：**{sum(x<0 for x in combo_deltas)}/120**')
-          print(f'- 2速2耐1智跨全部地区的平均分差：**{statistics.mean(combo_deltas):+.1f}**')
-          PY
-          cat 两配卡120地区各100局报告.md >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: 两配卡120地区各100局总报告
-          path: 两配卡120地区各100局报告.md
-          retention-days: 30
+          cargo check -p umasim --no-default-features
+          cargo test -p umasim recommended_ramen_uses_025_friend_pacing --no-default-features
+      - name: 提交修复
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          git commit -m 'fix(ramen): enforce training after eating ramen'
+          git push origin HEAD:${{ github.ref_name }}
