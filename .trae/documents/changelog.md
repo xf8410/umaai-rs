@@ -3,19 +3,21 @@
 本文件用于简要记录每次任务的修改内容。
 
 ## 2026-08-25
-- **手写策略四项提分机制落地（RecommendedRamenTrainer preset）**：吃面-训练联动（`ramen_train_coupling_weight=2.0`）、吃面必成价值（`eat_guarantee_weight=3.0`）、友人隐藏风味饥饿加成（`friend_hidden_starve_weight=300`，扣除未来 2 回合固定发放防夏合宿溢出）、动态属性平衡（`gap/over=0.5`）；新增 `matrix_variant` token（`couple`/`starve`/`guarantee`/`fh`）与单元测试。**base_seed=61444 配对 100 局总加权 +749**（友人 2.8→4.6/5，友人不足 build 大幅正收益）。"友人 5 次必完成"强假设被"未来供给缺口"估值实验否定（`friend_future_hidden_weight` 100 局扫描单调负收益，preset 关闭）。**改变手写策略行为，需重抓 bench 快照**
-- **地区选择组合级指标实验**：三个候选指标（净获得 / 配方失衡 / 吃出碗数）经整局对比与终局评分无稳定相关（`base_dist` 总量守恒），全部弃用。**默认打分行为不变（既有基准有效）**
-- **地区选择修正公式落地 + low_count_youqing 弃用**：`score_region` 改用 `bias_sum × youqing - waste×10`，核心语义为「`youqing` 在 `at_trains` 内每个训练位独立生效」（三点组合 youqing=40 在覆盖的 3 个位各给你qing=40），用「无卡位惩罚」替代 `max(0.5)` 兜底。`low_count_youqing` 全 101 种验证智向 build 严重受伤（-3447）已弃用，相关字段/函数/调用全部删除；`with_region_overrides` 过渡方案直接删除。**地区基线作废，需重抓 bench 快照**；`test_region_build_sensitivity` 继续通过
-- **修正公式全 101 种验证**：`deck_can_split=true`（玩家真实 build，420 局）上 +99.9 正向、`deck_can_split=false`（残缺 build，1600 局）上 -7.3 中性略负；之前 `/n_trains` 公式在该类上 -337 已被本次修正
-- **region_matrix 重写为诊断工具**：去掉 a/b 配对与 VARIANT token 解析，简化为「每 build × N 局，打印 build 配置 + 三年地区选择 + 最常见组合占比」；CSV 统一写到 `logs/` 下（与 `bench_compositions` 同级）。`SAMPLE_BUILDS` / `ALL_COMPOSITIONS=1` 复用 `bench_compositions` 设施
-- **新增 `test_region_selection_per_build` 测试**：读 `bench_config.toml [player_builds]` 7 build，对每个 build 调 `decide_region` 三年，打印 build 配置 + 每年地区选择（含 id 与名称）供人工审查合理性。**纯诊断测试**
-- **LocalRamenTrainer 补齐手写训练员地区选择**：第 1 年地区选择（回合 2 内联触发）此前按阶段分派落入默认分支恒选候选 0，现按动作类型判定进入打分，三年地区选择全部经过手写策略。**改变推荐策略第 1 年地区选择，既有基准作废**
-- **拉面动作空间不变量 + 终局分分解（MCTS P0 安全网）**：钉死 `special_targets` 之和 ≤ 2 与合并候选峰值上限、终局分分解支持分量求和、补 CRN 阶段重播种的双向契约测试。**输入维度变化（教师数据需重生成），模拟数值逐位不变**
-- **搜索层拉面合并动作落地（P1.1 + P1.2）**：搜索层接受 `(ramen, targets)` 合并动作（此前会被通用动作静默清零隐藏风味），并改在训练员内部合并搜索（缓存 targets 供后续 SpecialSelect 取用）——避免所有训练员都收到合并候选连手写基线一起作废。**搜索对外层 rng 消耗由两次降为一次，拉面基线作废**
-- **拉面搜索阶段缺省补上 `ramen`**：补上后 42 局配对 +2306 分（七 build 全正），同一笔算力加到 `train` 侧只值 +39 分（已饱和）。`default_config.toml` 同步显式写出，bench_base 缺省对齐。**改变 MCTS 生产行为与拉面基线**
-- **测试有效性审查后的修补**：补 `ramen_search_stages` 生产缺省守门测试（语义解析而非字符串比较）；合并候选峰值测试改为结构恒等式 + 下限；删除只断言局数的无效测量壳。补 oracle vs 转发断言注释
-- **不在判定与得意率解耦（distribute_person 两步算法）**：先按 `absent_rate / (500 + absent_rate)` 判「不在」（不含得意率），判定出现后才按训练位权重（含得意率）分配；不在权重按类型区分（支援 50 / 友人 100 / 理事记者 200 / NPC 必现），缺席名单入 `RamenState.absent_cards`
-- **地区拉面分身缺席优先**：本回合判定「不在」的支援卡按缺席顺序优先补分身位。**改变拉面模拟数值，bench / 搜索 / MCTS 三处基线作废重抓；对 base/onsen 同样生效（剧本通用正确行为，无需为其重抓）**
+- **友人词条加成 + 主动使用 + 回合级体力门限**：友人事件价值计入词条 bonus（体力×1.6 / 属性×1.3）；`friend_proactive_weight=150` 短期无发放+不溢出时主动用友人；体力低不溢出优先友人；回合级门限（吃面放掉 / 不吃面 30，第三年恢复）+ y3 门禁（软目标 25 / 硬底线 15）。失败率 2.4%→1.6%，友人 4.9/5
+- **残余收益折扣（方案 E）**：`cap_discount_weight=1.0` 主属性快满时副属性打折（PT 保留），300 局总加权 +84
+- **手写策略四项提分机制**：吃面联动 / 必成价值 / 友人饥饿 300 / 动态属性平衡，100 局 +749；fh 未来缺口实验否定关闭
+- **地区选择组合级指标实验**：净获得 / 配方失衡 / 吃出碗数无区分度弃用
+- **地区选择修正公式**：`bias×youqing - waste×10`（覆盖位独立生效），low_count_youqing 弃用；基线作废
+- **修正公式全 101 种验证**：真实 build +99.9 / 残缺 build -7.3
+- **region_matrix 重写为诊断工具**：按 build 打印三年选区 + 占比
+- **新增 `test_region_selection_per_build` 测试**：7 build × 3 年选区人工审查
+- **LocalRamenTrainer 补齐第 1 年地区选择打分**：不再恒选候选 0；基线作废
+- **拉面动作空间不变量 + 终局分分解（MCTS P0 安全网）**
+- **搜索层拉面合并动作落地（P1.1+P1.2）**：一次搜完 ramen×targets；拉面基线作废
+- **拉面搜索阶段缺省补 `ramen`**：42 局配对 +2306
+- **测试有效性审查修补**：缺省守门测试、结构恒等式、删无效测量壳
+- **不在判定与得意率解耦**：distribute_person 两步算法，缺席名单入 RamenState
+- **地区拉面分身缺席优先**：缺席卡优先补分身位；拉面基线作废
 
 ## 2026-08-24
 - **训练人数加成按人头类型计数**：`1 + 0.05 × 人数` 乘区改按 `PersonType` 判定（替代硬编码下标），抽出 `count_training_persons`，负数与越界下标一并不计。**改变拉面模拟数值，基线作废；温泉与 base 逐位不变**

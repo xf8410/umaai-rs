@@ -153,6 +153,7 @@ pub struct LocalRamenConfig {
     /// 配置 token `couple50` 对应 `0.50`。
     pub ramen_train_coupling_weight: f32,
 
+
     /// 隐藏风味饥饿加成权重，单位为策略评分/缺口点。
     ///
     /// 友人外出固定 +2 隐藏风味（上限 4，见 `RamenGame::do_friend_outing`）。
@@ -171,6 +172,18 @@ pub struct LocalRamenConfig {
     /// (≈800，每次吃面评分约 1200 ÷ 平均消耗 1.5)` 计入友人价值——"友人 5 次 =
     /// 10 个隐藏风味 = 吃面资源"的长期估值。`0.0` 表示关闭。配置 token `fh1` 对应 `1.0`。
     pub friend_future_hidden_weight: f32,
+
+    /// 友人"主动积极使用"价值，单位为策略评分。
+    ///
+    /// 友人外出是"带收益的休息"：事件给 30~50 体力 + 属性 + 心情 + 2 隐藏风味。
+    /// 饥饿加成只在 `special_feeling` 缺口大时触发，导致体力尚可、不饥饿时策略
+    /// 从不主动用友人——链拖到后期、体力线被训练打低后才被迫用。
+    ///
+    /// 本项在「未来 3 回合无固定发放（夏合宿 +2 / 年末 +1）」且「本次 +2 不溢出
+    /// （`special_feeling ≤ 2`）」时给友人加固定价值，代表"主动用友人维持体力线 +
+    /// 完链"的收益——体力正常/高时也愿意用，而不是等饥饿或被迫休息。
+    /// `0.0` 关闭。配置 token `pro150` 对应 `150.0`。
+    pub friend_proactive_weight: f32,
 
     /// 吃面必成价值权重，无量纲。
     ///
@@ -306,6 +319,7 @@ impl Default for LocalRamenConfig {
             ramen_train_coupling_weight: 0.0,
             friend_hidden_starve_weight: 0.0,
             friend_future_hidden_weight: 0.0,
+            friend_proactive_weight: 0.0,
             eat_guarantee_weight: 0.0,
             effective_ramen_failure: true,
             safety_bridge_min_fail: 101.0,
@@ -472,10 +486,14 @@ impl LocalRamenTrainer {
                 local.ramen_window_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("couple") {
                 local.ramen_train_coupling_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("capd") {
+                policy.cap_discount_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("starve") {
                 local.friend_hidden_starve_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("fh") {
                 local.friend_future_hidden_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("pro") {
+                local.friend_proactive_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("guarantee") {
                 local.eat_guarantee_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("look") {
@@ -577,6 +595,14 @@ impl LocalRamenTrainer {
         used < self.config.friend_outing_cumulative_caps[year]
     }
 
+    /// 友人外出 +2 隐藏风味是否不溢出（上限 4，见 `do_friend_outing`）。
+    ///
+    /// 溢出时 +2 中超出部分浪费，友人的隐藏风味补给价值应视为 0，
+    /// 优先恢复场景（体力低）应退回休息而非友人。
+    fn friend_hidden_not_overflow(&self, g: &RamenGame) -> bool {
+        g.ramen.special_feeling <= 2
+    }
+
     /// 下一段友人外出的动态价值。
     ///
     /// 事件本体按当前体力/干劲裁掉溢出，第三段两个选项也在这里实时比较；万能材料固定按
@@ -622,7 +648,25 @@ impl LocalRamenTrainer {
         } else {
             0.0
         };
-        let total = base + event_value + material + chain + starve + supply;
+        // 主动积极使用：未来 3 回合无固定发放（夏合宿 +2 / 年末 +1）且本次 +2 不溢出
+        // （special ≤ 2）时，友人的"体力维持 + 完链"价值——体力正常/高时也愿意用，
+        // 维持体力线、提前完链，而不是等饥饿或被迫休息。友人体力恢复实际按
+        // vital_bonus 乘算（如骏川满破 +60% → 48~80 体力）。
+        let proactive = if self.config.friend_proactive_weight > 0.0 {
+            let upcoming = [1, 2, 3]
+                .iter()
+                .map(|&d| get_turn_special_feeling(g.turn() + d).max(0))
+                .sum::<i32>();
+            let not_overflow = g.ramen.special_feeling <= 2;
+            if upcoming == 0 && not_overflow {
+                self.config.friend_proactive_weight
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+        let total = base + event_value + material + chain + starve + supply + proactive;
         Ok((
             total,
             vec![
@@ -632,15 +676,17 @@ impl LocalRamenTrainer {
                 ("friend_chain_dynamic".to_string(), chain),
                 ("friend_hidden_starve".to_string(), starve),
                 ("friend_hidden_future".to_string(), supply),
+                ("friend_proactive".to_string(), proactive),
             ],
             format!(
-                "友人外出#{} 选项{} 动态事件{:.0} 材料+2(库存{}也不禁用) 饥饿+{:.0} 未来+{:.0}",
+                "友人外出#{} 选项{} 动态事件{:.0} 材料+2(库存{}也不禁用) 饥饿+{:.0} 未来+{:.0} 主动+{:.0}",
                 used + 1,
                 choice + 1,
                 event_value,
                 g.ramen.special_feeling,
                 starve,
-                supply
+                supply,
+                proactive
             )
         ))
     }
@@ -671,23 +717,28 @@ impl LocalRamenTrainer {
     /// 按当前状态给友人事件选项评分。先复用通用事件评分，再扣除体力/干劲实际无法获得的
     /// 溢出；最大体力是永久收益，补回通用事件评分尚未覆盖的价值。
     fn dynamic_friend_event_choice(&self, g: &RamenGame, choices: &[Vec<EventChoice>]) -> Result<(usize, f32)> {
-        let (_, base) = self.policy.decide_event(g, choices)?;
+        // 友人卡词条乘数：「事件效果提高」作用于五维/PT、「恢复量提高」作用于正向体力
+        // 与永久最大体力（与 apply_friend_bonus 规则一致），避免友人事件价值被低估。
+        let event_mult = (100 + g.friend.event_bonus) as f32 / 100.0;
+        let vital_mult = (100 + g.friend.vital_bonus) as f32 / 100.0;
         let mut values = Vec::with_capacity(choices.len());
-        for (group, out) in choices.iter().zip(base.iter()) {
-            let mut adjust = 0.0;
+        for group in choices {
+            let mut val = 0.0;
             for c in group {
                 let prob = if c.prob == 0 { 1.0 } else { c.prob as f32 / 100.0 };
+                val += self.policy.score_friend_event_choice(g, c, event_mult, vital_mult)?;
+                // 体力/干劲溢出修正：用乘算后的实际恢复量，避免高估溢出
                 let max_after = g.uma.max_vital + c.value.max_vital;
-                let requested_vital = c.value.vital.max(0);
+                let requested_vital = (c.value.vital.max(0) as f32 * vital_mult) as i32;
                 let realized_vital = requested_vital.min((max_after - g.uma.vital).max(0));
-                adjust -= (requested_vital - realized_vital) as f32 * self.policy.config.event_vital_weight * prob;
+                val -= (requested_vital - realized_vital) as f32 * self.policy.config.event_vital_weight * prob;
                 let requested_motivation = c.value.motivation.max(0);
                 let realized_motivation = requested_motivation.min((5 - g.uma.motivation).max(0));
-                adjust -= (requested_motivation - realized_motivation) as f32
+                val -= (requested_motivation - realized_motivation) as f32
                     * self.policy.config.event_motivation_weight
                     * prob;
             }
-            values.push(out.score + adjust);
+            values.push(val);
         }
         let choice = values
             .iter()
@@ -866,7 +917,11 @@ impl LocalRamenTrainer {
                 .filter(|(i, _)| {
                     a.get(*i).is_some_and(|x| {
                         x.operation == Operation::Rest
-                            || (x.operation == Operation::FriendOuting && self.friend_outing_within_pacing(g))
+                            || (x.operation == Operation::FriendOuting
+                                && self.friend_outing_within_pacing(g)
+                                // 体力低时应优先友人（恢复 48~80 体力 + 属性 + 完链，比休息值），
+                                // 但隐藏风味不溢出时才行（友人 +2 上限 4，溢出浪费）
+                                && self.friend_hidden_not_overflow(g))
                     })
                 })
                 .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
@@ -1357,7 +1412,9 @@ impl LocalRamenTrainer {
 /// - 使用基础失败率作为保守决策风险预算（游戏规则仍应用真实减失败率）；
 /// - Cook2 式诀窍边际库存权重：40；
 /// - 关闭随机分身 lookahead；
-/// - 第一/二年仅在体力低于 30 时硬休息，第三年取消硬休息门，改由连续评分决策；
+/// - 回合级体力门限：吃面回合训练必成放掉门限（vital_rest_eating=0），不吃面回合
+///   保持体力 30 硬休息（三年一致）；第三年吃面时按 y3 门禁（训练后硬底线 15 /
+///   吃面前软目标 25 / 缺口软成本 0.5）防打空体力；
 /// - 吃面前先决定是否训练；吃面后强制从训练候选中选择，禁止休息浪费加成；
 /// - 第三年终盘允许有马前把体力控到 0，随后由赛后 +40 与超级拉面每回合 +20 接管；
 /// - 本来要休息时按 0/2/5 跨年累计节奏使用友人外出；第一年不消耗次数，第二年累计 2 次，第三年完成 5 次；
@@ -1410,11 +1467,16 @@ impl RecommendedRamenTrainer {
             let mut policy = RamenPolicyConfig::default();
             policy.pt_rate = pt_rate;
             policy.ramen_pt_weight = 2.0;
-            // 只在极低体力时保留下限；第三年彻底取消硬休息门，交给连续体力、
-            // 失败期望与休息动作本身的分数比较，避免浪费终盘高价值训练回合。
+            // 不吃面回合体力硬门限（回合级差异化：吃面回合由 vital_rest_eating=0 放掉，
+            // 避免浪费吃面必成的训练回合）。
             policy.vital_rest = vital_rest;
+            // 回合级体力门限：吃面回合训练必成（fail_rate_drop），体力门限放掉（0）；
+            // 不吃面回合保留 vital_rest（避免打空体力后下回合被迫休息/失败）。
+            policy.vital_rest_eating = 0;
             // 保守风险预算：只影响策略打分，不改变规则层真实失败率。
             policy.effective_ramen_failure = false;
+            // 残余收益折扣（方案 E）：主属性快满时打折副属性+PT，提前分流。初始 1.0 待矩阵验证。
+            policy.cap_discount_weight = 1.0;
 
             let mut local = LocalRamenConfig::default();
             local.status_reserve_max = 40.0;
@@ -1429,6 +1491,8 @@ impl RecommendedRamenTrainer {
             local.ramen_train_coupling_weight = 2.0;
             local.eat_guarantee_weight = 3.0;
             local.friend_hidden_starve_weight = 300.0;
+            // 友人主动积极使用：短期无固定发放 + 不溢出时给基础价值（体力维持 + 完链）。
+            local.friend_proactive_weight = 150.0;
             // 未来供给缺口估值（方案2）经 100 局扫描为单调负收益（fh=0.2 -125 ~ fh=1.0 -767）：
             // 追求友人 5/5 的边际代价超过隐藏风味边际收益，4.6/5 是 starve=300 下的最优平衡。
             // 字段保留可配（matrix_variant `fh`），preset 关闭。
@@ -1442,10 +1506,13 @@ impl RecommendedRamenTrainer {
             local.effective_ramen_failure = false;
             local.cook2_stock_weight = 40.0;
             local.eat_requires_training = true;
-            local.y3_pre_train_vital_target = 0;
+            // 第三年回合级体力门禁（workbench_improve_1 §2）：吃面前软目标 25、
+            // 训练后硬底线 15（非智）、缺口软成本 0.5/点——防吃面打空体力后
+            // 下回合被迫休息/失败；turn≥70 由有马 +40 / 超级拉面 +20 接管。
+            local.y3_pre_train_vital_target = 25;
             local.y3_post_train_vital_target = 0;
-            local.y3_vital_shortfall_weight = 0.0;
-            local.y3_post_train_hard_floor = 0;
+            local.y3_vital_shortfall_weight = 0.5;
+            local.y3_post_train_hard_floor = 15;
             local.y3_recovery_horizon = true;
             local.friend_outing_replaces_rest = true;
             local.friend_outing3_recovery_vital = 0;
@@ -1457,7 +1524,9 @@ impl RecommendedRamenTrainer {
         }
 
         Self {
-            years: [make(16.0, 30), make(64.0, 30), make(64.0, 0)],
+            // 第三年不再取消硬休息门：不吃面回合保留体力门限 30（回合级差异化，
+            // 吃面回合仍放掉），配合 y3 门禁参数防体力打空。
+            years: [make(16.0, 30), make(64.0, 30), make(64.0, 30)],
             last_year: Mutex::new(None)
         }
     }
@@ -1967,6 +2036,79 @@ mod tests {
         }
         if supply2 > 0.5 {
             panic!("后期供给充足时未来缺口应为0，实际 {supply2}");
+        }
+        Ok(())
+    }
+
+    /// 残余收益折扣（方案 E，policy 层）：主属性快满时，训练该位的副属性收益
+    /// 打折（cap_discount_weight=1 的 attr < 0 的 attr）；远离上限时两者相同。
+    #[test]
+    #[allow(clippy::panic)]
+    fn cap_discount_ratio_behavior() -> Result<()> {
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame, RamenStage, TrainingType}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut policy_off = RamenPolicyConfig::default();
+        policy_off.cap_discount_weight = 0.0;
+        let mut policy_on = RamenPolicyConfig::default();
+        policy_on.cap_discount_weight = 1.0;
+        let off = LocalRamenTrainer::with_configs(policy_off, LocalRamenConfig::default());
+        let on = LocalRamenTrainer::with_configs(policy_on, LocalRamenConfig::default());
+
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        game.base.turn = 50;
+        game.uma.vital = 100;
+
+        fn speed_attr(trainer: &LocalRamenTrainer, game: &RamenGame) -> Result<f32> {
+            let mut preview = game.clone();
+            preview.stage = RamenStage::Train;
+            let actions = preview.list_actions()?;
+            let (_, outs) = trainer.decide_train(&preview, &actions)?;
+            for (act, o) in actions.iter().zip(outs.iter()) {
+                if let Operation::Train(TrainingType::Speed) = act.operation {
+                    return Ok(o
+                        .breakdown
+                        .iter()
+                        .find(|(k, _)| k == "attr")
+                        .map(|(_, v)| *v)
+                        .unwrap_or(0.0));
+                }
+            }
+            Ok(0.0)
+        }
+
+        // 速位接近上限（剩余 10 < 2×训练值）：打折生效 → on 的 attr < off
+        game.uma.five_status[0] = game.uma.five_status_limit[0] - 10;
+        let attr_off_near = speed_attr(&off, &game)?;
+        let attr_on_near = speed_attr(&on, &game)?;
+        println!("速位剩余10: attr_off={attr_off_near} attr_on={attr_on_near}");
+
+        // 速位远离上限（剩余 1500）：不打折 → 两者相同
+        game.uma.five_status[0] = game.uma.five_status_limit[0] - 1500;
+        let attr_off_far = speed_attr(&off, &game)?;
+        let attr_on_far = speed_attr(&on, &game)?;
+        println!("速位剩余1500: attr_off={attr_off_far} attr_on={attr_on_far}");
+
+        if attr_on_near >= attr_off_near {
+            panic!("速位快满时打折应降低 attr，实际 off={attr_off_near} on={attr_on_near}");
+        }
+        if (attr_off_far - attr_on_far).abs() > 1e-3 {
+            panic!("速位远离上限时不应打折，实际 off={attr_off_far} on={attr_on_far}");
         }
         Ok(())
     }

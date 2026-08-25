@@ -37,6 +37,10 @@ pub struct RamenPolicyConfig {
     // ===== 守门（安全剪枝）=====
     /// 体力低于此值强制休息（经验：<45 训练失败率高）
     pub vital_rest: i32,
+    /// 吃面回合的体力强制休息阈值：吃面后训练必成（`fail_rate_drop` 生效），
+    /// 体力门限可以放掉（回合级差异化，workbench_improve_1 §2）。`0` 表示
+    /// 吃面回合不因体力强制休息；不吃面回合仍用 [`vital_rest`](Self::vital_rest)。
+    pub vital_rest_eating: i32,
     /// 心情低于此值强制外出（经验：<3 训练数值损失大）
     pub motivation_outing: i32,
     /// 生病时治病（Clinic）优先级权重（守门直通，无需打分）
@@ -45,6 +49,18 @@ pub struct RamenPolicyConfig {
     pub status_rate: f32,
     /// PT→评分折算（默认与 `pt_score_rate` 同量级）
     pub pt_rate: f32,
+    /// 主属性快满时"残余收益"折扣强度（方案 E，0~1）。
+    ///
+    /// 配卡决定训练效率（3 速 build 速位每次 +90 天然更快接近上限），凸评分曲线
+    /// 让策略优先堆满主属性；主属性快满/已满时训练该位只剩副属性 + PT 收益，
+    /// 仍全额计入会诱使策略继续训练已满位、冷落卡少属性。
+    ///
+    /// 按「主属性剩余空间 / (本次主属性收益 × 2)」算有效比率 `ratio`
+    /// （剩余不足 2 次训练收益即平滑衰减，提前分流而非等溢出才惩罚），
+    /// 副属性与 PT 收益按 `ratio × 本权重` 打折；主属性本身仍按差分全额
+    /// （`status_gain` 已截断溢出部分）。`0.0` 关闭；`1.0` 全额打折。
+    /// 配置 token `capd100` 对应 `1.0`。
+    pub cap_discount_weight: f32,
     /// 训练失败惩罚（期望值中被扣减的固定分）
     pub failure_penalty: f32,
     /// Whether policy scoring applies ramen_basic_effect.fail_rate_drop.
@@ -124,9 +140,11 @@ impl Default for RamenPolicyConfig {
     fn default() -> Self {
         Self {
             vital_rest: 45,
+            vital_rest_eating: 0,
             motivation_outing: 3,
             status_rate: 1.0,
             pt_rate: 8.0,
+            cap_discount_weight: 0.0,
             failure_penalty: 60.0,
             effective_ramen_failure: true,
             shining_bonus: 60.0,
@@ -253,11 +271,18 @@ impl RamenPolicy {
             }
         }
         // 守门 2：体力低 → 休息（防失败率崩盘；优先于心情、训练）
-        if uma.vital < self.config.vital_rest {
+        // 回合级差异化：吃面回合训练必成（fail_rate_drop），体力门限放掉；
+        // 不吃面回合保留阈值（避免打空体力后下回合被迫休息/失败）。
+        let rest_threshold = if game.ramen.current_ramen.is_some() {
+            self.config.vital_rest_eating
+        } else {
+            self.config.vital_rest
+        };
+        if uma.vital < rest_threshold {
             if let Some(idx) = actions.iter().position(|a| a.operation == Operation::Rest) {
                 return Ok((idx, vec![RamenPolicyOutput {
                     score: f32::MAX,
-                    reason: format!("守门: 体力{}<{}休息", uma.vital, self.config.vital_rest),
+                    reason: format!("守门: 体力{}<{}休息", uma.vital, rest_threshold),
                     ..Default::default()
                 }]));
             }
@@ -502,9 +527,23 @@ impl RamenPolicy {
                     base_fail_rate
                 };
                 // 属性增益（five_status_final_score 差分，与 calc_score 一致）
+                // 方案 E：主属性快满时副属性按有效比率打折（残余收益折扣）；
+                // PT 是真实收益（训练任何位都给，与溢出无关）不打折。
+                let inc_main = value.status_pt[train].max(0);
+                let cap_left = (game.uma().five_status_limit[train] - game.uma().five_status[train]).max(0);
+                let ratio = if self.config.cap_discount_weight > 0.0 && inc_main > 0 {
+                    (cap_left as f32 / (inc_main as f32 * 3.0)).clamp(0.0, 1.0)
+                } else {
+                    1.0
+                };
                 let mut attr_gain = 0.0;
                 for i in 0..5 {
-                    attr_gain += self.status_gain(game, i, value.status_pt[i]);
+                    let inc_i = if i == train {
+                        value.status_pt[i]
+                    } else {
+                        (value.status_pt[i] as f32 * ratio) as i32
+                    };
+                    attr_gain += self.status_gain(game, i, inc_i);
                 }
                 let pt_gain = value.status_pt[5] as f32;
                 // 注：`status_gain` 内部已乘 status_rate，此处不可再乘（否则成平方）
@@ -668,20 +707,41 @@ impl RamenPolicy {
     // ========== Event 打分 ==========
 
     /// 单个事件选项的效果折算（含 flags 修正）
+    /// 单个事件选项的效果折算（含 flags 修正）
     fn score_event_choice(&self, game: &RamenGame, c: &EventChoice) -> Result<f32> {
+        self.score_event_choice_ex(game, c, 1.0, 1.0)
+    }
+
+    /// 带友人卡词条加成的事件评分（供友人事件动态估值）。
+    ///
+    /// 友人卡「事件效果提高」（`event_effect_up`）对五维与 PT 乘算，
+    /// 「恢复量提高」（`event_recovery_amount_up`）对正向体力恢复与永久最大体力乘算
+    /// （规则见 `BaseGame::apply_friend_bonus`）。基础 `score_event_choice` 不感知
+    /// 友人词条，友人事件价值会被系统性低估。
+    pub fn score_friend_event_choice(
+        &self, game: &RamenGame, c: &EventChoice, event_mult: f32, vital_mult: f32
+    ) -> Result<f32> {
+        self.score_event_choice_ex(game, c, event_mult, vital_mult)
+    }
+
+    /// 事件评分核心：`event_mult` 作用于五维/PT，`vital_mult` 作用于正向体力恢复与
+    /// 永久最大体力（与 `apply_friend_bonus` 的乘算规则一致；体力消耗/心情/hint/羁绊
+    /// 不受加成）。
+    fn score_event_choice_ex(&self, game: &RamenGame, c: &EventChoice, event_mult: f32, vital_mult: f32) -> Result<f32> {
         // prob=0 视为必触发（与规则层语义一致）
         let prob = if c.prob == 0 { 100.0 } else { c.prob as f32 };
         let mut val = 0.0;
         for i in 0..5 {
-            val += self.status_gain(game, i, c.value.status_pt[i]);
+            val += self.status_gain(game, i, c.value.status_pt[i]) * event_mult;
         }
-        val += c.value.status_pt[5] as f32 * self.config.pt_rate;
-        val += c.value.vital as f32 * self.config.event_vital_weight;
+        val += c.value.status_pt[5] as f32 * self.config.pt_rate * event_mult;
+        let vital = if c.value.vital > 0 { c.value.vital as f32 * vital_mult } else { c.value.vital as f32 };
+        val += vital * self.config.event_vital_weight;
         val += c.value.motivation as f32 * self.config.event_motivation_weight;
         // 旧简化器漏掉了 Hint、羁绊和永久最大体力，导致友人/支援事件被系统性低估。
         val += c.value.hint_level as f32 * global!(GAMECONSTANTS).hint_pt_rate * self.config.pt_rate;
         val += c.value.friendship as f32 * 5.0;
-        val += c.value.max_vital as f32 * self.config.event_vital_weight * 2.0;
+        val += c.value.max_vital as f32 * self.config.event_vital_weight * 2.0 * vital_mult;
         // flags：ill/bad_trainer 是坏状态，获得惩罚、移除奖励
         if let Some(flags) = &c.add_flags {
             if flags.ill || flags.bad_trainer {
