@@ -1,59 +1,105 @@
-name: 修复并验证吃面后必须训练
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
+name: H0-G39最终小数策略×两配卡×120地区
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
 concurrency:
-  group: fix-post-eat-training-${{ github.ref }}
-  cancel-in-progress: false
-
+  group: h0-g39-120-region-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  fix:
+  matrix:
+    name: H0地区${{ matrix.start }}-${{ matrix.end }}
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        include:
+          - {start: 0, end: 6}
+          - {start: 6, end: 12}
+          - {start: 12, end: 18}
+          - {start: 18, end: 24}
+          - {start: 24, end: 30}
+          - {start: 30, end: 36}
+          - {start: 36, end: 42}
+          - {start: 42, end: 48}
+          - {start: 48, end: 54}
+          - {start: 54, end: 60}
+          - {start: 60, end: 66}
+          - {start: 66, end: 72}
+          - {start: 72, end: 78}
+          - {start: 78, end: 84}
+          - {start: 84, end: 90}
+          - {start: 90, end: 96}
+          - {start: 96, end: 102}
+          - {start: 102, end: 108}
+          - {start: 108, end: 114}
+          - {start: 114, end: 120}
+    env:
+      COMBO_START: ${{ matrix.start }}
+      COMBO_END: ${{ matrix.end }}
+      RUNS: 100
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-          fetch-depth: 0
-      - name: 修复最佳训练索引未写回
+      - name: 注入PR15最终小数策略入口
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('crates/umasim/src/trainer/local_ramen_trainer.rs')
-          s=p.read_text(encoding='utf-8')
-          old='''            let _ = out
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))
-                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
-                .map(|(i, _)| i)
-                .ok_or_else(|| anyhow::anyhow!("已吃面但 Train 阶段没有训练候选"))?;'''
-          new='''            guard = out
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| a.get(*i).is_some_and(|x| matches!(x.operation, Operation::Train(_))))
-                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
-                .map(|(i, _)| i)
-                .ok_or_else(|| anyhow::anyhow!("已吃面但 Train 阶段没有训练候选"))?;'''
-          if s.count(old)!=1: raise SystemExit(f'回归代码应命中1处，实际{s.count(old)}处')
-          p.write_text(s.replace(old,new),encoding='utf-8')
-          print('已恢复最佳训练索引写回 guard')
-          PY
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with: {shared-key: h0-g39-region-matrix}
+      - run: cargo run -p umasim --bin requested_decks_region_matrix --release --no-default-features
+      - uses: actions/upload-artifact@v4
         with:
-          shared-key: post-eat-training-regression
-      - name: 编译及策略回归
-        run: |
-          cargo check -p umasim --no-default-features
-          cargo test -p umasim recommended_ramen_uses_025_friend_pacing --no-default-features
-      - name: 提交修复
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/umasim/src/trainer/local_ramen_trainer.rs
-          git commit -m 'fix(ramen): enforce training after eating ramen'
-          git push origin HEAD:${{ github.ref_name }}
+          name: H0地区${{ matrix.start }}-${{ matrix.end }}-原始结果
+          path: requested-decks-region-matrix.csv
+          retention-days: 30
+  summary:
+    name: 汇总H0-G39的24000局
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'H0地区*-原始结果', path: results}
+      - run: |
+          python3 - <<'PY' | tee H0-G39两配卡120地区报告.md
+          import csv,glob,collections,statistics
+          rows=[];files=glob.glob('results/**/requested-decks-region-matrix.csv',recursive=True)
+          if len(files)!=20:raise SystemExit(f'分片{len(files)}')
+          for p in files:rows+=list(csv.DictReader(open(p)))
+          if len(rows)!=24000:raise SystemExit(f'行数{len(rows)}')
+          g=collections.defaultdict(list)
+          for r in rows:g[(r['build'],int(r['combo_index']),r['region_ids'],r['deck'])].append(r)
+          if len(g)!=240 or any(len(x)!=100 for x in g.values()):raise SystemExit('覆盖不完整')
+          builds=['3速1耐1智','2速2耐1智'];ranked={}
+          print('# H0/G39最终小数策略 × 两配卡 × 第三年120地区\n')
+          print('- H0参数：PT 31.0594/26.2536/4.3471；缺口1.1311；溢出1.3254；让分234.9200；Y1/2对盘0.1148；Y3对盘0.1999；预留5.2663；羁绊5.2657；Hint 11.2926；续航0')
+          print('- 各格100个相同seed，总计24,000局；保留当前分支既有硬门语义')
+          print('\n|配卡|实体卡组|最佳组合|地区ID|均分|P10|中位数|P90|平均PT|')
+          print('|---|---|---:|---|---:|---:|---:|---:|---:|')
+          for b in builds:
+            z=[]
+            for k,rs in g.items():
+              if k[0]!=b:continue
+              s=sorted(int(r['score']) for r in rs);pt=[int(r['skill_pt']) for r in rs];q=lambda p:s[round(99*p)]
+              z.append((statistics.mean(s),k,q(.1),statistics.median(s),q(.9),statistics.mean(pt)))
+            z.sort(reverse=True);ranked[b]=z;m,k,p10,p50,p90,pt=z[0]
+            print(f'|{b}|{k[3]}|{k[1]}|{k[2]}|{m:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
+          for b in builds:
+            print(f'\n## {b}前10\n\n|排名|组合|地区ID|均分|P10|中位数|P90|平均PT|\n|---:|---:|---|---:|---:|---:|---:|---:|')
+            for i,(m,k,p10,p50,p90,pt) in enumerate(ranked[b][:10],1):print(f'|{i}|{k[1]}|{k[2]}|{m:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
+          deltas=[]
+          for ci in range(120):
+            aa=next(v for k,v in g.items()if k[0]==builds[0]and k[1]==ci);bb=next(v for k,v in g.items()if k[0]==builds[1]and k[1]==ci)
+            a={int(r['run']):int(r['score'])for r in aa};b={int(r['run']):int(r['score'])for r in bb};deltas.append(statistics.mean(b[i]-a[i]for i in range(100)))
+          print('\n## 同地区配对\n')
+          print(f'- 2速2耐1智领先：**{sum(x>0 for x in deltas)}/120**')
+          print(f'- 3速1耐1智领先：**{sum(x<0 for x in deltas)}/120**')
+          print(f'- 平均差（2速2耐1智减3速1耐1智）：**{statistics.mean(deltas):+.1f}**')
+          PY
+          cat H0-G39两配卡120地区报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: H0-G39两配卡120地区总报告
+          path: H0-G39两配卡120地区报告.md
+          retention-days: 30
