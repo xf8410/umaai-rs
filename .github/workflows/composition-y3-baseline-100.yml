@@ -1,0 +1,71 @@
+name: 配卡0基准100局验收
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: composition-y3-baseline-100-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: 配卡0-10地区各10局
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSITION_INDEX: 0
+      COMBO_START: 0
+      COMBO_END: 10
+      RUNS: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: composition-y3-handwritten
+      - name: Run baseline 100 games
+        run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
+      - name: Validate and summarize
+        run: |
+          python3 - <<'PY' | tee 配卡0基准100局报告.md
+          import csv, statistics
+          rows=list(csv.DictReader(open('composition-y3-matrix.csv',encoding='utf-8',newline='')))
+          if len(rows)!=100:
+              raise SystemExit(f'应有100局，实际{len(rows)}局')
+          if {int(r['composition_index']) for r in rows}!={0}:
+              raise SystemExit('混入非配卡0结果')
+          if {int(r['combo_index']) for r in rows}!=set(range(10)):
+              raise SystemExit('地区组合应为0至9')
+          if any(sum(int(r['combo_index'])==i for r in rows)!=10 for i in range(10)):
+              raise SystemExit('每个地区组合必须恰好10局')
+          scores=[int(r['score']) for r in rows]
+          pts=[int(r['skill_pt']) for r in rows]
+          scores_sorted=sorted(scores)
+          def pct(xs,p):
+              return xs[round((len(xs)-1)*p)]
+          print('# 配卡0基准100局验收')
+          print('\n- 配卡：'+rows[0]['composition'])
+          print('- 实体卡组：'+rows[0]['deck'])
+          print('- 地区组合：0–9，每个组合10局，共100局')
+          print(f'- 平均分：**{statistics.mean(scores):.1f}**')
+          print(f'- 最低 / P10 / 中位 / P90 / 最高：**{min(scores)} / {pct(scores_sorted,.1)} / {statistics.median(scores):.1f} / {pct(scores_sorted,.9)} / {max(scores)}**')
+          print(f'- 标准差：**{statistics.pstdev(scores):.1f}**')
+          print(f'- 平均技能PT：**{statistics.mean(pts):.1f}**')
+          print('\n## 各地区组合')
+          print('|组合|地区ID|局数|平均分|平均PT|')
+          print('|---:|---|---:|---:|---:|')
+          for i in range(10):
+              rs=[r for r in rows if int(r['combo_index'])==i]
+              print(f'|{i}|{rs[0]["region_ids"]}|{len(rs)}|{statistics.mean(int(r["score"]) for r in rs):.1f}|{statistics.mean(int(r["skill_pt"]) for r in rs):.1f}|')
+          PY
+          cat 配卡0基准100局报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 配卡0基准100局结果
+          path: |
+            composition-y3-matrix.csv
+            配卡0基准100局报告.md
+          retention-days: 30
