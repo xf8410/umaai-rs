@@ -1,18 +1,19 @@
-name: 吃面后门控三臂五维属性矩阵
+name: 友人训练优先级五维矩阵
 on: {workflow_dispatch: {}}
 permissions: {contents: read}
 jobs:
   matrix:
-    name: ${{ matrix.mode }}｜片${{ matrix.shard }}
+    name: 倍率${{ matrix.scale }}｜片${{ matrix.shard }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        mode: [baseline,soft150,hard]
+        scale: ['1','2','3','4','6']
         shard: [0,1,2]
     env:
-      GATE_MODE: ${{ matrix.mode }}
+      FRIEND_TRAIN_SCALE: ${{ matrix.scale }}
       RUNS: 100
+      GATE_MODE: friend-${{ matrix.scale }}
       SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
@@ -20,8 +21,7 @@ jobs:
           python3 scripts/ramen/add_vital_transition_override.py
           python3 scripts/ramen/add_recipe_continuity_override.py
           python3 scripts/ramen/add_random_decimal_override.py
-          if [ "$GATE_MODE" = soft150 ]; then POST_EAT_SOFT_THRESHOLD=150 python3 scripts/ramen/add_post_eat_soft_gate.py; fi
-          if [ "$GATE_MODE" = hard ]; then python3 scripts/ramen/fix_post_eat_covered_training.py; fi
+          python3 scripts/ramen/add_friend_training_priority_scale.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
@@ -36,52 +36,43 @@ jobs:
           PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: post-eat-five-status}
+        with: {shared-key: friend-training-priority}
       - run: |
-          export BASE_SEED=$((707070 + SHARD * 1000003))
+          export BASE_SEED=$((808080 + SHARD * 1000003))
           cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
-          mv eat-friend-audit.csv "$GATE_MODE-$SHARD.csv"
+          mv eat-friend-audit.csv "friend-$FRIEND_TRAIN_SCALE-$SHARD.csv"
       - uses: actions/upload-artifact@v4
-        with:
-          name: 五维门控-${{ matrix.mode }}-${{ matrix.shard }}
-          path: ${{ matrix.mode }}-${{ matrix.shard }}.csv
-          retention-days: 30
+        with: {name: '友训-${{ matrix.scale }}-${{ matrix.shard }}', path: 'friend-${{ matrix.scale }}-${{ matrix.shard }}.csv', retention-days: 30}
   summary:
     needs: matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: {pattern: '五维门控-*', path: results, merge-multiple: true}
-      - name: 汇总五维、属性总和、PT与总评分
-        run: |
-          python3 - <<'PY' | tee 吃面后门控三臂五维属性报告.md
+        with: {pattern: '友训-*', path: results, merge-multiple: true}
+      - run: |
+          python3 - <<'PY' | tee 友人训练优先级五维报告.md
           import csv,glob,collections,statistics
           rows=[]
           for p in glob.glob('results/*.csv'):rows+=list(csv.DictReader(open(p)))
           g=collections.defaultdict(list)
-          for r in rows:g[(r['build'],r['mode'])].append(r)
-          keys=['speed','stamina','power','guts','wisdom','status_sum','skill_pt','score']
-          print('# 吃面后门控三臂：五维属性与属性总和报告\n')
-          print('|配卡|方案|局数|速度|耐力|力量|根性|智力|五维总和|PT|总评分|P10|覆盖|错位|')
-          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
-          means={}
+          for r in rows:g[(r['build'],r['mode'].split('-')[-1])].append(r)
+          ks=['speed','stamina','power','guts','wisdom','status_sum','skill_pt','score'];M={}
+          print('# 友人训练优先级矩阵\n')
+          print('|配卡|倍率|局数|速|耐|力|根|智|五维和|PT|总分|P10|友训|60后友训|外出|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
           for b in ['3速1耐1智','2速2耐1智']:
-            for m in ['baseline','soft150','hard']:
-              rs=g[(b,m)];v={k:statistics.mean(int(r[k])for r in rs)for k in keys};means[(b,m)]=v;scores=sorted(int(r['score'])for r in rs)
-              av=lambda k:statistics.mean(int(r[k])for r in rs)
-              print(f"|{b}|{m}|{len(rs)}|{v['speed']:.1f}|{v['stamina']:.1f}|{v['power']:.1f}|{v['guts']:.1f}|{v['wisdom']:.1f}|{v['status_sum']:.1f}|{v['skill_pt']:.1f}|{v['score']:.1f}|{scores[len(scores)//10-1]}|{av('aligned'):.2f}|{av('misaligned'):.2f}|")
-          print('\n## 相对 baseline\n')
-          print('|配卡|方案|Δ速|Δ耐|Δ力|Δ根|Δ智|Δ五维总和|ΔPT|Δ总评分|三主指标同时提升|')
-          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|')
+            for m in ['1','2','3','4','6']:
+              rs=g[(b,m)];v={k:statistics.mean(int(r[k])for r in rs)for k in ks};M[(b,m)]=v;s=sorted(int(r['score'])for r in rs);av=lambda k:statistics.mean(int(r[k])for r in rs)
+              print(f"|{b}|{m}|{len(rs)}|{v['speed']:.1f}|{v['stamina']:.1f}|{v['power']:.1f}|{v['guts']:.1f}|{v['wisdom']:.1f}|{v['status_sum']:.1f}|{v['skill_pt']:.1f}|{v['score']:.1f}|{s[len(s)//10-1]}|{av('friend_train'):.2f}|{av('friend_train_after60'):.2f}|{av('friend_outing'):.2f}|")
+          print('\n## 相对1倍基线及晋级\n')
+          print('|配卡|倍率|Δ速|Δ耐|Δ力|Δ根|Δ智|Δ五维和|ΔPT|Δ总分|三指标全升|五维无单项下降|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|')
           for b in ['3速1耐1智','2速2耐1智']:
-            z=means[(b,'baseline')]
-            for m in ['soft150','hard']:
-              v=means[(b,m)];d={k:v[k]-z[k] for k in keys};ok=d['status_sum']>0 and d['skill_pt']>0 and d['score']>0
-              print(f"|{b}|{m}|{d['speed']:+.1f}|{d['stamina']:+.1f}|{d['power']:+.1f}|{d['guts']:+.1f}|{d['wisdom']:+.1f}|{d['status_sum']:+.1f}|{d['skill_pt']:+.1f}|{d['score']:+.1f}|{'是' if ok else '否'}|")
+            z=M[(b,'1')]
+            for m in ['2','3','4','6']:
+              d={k:M[(b,m)][k]-z[k] for k in ks};tri=all(d[k]>0 for k in ['status_sum','skill_pt','score']);five=all(d[k]>=0 for k in ks[:5])
+              print(f"|{b}|{m}|{d['speed']:+.1f}|{d['stamina']:+.1f}|{d['power']:+.1f}|{d['guts']:+.1f}|{d['wisdom']:+.1f}|{d['status_sum']:+.1f}|{d['skill_pt']:+.1f}|{d['score']:+.1f}|{'是' if tri else '否'}|{'是' if five else '否'}|")
           PY
-          cat 吃面后门控三臂五维属性报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 友人训练优先级五维报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        with:
-          name: 吃面后门控三臂五维属性总报告
-          path: 吃面后门控三臂五维属性报告.md
-          retention-days: 30
+        with: {name: 友人训练优先级五维总报告, path: 友人训练优先级五维报告.md, retention-days: 30}
