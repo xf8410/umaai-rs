@@ -17,7 +17,7 @@ use anyhow::Result;
 
 use super::{
     effects::calc_ramen_training_effect,
-    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options}
+    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options},
 };
 use crate::{
     game::{
@@ -107,6 +107,10 @@ pub struct RamenPolicyConfig {
     /// 且同一年内 `pt_bonus` / `hint_count` 恒定，故本权重的绝对值不影响 argmax，
     /// 只影响打印出来的分数量级。
     pub region_youqing_weight: f32,
+    /// 卡少训练位 youqing 加权→分数折算
+    pub region_low_count_youqing_weight: f32,
+    /// `low_count_youqing` 的放大系数 K（卡组 bias ≤ 1 的训练位权重倍率）
+    pub region_low_count_k: f32,
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
@@ -144,6 +148,8 @@ impl Default for RamenPolicyConfig {
             region_pt_weight: 30.0,
             region_hint_weight: 15.0,
             region_youqing_weight: 1.0,
+            region_low_count_youqing_weight: 0.0,
+            region_low_count_k: 2.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
@@ -340,6 +346,11 @@ impl RamenPolicy {
     }
 
     /// RegionSelect 阶段：按地区静态价值打分选组合（含第 3 年 120 组合全枚举，O(360) 便宜）
+    ///
+    /// 每个组合的分数 = 逐地区 `score_region`（卡组 bias × 词条）累加 + 组合级加分
+    /// `low_count_youqing`（卡少训练位 youqing 加权，权重 0 时与现状一致）。
+    /// 曾实验的诀窍模拟指标（净获得 / 配方失衡 / 吃出碗数）经固定地区整局对比
+    /// 证实与终局评分无稳定相关，已弃用（见 issues.md）。
     pub fn decide_region(
         &self, game: &RamenGame, _year_idx: usize, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
@@ -354,6 +365,10 @@ impl RamenPolicy {
             let mut out = RamenPolicyOutput::default();
             for &rid in combo.iter() {
                 out.score += self.score_region(game, rid)?;
+            }
+            if self.config.region_low_count_youqing_weight != 0.0 {
+                out.score += self.low_count_youqing(game, &combo)?
+                    * self.config.region_low_count_youqing_weight;
             }
             out.reason = format!("{combo:?}");
             scores.push(out);
@@ -604,7 +619,7 @@ impl RamenPolicy {
     // ========== RegionSelect 单地区价值 ==========
 
     /// 单个地区的静态价值（xunlian×训练倾向 + pt_bonus + hint）
-    fn score_region(&self, game: &RamenGame, region_id: usize) -> Result<f32> {
+    pub fn score_region(&self, game: &RamenGame, region_id: usize) -> Result<f32> {
         let region = RAMENDATA
             .get()
             .and_then(|d| d.ramen_region_effect.get(region_id))
@@ -634,6 +649,39 @@ impl RamenPolicy {
                 + region.youqing as f32 * self.config.region_youqing_weight)
             + region.pt_bonus as f32 * self.config.region_pt_weight
             + region.hint_count as f32 * self.config.region_hint_weight)
+    }
+
+    /// 卡少训练位的地区友情加权：卡组 `bias ≤ 1` 的训练位对应 youqing 放大 K 倍
+    ///
+    /// 弥补卡少训练位训练加成利用率低的问题——bias 指向哪个训练位的卡少，
+    /// 选地区时优先覆盖它的地区 youqing 权重放大（非线性阈值，产生
+    /// `score_region` 纯线性项不具备的 build 区分度）。
+    fn low_count_youqing(&self, game: &RamenGame, combo: &[usize; 3]) -> Result<f32> {
+        let mut bias = [0.0f32; 5];
+        for card in game.deck.iter() {
+            let t = card.data.card_type;
+            if (0..5).contains(&t) {
+                bias[t as usize] += 1.0;
+            }
+        }
+        let k = self.config.region_low_count_k;
+        let mut bonus = 0.0;
+        for &rid in combo {
+            let region = RAMENDATA
+                .get()
+                .and_then(|d| d.ramen_region_effect.get(rid))
+                .ok_or_else(|| anyhow::anyhow!("地区效果缺失: region_id={rid}"))?;
+            let w: f32 = region
+                .at_trains
+                .iter()
+                .map(|&t| {
+                    let t = t as usize;
+                    if t < 5 && bias[t] <= 1.0 { k } else { 1.0 }
+                })
+                .sum();
+            bonus += region.youqing as f32 * w;
+        }
+        Ok(bonus)
     }
 
     // ========== Event 打分 ==========

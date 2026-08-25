@@ -1255,6 +1255,22 @@ impl RecommendedRamenTrainer {
         trainer
     }
 
+    /// 从正式 preset 精确复制，只覆盖地区选择的组合级 `low_count_youqing` 权重。
+    ///
+    /// - `low_count_youqing_weight`：卡少训练位 youqing 加权 → 分数折算
+    /// - `low_count_k`：`bias ≤ 1` 训练位的 youqing 放大倍率
+    ///
+    /// 全部传默认（0 / 2）时与 `new()` 完全一致。诀窍模拟类指标经固定地区整局
+    /// 对比证实无稳定区分度，已弃用（见 issues.md），不再提供覆盖入口。
+    pub fn with_region_overrides(low_count_youqing_weight: f32, low_count_k: f32) -> Self {
+        let mut trainer = Self::new();
+        for year in trainer.years.iter_mut() {
+            year.policy.config.region_low_count_youqing_weight = low_count_youqing_weight;
+            year.policy.config.region_low_count_k = low_count_k;
+        }
+        trainer
+    }
+
     /// 构造当前正式推荐 preset。
     pub fn new() -> Self {
         fn make(pt_rate: f32, vital_rest: i32) -> LocalRamenTrainer {
