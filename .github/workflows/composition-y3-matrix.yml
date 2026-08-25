@@ -1,4 +1,4 @@
-name: 配卡×120拉面地区组合（小批测试）
+name: 配卡×拉面地区组合（20 Job小批测试）
 
 on:
   workflow_dispatch:
@@ -12,18 +12,18 @@ concurrency:
 
 jobs:
   matrix:
-    name: 配卡${{ matrix.composition_index }}-120地区
+    name: 配卡${{ matrix.composition_index }}-地区0至9
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 20
       matrix:
-        composition_index: [0, 1]
+        composition_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     env:
       COMPOSITION_INDEX: ${{ matrix.composition_index }}
       COMBO_START: 0
-      COMBO_END: 120
+      COMBO_END: 10
       RUNS: 1
     steps:
       - uses: actions/checkout@v4
@@ -31,50 +31,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: composition-y3-upstream-ramen
-      - name: Run all 120 region combinations
+      - name: Run 10 region combinations
         run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
-      - uses: actions/upload-artifact@v4
-        with:
-          name: 配卡${{ matrix.composition_index }}-120地区原始结果
-          path: composition-y3-matrix.csv
-          retention-days: 30
-
-  summary:
-    name: 汇总小批测试
-    needs: matrix
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: '配卡*-120地区原始结果'
-          path: results
-      - name: Validate and summarize
+      - name: Validate 10 results
+        shell: bash
         run: |
-          python3 - <<'PY' | tee 配卡地区组合-小批测试报告.md
-          import csv, glob, collections, statistics
-          expected_compositions = {0, 1}
-          grouped = collections.defaultdict(list)
-          for path in glob.glob('results/**/composition-y3-matrix.csv', recursive=True):
-              with open(path, encoding='utf-8', newline='') as f:
-                  for row in csv.DictReader(f):
-                      grouped[int(row['composition_index'])].append(row)
-          if set(grouped) != expected_compositions:
-              raise SystemExit(f'配卡不完整: 实际{sorted(grouped)}，期望{sorted(expected_compositions)}')
-          print('# 配卡×120拉面地区组合：小批测试')
-          print('\n|配卡|行数|地区数|平均分|平均PT|')
-          print('|---:|---:|---:|---:|---:|')
-          for ci in sorted(grouped):
-              rows = grouped[ci]
-              combos = {int(r['combo_index']) for r in rows}
-              if len(rows) != 120 or combos != set(range(120)):
-                  raise SystemExit(f'配卡{ci}不完整: 行数={len(rows)}, 地区数={len(combos)}')
-              score = statistics.mean(int(r['score']) for r in rows)
-              pt = statistics.mean(int(r['skill_pt']) for r in rows)
-              print(f'|{ci}|{len(rows)}|{len(combos)}|{score:.1f}|{pt:.1f}|')
+          python3 - <<'PY'
+          import csv, os
+          ci = int(os.environ['COMPOSITION_INDEX'])
+          with open('composition-y3-matrix.csv', encoding='utf-8', newline='') as f:
+              rows = list(csv.DictReader(f))
+          combos = {int(r['combo_index']) for r in rows}
+          compositions = {int(r['composition_index']) for r in rows}
+          if len(rows) != 10 or combos != set(range(10)) or compositions != {ci}:
+              raise SystemExit(
+                  f'结果错误: 配卡={sorted(compositions)}, 行数={len(rows)}, 地区={sorted(combos)}'
+              )
+          print(f'配卡{ci}: 10个地区组合完整')
           PY
-          cat 配卡地区组合-小批测试报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡地区组合-小批测试报告
-          path: 配卡地区组合-小批测试报告.md
+          name: 配卡${{ matrix.composition_index }}-地区0至9
+          path: composition-y3-matrix.csv
           retention-days: 30
