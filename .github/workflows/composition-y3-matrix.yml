@@ -24,9 +24,8 @@ jobs:
       BASE_SEED: 939393
     steps:
       - uses: actions/checkout@v4
-      - name: 应用真实属性边际实验层并登记程序
+      - name: 登记程序
         run: |
-          python3 scripts/ramen/add_dynamic_status_balance_v39.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('crates/umasim/Cargo.toml');s=p.read_text()
@@ -65,33 +64,36 @@ jobs:
           import csv,glob,statistics,collections
           rows=[]
           for p in glob.glob('results/**/focused-status-margin.csv',recursive=True):rows+=list(csv.DictReader(open(p)))
-          builds=['3速1耐1智','2速2耐1智']
-          expected=2*100*25
+          builds=['3速1耐1智','2速2耐1智'];expected=2*100*25
           if len(rows)!=expected:raise SystemExit(f'期望{expected}行，实际{len(rows)}')
           def q(xs,p):
               x=sorted(xs);return x[round((len(x)-1)*p)]
           print('# 两配卡纯手写真实属性边际矩阵\n')
-          print('- 每套配卡100个同种子样本；基线每种子一次。')
-          print('- 候选仅改变训练动作的属性缺口奖励与近上限衰减；恢复、友人外出、普通外出、吃面、地区等逻辑保持正式基线。')
-          print('- 24个候选：缺口0/25/50/75/100% × 溢出0/25/50/75/100%，排除0/0。\n')
-          print('|配卡|排名|缺口|溢出|均分Δ|P10Δ|P50Δ|P90Δ|P95Δ|最高Δ|PTΔ|五维和Δ|速Δ|耐Δ|力Δ|根Δ|智Δ|胜/平/负|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|')
+          print('- 每套配卡100个同种子样本；候选只改变训练的属性缺口奖励与近上限衰减。')
+          print('- 恢复、外出、吃面、材料、地区和PT逻辑保持正式基线。\n')
+          print('|配卡|排名|缺口|溢出|均分Δ|P10Δ|P50Δ|P90Δ|P95Δ|最高Δ|PTΔ|五维和Δ|速Δ|耐Δ|力Δ|根Δ|智Δ|胜/平/负|Y1面Δ|Y2面Δ|Y3面Δ|总面Δ|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|')
           for b in builds:
-              base={int(r['run']):r for r in rows if r['build']==b and r['variant']=='baseline'}
-              cand=collections.defaultdict(dict)
+              base={int(r['run']):r for r in rows if r['build']==b and r['variant']=='baseline'};cand=collections.defaultdict(dict)
               for r in rows:
                   if r['build']==b and r['variant']=='margin':cand[(int(r['gap']),int(r['overflow']))][int(r['run'])]=r
               out=[]
               for key,rr in cand.items():
                   ids=sorted(base);d=[int(rr[i]['score'])-int(base[i]['score']) for i in ids];pt=[int(rr[i]['skill_pt'])-int(base[i]['skill_pt']) for i in ids];fs=[int(rr[i]['five_sum'])-int(base[i]['five_sum']) for i in ids];bs=[int(base[i]['score']) for i in ids];ns=[int(rr[i]['score']) for i in ids]
                   attrs=[statistics.mean(int(rr[i][k])-int(base[i][k]) for i in ids) for k in ['speed','stamina','power','guts','wisdom']]
-                  out.append((statistics.mean(d),statistics.mean(pt),statistics.mean(fs),key,d,bs,ns,attrs))
+                  eats=[statistics.mean(int(rr[i][k])-int(base[i][k]) for i in ids) for k in ['ramen_y1','ramen_y2','ramen_y3','ramen_total']]
+                  out.append((statistics.mean(d),statistics.mean(pt),statistics.mean(fs),key,d,bs,ns,attrs,eats))
               out.sort(reverse=True)
-              for rank,(md,mpt,mfs,(gap,over),d,bs,ns,a) in enumerate(out,1):
+              for rank,(md,mpt,mfs,(gap,over),d,bs,ns,a,e) in enumerate(out,1):
                   w=sum(x>0 for x in d);t=sum(x==0 for x in d);l=sum(x<0 for x in d)
-                  print(f'|{b}|{rank}|{gap}%|{over}%|{md:+.1f}|{q(ns,.1)-q(bs,.1):+}|{q(ns,.5)-q(bs,.5):+}|{q(ns,.9)-q(bs,.9):+}|{q(ns,.95)-q(bs,.95):+}|{max(ns)-max(bs):+}|{mpt:+.1f}|{mfs:+.1f}|{a[0]:+.1f}|{a[1]:+.1f}|{a[2]:+.1f}|{a[3]:+.1f}|{a[4]:+.1f}|{w}/{t}/{l}|')
+                  print(f'|{b}|{rank}|{gap}%|{over}%|{md:+.1f}|{q(ns,.1)-q(bs,.1):+}|{q(ns,.5)-q(bs,.5):+}|{q(ns,.9)-q(bs,.9):+}|{q(ns,.95)-q(bs,.95):+}|{max(ns)-max(bs):+}|{mpt:+.1f}|{mfs:+.1f}|{a[0]:+.1f}|{a[1]:+.1f}|{a[2]:+.1f}|{a[3]:+.1f}|{a[4]:+.1f}|{w}/{t}/{l}|{e[0]:+.2f}|{e[1]:+.2f}|{e[2]:+.2f}|{e[3]:+.2f}|')
               promoted=[x for x in out if x[0]>0 and x[1]>0 and x[2]>0]
               print(f'\n**{b} 三项同时提升候选：{len(promoted)}/24。**\n')
+              for label,key in [('基线','baseline'),('最佳候选',out[0][3])]:
+                  rr=list(base.values()) if key=='baseline' else list(cand[key].values())
+                  vals=[statistics.mean(int(r[k]) for r in rr) for k in ['ramen_y1','ramen_y2','ramen_y3','ramen_total']]
+                  print(f'- {b} {label}平均吃面：Y1 {vals[0]:.2f} / Y2 {vals[1]:.2f} / Y3 {vals[2]:.2f} / 总计 {vals[3]:.2f}')
+              print()
           PY
           cat 手写真实属性边际矩阵报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
