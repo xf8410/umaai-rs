@@ -74,6 +74,27 @@ pub struct RamenState {
     /// 映射：turn 2 → 0，turn 23 → 1，turn 47 → 2。
     #[serde(default)]
     pub yearly_selected_regions: [[usize; 3]; 3],
+    /// 观测用：当前年份下标（0/1/2），供诀窍流转埋点定位年份数组。
+    ///
+    /// 在 RMJ 归档（[`Self::archive_year_counters`]）时顺带推进（turn 71 后封顶 2），
+    /// 初始 0。**纯观测**，不参与任何规则/策略逻辑。
+    #[serde(default)]
+    pub obs_year: usize,
+    /// 观测用：逐年友情训练回合数（下标 0/1/2 = 第 1/2/3 年）。
+    ///
+    /// 写入点在 `fill_feeling_gauge`（`is_shining` 时累加）。**纯观测**。
+    #[serde(default)]
+    pub yearly_friend_turns: [i32; 3],
+    /// 观测用：逐年诀窍获得数（槽满 [`GAUGE_LIMIT`] 清零 +1 的次数）。
+    ///
+    /// 写入点在 `add_gauge` 清零分支。**纯观测**。
+    #[serde(default)]
+    pub yearly_gauge_gain: [i32; 3],
+    /// 观测用：逐年诀窍溢出数（库存超 [`FEELING_LIMIT`] 被丢弃）。
+    ///
+    /// 写入点在 `add_feeling` 丢弃分支。**纯观测**。
+    #[serde(default)]
+    pub yearly_gauge_overflow: [i32; 3],
     /// 诀窍角标分配（回合 2-71 时每个训练随机分配一个诀窍类型）
     pub train_feeling_type: Option<[FeelingType; 5]>,
 
@@ -284,6 +305,8 @@ impl RamenState {
             .yearly_eat_count
             .get_mut(year_idx)
             .ok_or_else(|| anyhow!("yearly_eat_count 下标 {year_idx} 越界"))? = self.eat_count;
+        // 观测：推进当前年份（turn 71 结算后封顶 2，覆盖超级拉面回合）
+        self.obs_year = (year_idx + 1).min(2);
         Ok(())
     }
 
