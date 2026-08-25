@@ -119,12 +119,13 @@ pub struct RamenPolicyConfig {
     pub region_hint_weight: f32,
     /// 地区 youqing 加成→分数折算（与 `region_xunlian_weight` 同族，作用于不同年份）
     ///
-    /// 第 1 年地区只有 `xunlian`、第 2/3 年只有 `youqing`，两项不会同时非零；
-    /// 且同一年内 `pt_bonus` / `hint_count` 恒定，故本权重的绝对值不影响 argmax，
-    /// 只影响打印出来的分数量级。
+    /// 第 1 年地区只有 `xunlian`、第 2/3 年只有 `youqing`，两项不会同时非零。
+    /// 核心语义：`youqing` 在 `at_trains` 覆盖的每个训练位**独立生效**（三点组合
+    /// youqing=40 在 3 个位各给 40），故覆盖 build 主训位越广、youqing 越高越值。
     ///
-    /// `score_region` 内部用 `youqing / |at_trains|`（单格你qing）替代原始你qing，
-    /// 避免"覆盖广但单格低"的反例地区（Y2 id 5 你qing=10 覆盖 5 位）天然胜出。
+    /// 当前策略（吃面联动/体力门限/残余收益折扣等）下重新评估（base_seed=61444
+    /// 配对 300 局）：`1.5` 让 speed build Y3 从"速单点"（id 10）转为"速耐力覆盖"
+    /// （id 18，bias_sum 更大、无 waste），总加权 +55（speed +387，其余不变）。
     pub region_youqing_weight: f32,
     // ===== Event =====
     /// 事件体力每点折算
@@ -164,7 +165,7 @@ impl Default for RamenPolicyConfig {
             region_xunlian_weight: 40.0,
             region_pt_weight: 30.0,
             region_hint_weight: 15.0,
-            region_youqing_weight: 1.0,
+            region_youqing_weight: 1.5,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0

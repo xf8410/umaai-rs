@@ -228,25 +228,26 @@ pub struct LocalRamenConfig {
     /// 不允许随后休息而浪费仅本回合生效的拉面加成。
     pub eat_requires_training: bool,
 
-    /// 第三年吃面前希望具备的训练前体力，单位为体力点。
+    /// 每年吃面前希望具备的训练前体力，单位为体力点。
     ///
     /// 它回答“现在是否应该先恢复”。低于目标不会直接禁止吃面，而会按短缺量收费，
     /// 使极强窗口仍可突破保守线。`0` 表示关闭训练前体力预算。
+    /// （字段名保留 `y3` 前缀为历史沿革；现每年吃面决策都评估。）
     pub y3_pre_train_vital_target: i32,
 
-    /// 第三年吃面并完成计划训练后希望保留的体力，单位为体力点。
+    /// 每年吃面并完成计划训练后希望保留的体力，单位为体力点。
     ///
     /// 它回答“本次训练会不会使下一回合崩盘”。智力训练同样参与计算，但因其体力变化
     /// 通常为正，训练后短缺自然较小；不再给予无条件豁免。`0` 表示关闭训练后预算。
     pub y3_post_train_vital_target: i32,
 
-    /// 第三年训练前/后体力每短缺 1 点对候选面的软惩罚，单位为策略评分/体力点。
+    /// 每年训练前/后体力每短缺 1 点对候选面的软惩罚，单位为策略评分/体力点。
     ///
     /// 总成本为 `max(pre_target-V0,0) + max(post_target-V1,0)` 再乘此权重。
     /// `0.0` 表示关闭联合体力预算。
     pub y3_vital_shortfall_weight: f32,
 
-    /// 第三年非智力训练后的极端安全底线，低于该值才硬禁止吃面。
+    /// 每年非智力训练后的极端安全底线，低于该值才硬禁止吃面。
     ///
     /// 与软目标分离：正常体力不足只扣分，只有接近打空时才保下限。智力训练也必须满足
     /// `V1 >= 0`，但不受此非智力硬底线。`0` 表示不额外硬拦。
@@ -1011,7 +1012,8 @@ impl LocalRamenTrainer {
     }
 
     fn post_ramen_vital_transition(&self, g: &RamenGame, region_id: usize) -> Result<Option<(usize, i32, i32)>> {
-        if g.current_year() != 3 || g.turn() >= 72 {
+        // 每年吃面决策都评估吃面后的体力（turn>=72 超级拉面回合不吃面，防御性返回 None）
+        if g.turn() >= 72 {
             return Ok(None);
         }
         let mut preview = g.clone();
@@ -1326,7 +1328,7 @@ impl LocalRamenTrainer {
                     {
                         o.score = f32::NEG_INFINITY;
                         o.reason = format!(
-                            "禁止吃面：第三年{}训练体力{}→{}低于硬底线{}",
+                            "禁止吃面：{}训练体力{}→{}低于硬底线{}",
                             ["速", "耐", "力", "根", "智"][train],
                             pre_vital,
                             post_vital,
@@ -1463,16 +1465,16 @@ impl RecommendedRamenTrainer {
 
     /// 构造当前正式推荐 preset。
     pub fn new() -> Self {
-        fn make(pt_rate: f32, vital_rest: i32) -> LocalRamenTrainer {
+        fn make(pt_rate: f32, vital_rest: i32, eating_rest: i32) -> LocalRamenTrainer {
             let mut policy = RamenPolicyConfig::default();
             policy.pt_rate = pt_rate;
             policy.ramen_pt_weight = 2.0;
-            // 不吃面回合体力硬门限（回合级差异化：吃面回合由 vital_rest_eating=0 放掉，
-            // 避免浪费吃面必成的训练回合）。
+            // 不吃面回合体力硬门限（防打空体力后下回合被迫休息/失败）。
             policy.vital_rest = vital_rest;
-            // 回合级体力门限：吃面回合训练必成（fail_rate_drop），体力门限放掉（0）；
-            // 不吃面回合保留 vital_rest（避免打空体力后下回合被迫休息/失败）。
-            policy.vital_rest_eating = 0;
+            // 吃面回合门限：fail_rate_drop 分年份——Y1 30% / Y2 50%（吃面训练并非必成，
+            // 低体力仍可能失败），只有 Y3 100% 必成，故仅第三年吃面回合放掉门限（0），
+            // 第一/二年吃面回合保留与不吃面相同的硬门限。
+            policy.vital_rest_eating = eating_rest;
             // 保守风险预算：只影响策略打分，不改变规则层真实失败率。
             policy.effective_ramen_failure = false;
             // 残余收益折扣（方案 E）：主属性快满时打折副属性+PT，提前分流。初始 1.0 待矩阵验证。
@@ -1524,9 +1526,9 @@ impl RecommendedRamenTrainer {
         }
 
         Self {
-            // 第三年不再取消硬休息门：不吃面回合保留体力门限 30（回合级差异化，
-            // 吃面回合仍放掉），配合 y3 门禁参数防体力打空。
-            years: [make(16.0, 30), make(64.0, 30), make(64.0, 30)],
+            // 回合级体力门限：不吃面回合统一 30；吃面回合仅第三年放掉（Y3 fail_rate_drop
+            // =100% 必成），第一/二年保留 30（Y1/Y2 吃面训练仍可能失败）。
+            years: [make(16.0, 30, 30), make(64.0, 30, 30), make(64.0, 30, 0)],
             last_year: Mutex::new(None)
         }
     }
