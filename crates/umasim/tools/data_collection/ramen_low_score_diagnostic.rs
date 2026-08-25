@@ -54,15 +54,15 @@ fn main() -> Result<()> {
         }
         println!("================ 详细重放终局 ================");
         println!(
-            "最终评分={} 等级={} 五维={:?} 五维和={} 技能PT={} 剧本PT={} RMJ={}/3 吃面={} 友人完成={}",
+            "最终评分={} 等级={} 五维={:?} 五维和={} 技能PT={} 剧本PT={:?} RMJ={}/3 吃面={:?} 友人完成={}",
             outcome.score,
             outcome.rank,
             outcome.five_status,
             outcome.five_status.iter().sum::<i32>(),
             outcome.skill_pt,
-            outcome.scenario_pt,
+            outcome.yearly_scenario_pt,
             outcome.rmj_ok,
-            outcome.eat_count,
+            outcome.yearly_eat_count,
             outcome.friend_all
         );
         return Ok(());
@@ -122,11 +122,11 @@ fn main() -> Result<()> {
     lines.push(format!("|最终评分|{}|\n", low.score));
     lines.push(format!("|等级|{}|\n", low.rank));
     lines.push(format!("|技能 PT|{}|\n", low.skill_pt));
-    lines.push(format!("|剧本 PT|{}|\n", low.scenario_pt));
+    lines.push(format!("|剧本 PT|{:?}|\n", low.yearly_scenario_pt));
     lines.push(format!("|五维|`{:?}`|\n", low.five_status));
     lines.push(format!("|五维原值和|{status_sum}|\n"));
     lines.push(format!("|RMJ 成功年数|{}/3|\n", low.rmj_ok));
-    lines.push(format!("|最终当年吃面次数|{}|\n", low.eat_count));
+    lines.push(format!("|最终当年吃面次数|{:?}|\n", low.yearly_eat_count));
     lines.push(format!(
         "|友人五段全部完成|{}|\n\n",
         if low.friend_all { "是" } else { "否" }
@@ -162,13 +162,13 @@ fn main() -> Result<()> {
     );
     for (rank, (idx, outcome)) in outcomes.iter().take(5).enumerate() {
         lines.push(format!(
-            "|{}|`{}`|{}|{}|{}|{}|{}/3|{}|\n",
+            "|{}|`{}`|{}|{}|{}|{:?}|{}/3|{}|\n",
             rank + 1,
             idx,
             outcome.score,
             outcome.skill_pt,
             outcome.five_status.iter().sum::<i32>(),
-            outcome.scenario_pt,
+            outcome.yearly_scenario_pt,
             outcome.rmj_ok,
             if outcome.friend_all { "是" } else { "否" }
         ));

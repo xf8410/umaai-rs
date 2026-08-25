@@ -24,6 +24,7 @@ use crate::{
     gamedata::{EventChoice, EventData, GAMECONSTANTS, ramen::RAMENDATA},
     global
 };
+use crate::trainer::ramen_handwritten_trainer::ramen_effective_stage;
 
 #[derive(Debug, Clone)]
 pub struct LocalRamenConfig {
@@ -285,6 +286,14 @@ impl Default for LocalRamenConfig {
 pub struct LocalRamenTrainer {
     policy: RamenPolicy,
     config: LocalRamenConfig,
+    /// 是否采集评分分解文本（供 `LoggingTrainer` 取用）
+    ///
+    /// 作为**搜索的 rollout 基策**时必须关掉：`stash` 每次决策都无条件
+    /// `format!` 出全候选分解并锁同一把 `Mutex`，而所有 rayon 线程共享同一个
+    /// rollout trainer。单次 rollout 约 170 次决策 × 24 线程 = 高频锁争用，
+    /// 而 rollout 内部的分解文本没有任何消费者。不影响分数，只影响吞吐。
+    /// （与 `RamenHandwrittenTrainer::collect_breakdown` 同构。）
+    collect_breakdown: bool,
     last_breakdown: Mutex<Option<String>>
 }
 impl Default for LocalRamenTrainer {
@@ -300,7 +309,15 @@ impl LocalRamenTrainer {
         Self {
             policy: RamenPolicy::new(policy),
             config,
+            collect_breakdown: true,
             last_breakdown: Mutex::new(None)
+        }
+    }
+    /// 创建 rollout 专用实例（关闭分解采集，见 [`collect_breakdown`](Self::collect_breakdown)）
+    pub fn for_rollout() -> Self {
+        Self {
+            collect_breakdown: false,
+            ..Self::new()
         }
     }
     pub fn matrix_variant(name: &str) -> Result<Self> {
@@ -430,6 +447,9 @@ impl LocalRamenTrainer {
             .unwrap_or(0)
     }
     fn stash(&self, o: &[RamenPolicyOutput]) {
+        if !self.collect_breakdown {
+            return;
+        }
         let t = o
             .iter()
             .enumerate()
@@ -1331,10 +1351,19 @@ impl Trainer<RamenGame> for RecommendedRamenTrainer {
 
 impl Trainer<RamenGame> for LocalRamenTrainer {
     fn select_action(&self, g: &RamenGame, a: &[RamenAction], _r: &mut StdRng) -> Result<usize> {
+        // 单个候选直接返回（无选择空间）；仍记录 breakdown 供决策日志展示
         if a.len() <= 1 {
+            if self.collect_breakdown {
+                if let Ok(mut slot) = self.last_breakdown.lock() {
+                    *slot = Some(format!("仅1候选: {}", a[0]));
+                }
+            }
             return Ok(0);
         }
-        let (c, o) = match g.stage {
+        // 阶段分派用 `ramen_effective_stage` 而非裸 `g.stage`：第 1 年地区选择（turn 2）
+        // 由 `run_begin` 内联触发，此时 `g.stage` 仍是 Begin，裸分派会落入默认分支
+        // 恒选候选 0（详见 ramen_handwritten_trainer.rs 的 ramen_effective_stage 注释）。
+        let (c, o) = match ramen_effective_stage(g, a) {
             RamenStage::Train => self.decide_train(g, a)?,
             RamenStage::RamenSelect => self.decide_ramen(g, a)?,
             RamenStage::SpecialSelect => {
@@ -1379,7 +1408,113 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
 
 #[cfg(test)]
 mod tests {
-    use super::RecommendedRamenTrainer;
+    use anyhow::Result;
+
+    use crate::game::Trainer;
+
+    use super::{LocalRamenTrainer, RecommendedRamenTrainer};
+
+    /// 第1年地区选择（turn 2 在 run_begin 内联触发、stage=Begin）必须走 decide_region 打分。
+    ///
+    /// 回归：LocalRamenTrainer::select_action 只按 `g.stage` 分派时，第1年地区选择
+    /// 会落入默认分支恒选候选 0（详见 ramen_handwritten_trainer.rs 的 ramen_effective_stage 注释）。
+    #[test]
+    #[allow(clippy::panic)]
+    fn recommended_region_select_year1_runs_policy() -> Result<()> {
+        use rand::{SeedableRng, prelude::StdRng};
+
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame, rules::get_region_combinations}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let trainer = RecommendedRamenTrainer::new();
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        game.base.turn = 2; // 第1年地区选择（run_begin 内联触发）
+        let actions: Vec<RamenAction> = get_region_combinations(0)?
+            .iter()
+            .map(|&c| RamenAction::no_ramen(Operation::RegionSelect(c)))
+            .collect();
+        let mut rng = StdRng::seed_from_u64(42);
+        let idx = trainer.select_action(&game, &actions, &mut rng)?;
+        let bd = trainer.last_breakdown();
+        println!(
+            "第1年地区选择: stage={:?} 候选={} 选中={:?} breakdown={}",
+            game.stage,
+            actions.len(),
+            actions[idx].operation,
+            bd.clone().unwrap_or_default()
+        );
+        if bd.as_deref().unwrap_or_default().is_empty() {
+            panic!(
+                "第1年地区选择未走 decide_region（stage={:?} 落入默认分支），恒选候选 {idx}",
+                game.stage
+            );
+        }
+        Ok(())
+    }
+
+    /// 单候选决策点必须记录「仅1候选」breakdown（决策日志完整性）；
+    /// `for_rollout` 实例关闭分解采集（搜索 rollout 高频锁争用，与
+    /// `RamenHandwrittenTrainer::collect_breakdown` 同构）。
+    #[test]
+    #[allow(clippy::panic)]
+    fn local_single_candidate_breakdown_and_for_rollout() -> Result<()> {
+        use rand::{SeedableRng, prelude::StdRng};
+
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        game.base.turn = 2;
+        let actions = vec![RamenAction::no_ramen(Operation::RegionSelect([0, 1, 2]))];
+        let mut rng = StdRng::seed_from_u64(42);
+
+        let normal = LocalRamenTrainer::new();
+        let idx = normal.select_action(&game, &actions, &mut rng)?;
+        let bd = normal.last_breakdown().unwrap_or_default();
+        println!("普通实例单候选: idx={idx} breakdown={bd}");
+        if bd.is_empty() || !bd.contains("仅1候选") {
+            panic!("单候选决策点应记录「仅1候选」breakdown，实际: {bd}");
+        }
+
+        let rollout = LocalRamenTrainer::for_rollout();
+        let idx = rollout.select_action(&game, &actions, &mut rng)?;
+        let bd = rollout.last_breakdown();
+        println!("for_rollout 单候选: idx={idx} breakdown={bd:?}");
+        if bd.is_some() {
+            panic!("for_rollout 实例不应采集 breakdown，实际: {bd:?}");
+        }
+        Ok(())
+    }
 
     /// 正式 preset 必须使用 v44 同种子回归胜出的友人跨年节奏。
     #[test]
