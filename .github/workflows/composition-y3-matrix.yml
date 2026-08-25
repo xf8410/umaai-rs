@@ -1,6 +1,12 @@
 name: 101配卡构成×120拉面地区矩阵
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ramen_workbench]
+    paths:
+      - 'crates/umasim/src/bin/composition_y3_matrix.rs'
+      - 'crates/umasim/Cargo.toml'
+      - '.github/workflows/composition-y3-matrix.yml'
 permissions:
   contents: read
 jobs:
