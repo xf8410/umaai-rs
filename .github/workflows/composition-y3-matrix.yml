@@ -1,4 +1,4 @@
-name: 吃面后训练门控三臂矩阵
+name: 吃面后门控三臂五维属性矩阵
 on: {workflow_dispatch: {}}
 permissions: {contents: read}
 jobs:
@@ -13,12 +13,10 @@ jobs:
     env:
       GATE_MODE: ${{ matrix.mode }}
       RUNS: 100
-      BASE_SEED: 606060
       SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
-      - name: 注入共同实验入口与门控臂
-        run: |
+      - run: |
           python3 scripts/ramen/add_vital_transition_override.py
           python3 scripts/ramen/add_recipe_continuity_override.py
           python3 scripts/ramen/add_random_decimal_override.py
@@ -38,14 +36,14 @@ jobs:
           PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: post-eat-three-arm}
+        with: {shared-key: post-eat-five-status}
       - run: |
-          export BASE_SEED=$((606060 + SHARD * 1000003))
+          export BASE_SEED=$((707070 + SHARD * 1000003))
           cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
           mv eat-friend-audit.csv "$GATE_MODE-$SHARD.csv"
       - uses: actions/upload-artifact@v4
         with:
-          name: 门控-${{ matrix.mode }}-${{ matrix.shard }}
+          name: 五维门控-${{ matrix.mode }}-${{ matrix.shard }}
           path: ${{ matrix.mode }}-${{ matrix.shard }}.csv
           retention-days: 30
   summary:
@@ -53,34 +51,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: {pattern: '门控-*', path: results, merge-multiple: true}
-      - name: 配对汇总
+        with: {pattern: '五维门控-*', path: results, merge-multiple: true}
+      - name: 汇总五维、属性总和、PT与总评分
         run: |
-          python3 - <<'PY' | tee 吃面后训练门控三臂报告.md
-          import csv,glob,collections,statistics,math
+          python3 - <<'PY' | tee 吃面后门控三臂五维属性报告.md
+          import csv,glob,collections,statistics
           rows=[]
-          for p in glob.glob('results/*.csv'): rows += list(csv.DictReader(open(p)))
+          for p in glob.glob('results/*.csv'):rows+=list(csv.DictReader(open(p)))
           g=collections.defaultdict(list)
           for r in rows:g[(r['build'],r['mode'])].append(r)
-          print('# 吃面后训练门控三臂矩阵\n')
-          print('- baseline：吃后必须训练，但训练位不限')
-          print('- soft150：覆盖训练相对全局最佳损失 ≤150 策略分时切换到覆盖训练')
-          print('- hard：吃后只能选择该面 at_trains 覆盖训练\n')
-          print('|配卡|臂|局数|均分|P10|平均PT|覆盖命中|错位|吃后非训练|友人训练|羁绊60后友人|外出|')
-          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          keys=['speed','stamina','power','guts','wisdom','status_sum','skill_pt','score']
+          print('# 吃面后门控三臂：五维属性与属性总和报告\n')
+          print('|配卡|方案|局数|速度|耐力|力量|根性|智力|五维总和|PT|总评分|P10|覆盖|错位|')
+          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          means={}
           for b in ['3速1耐1智','2速2耐1智']:
             for m in ['baseline','soft150','hard']:
-              rs=g[(b,m)]; scores=sorted(int(r['score'])for r in rs)
+              rs=g[(b,m)];v={k:statistics.mean(int(r[k])for r in rs)for k in keys};means[(b,m)]=v;scores=sorted(int(r['score'])for r in rs)
               av=lambda k:statistics.mean(int(r[k])for r in rs)
-              print(f"|{b}|{m}|{len(rs)}|{statistics.mean(scores):.1f}|{scores[len(scores)//10-1]}|{av('skill_pt'):.1f}|{av('aligned'):.2f}|{av('misaligned'):.2f}|{av('post_nontrain'):.2f}|{av('friend_train'):.2f}|{av('friend_train_after60'):.2f}|{av('friend_outing'):.2f}|")
-          print('\n## 相对 baseline（同臂规模；三分片独立种子）\n')
+              print(f"|{b}|{m}|{len(rs)}|{v['speed']:.1f}|{v['stamina']:.1f}|{v['power']:.1f}|{v['guts']:.1f}|{v['wisdom']:.1f}|{v['status_sum']:.1f}|{v['skill_pt']:.1f}|{v['score']:.1f}|{scores[len(scores)//10-1]}|{av('aligned'):.2f}|{av('misaligned'):.2f}|")
+          print('\n## 相对 baseline\n')
+          print('|配卡|方案|Δ速|Δ耐|Δ力|Δ根|Δ智|Δ五维总和|ΔPT|Δ总评分|三主指标同时提升|')
+          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|')
           for b in ['3速1耐1智','2速2耐1智']:
-            base=statistics.mean(int(r['score'])for r in g[(b,'baseline')])
-            print(f'- {b}: soft150 {statistics.mean(int(r["score"])for r in g[(b,"soft150")])-base:+.1f}；hard {statistics.mean(int(r["score"])for r in g[(b,"hard")])-base:+.1f}')
+            z=means[(b,'baseline')]
+            for m in ['soft150','hard']:
+              v=means[(b,m)];d={k:v[k]-z[k] for k in keys};ok=d['status_sum']>0 and d['skill_pt']>0 and d['score']>0
+              print(f"|{b}|{m}|{d['speed']:+.1f}|{d['stamina']:+.1f}|{d['power']:+.1f}|{d['guts']:+.1f}|{d['wisdom']:+.1f}|{d['status_sum']:+.1f}|{d['skill_pt']:+.1f}|{d['score']:+.1f}|{'是' if ok else '否'}|")
           PY
-          cat 吃面后训练门控三臂报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 吃面后门控三臂五维属性报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 吃面后训练门控三臂总报告
-          path: 吃面后训练门控三臂报告.md
+          name: 吃面后门控三臂五维属性总报告
+          path: 吃面后门控三臂五维属性报告.md
           retention-days: 30
