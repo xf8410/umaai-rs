@@ -1,22 +1,125 @@
 name: 单种配卡×120拉面地区排列组合
 
 on:
-  push:
-    branches:
-      - workbench/101x120-upstream-ramen-v2
-    paths:
-      - '.github/ramen-composition-index'
+  workflow_dispatch:
+    inputs:
+      composition_index:
+        description: '配卡编号（0-100）'
+        required: true
+        type: choice
+        options:
+          - '0'
+          - '1'
+          - '2'
+          - '3'
+          - '4'
+          - '5'
+          - '6'
+          - '7'
+          - '8'
+          - '9'
+          - '10'
+          - '11'
+          - '12'
+          - '13'
+          - '14'
+          - '15'
+          - '16'
+          - '17'
+          - '18'
+          - '19'
+          - '20'
+          - '21'
+          - '22'
+          - '23'
+          - '24'
+          - '25'
+          - '26'
+          - '27'
+          - '28'
+          - '29'
+          - '30'
+          - '31'
+          - '32'
+          - '33'
+          - '34'
+          - '35'
+          - '36'
+          - '37'
+          - '38'
+          - '39'
+          - '40'
+          - '41'
+          - '42'
+          - '43'
+          - '44'
+          - '45'
+          - '46'
+          - '47'
+          - '48'
+          - '49'
+          - '50'
+          - '51'
+          - '52'
+          - '53'
+          - '54'
+          - '55'
+          - '56'
+          - '57'
+          - '58'
+          - '59'
+          - '60'
+          - '61'
+          - '62'
+          - '63'
+          - '64'
+          - '65'
+          - '66'
+          - '67'
+          - '68'
+          - '69'
+          - '70'
+          - '71'
+          - '72'
+          - '73'
+          - '74'
+          - '75'
+          - '76'
+          - '77'
+          - '78'
+          - '79'
+          - '80'
+          - '81'
+          - '82'
+          - '83'
+          - '84'
+          - '85'
+          - '86'
+          - '87'
+          - '88'
+          - '89'
+          - '90'
+          - '91'
+          - '92'
+          - '93'
+          - '94'
+          - '95'
+          - '96'
+          - '97'
+          - '98'
+          - '99'
+          - '100'
 
 permissions:
   contents: read
 
 concurrency:
-  group: composition-y3-${{ github.ref }}-${{ github.sha }}
-  cancel-in-progress: false
+  group: composition-y3-${{ github.ref }}-${{ inputs.composition_index }}
+  cancel-in-progress: true
 
 jobs:
   matrix:
-    name: 配卡分片${{ matrix.shard }}
+    name: 配卡${{ inputs.composition_index }}-分片${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 180
     strategy:
@@ -25,18 +128,10 @@ jobs:
       matrix:
         shard: [0, 1]
     env:
+      COMPOSITION_INDEX: ${{ inputs.composition_index }}
       RUNS: 1
     steps:
       - uses: actions/checkout@v4
-      - name: Read composition index
-        shell: bash
-        run: |
-          index="$(tr -d '[:space:]' < .github/ramen-composition-index)"
-          if ! [[ "$index" =~ ^([0-9]|[1-9][0-9]|100)$ ]]; then
-            echo "配卡编号无效: $index（必须为0到100）" >&2
-            exit 1
-          fi
-          echo "COMPOSITION_INDEX=$index" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -50,25 +145,21 @@ jobs:
             cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡结果-分片${{ matrix.shard }}
+          name: 配卡${{ inputs.composition_index }}-分片${{ matrix.shard }}
           path: composition-y3-matrix.csv
           retention-days: 30
 
   summary:
-    name: 汇总单种配卡120组合
+    name: 汇总配卡${{ inputs.composition_index }}的120组合
     if: always()
     needs: matrix
     runs-on: ubuntu-latest
+    env:
+      COMPOSITION_INDEX: ${{ inputs.composition_index }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Read composition index
-        shell: bash
-        run: |
-          index="$(tr -d '[:space:]' < .github/ramen-composition-index)"
-          echo "COMPOSITION_INDEX=$index" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
-          pattern: '配卡结果-分片*'
+          pattern: '配卡${{ inputs.composition_index }}-分片*'
           path: results
       - shell: bash
         run: |
@@ -94,6 +185,6 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡${{ env.COMPOSITION_INDEX }}-120地区组合报告
-          path: 配卡${{ env.COMPOSITION_INDEX }}-120地区组合报告.md
+          name: 配卡${{ inputs.composition_index }}-120地区组合报告
+          path: 配卡${{ inputs.composition_index }}-120地区组合报告.md
           retention-days: 30
