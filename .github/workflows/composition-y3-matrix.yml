@@ -1,4 +1,4 @@
-name: 3速1耐1智 vs 2速2耐1智（各100局配对）
+name: 两种指定配卡×120地区×各100局
 
 on:
   workflow_dispatch:
@@ -7,73 +7,102 @@ permissions:
   contents: read
 
 concurrency:
-  group: requested-composition-pair-${{ github.ref }}
+  group: requested-decks-120x100-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  run:
-    name: ${{ matrix.build }}-100局
+  matrix:
+    name: 地区分片${{ matrix.shard }}（两配卡各600局）
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
-        build: [3速1耐1智, 2速2耐1智]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     env:
-      BUILD: ${{ matrix.build }}
+      COMBO_START: ${{ matrix.shard * 6 }}
+      COMBO_END: ${{ matrix.shard * 6 + 6 }}
       RUNS: 100
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: composition-pair-100
-      - run: cargo run -p umasim --bin composition_pair_100 --release --no-default-features
+          shared-key: requested-decks-region-120x100
+      - run: cargo run -p umasim --bin requested_decks_region_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.build }}-100局原始结果
-          path: composition-pair-100.csv
+          name: 地区分片${{ matrix.shard }}-原始结果
+          path: requested-decks-region-matrix.csv
           retention-days: 30
 
   summary:
-    name: 生成同seed配对报告
-    needs: run
+    name: 汇总240方案共24000局
+    needs: matrix
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-100局原始结果'
+          pattern: 地区分片*-原始结果
           path: results
-      - name: Summarize
+      - name: Validate and summarize
         run: |
-          python3 - <<'PY' | tee 两种配卡100局配对报告.md
-          import csv,glob,statistics
-          data={}
-          for p in glob.glob('results/**/composition-pair-100.csv',recursive=True):
-              rows=list(csv.DictReader(open(p,encoding='utf-8',newline='')))
-              if len(rows)!=100: raise SystemExit(f'{p}不是100局')
-              data[rows[0]['build']]=rows
-          names=['3速1耐1智','2速2耐1智']
-          if set(data)!=set(names): raise SystemExit(f'结果不完整: {list(data)}')
-          print('# 3速1耐1智 vs 2速2耐1智：100局同 seed 配对')
-          print('\n> 使用 PR #15 实验马娘、继承、代表卡选择、RecommendedRamenTrainer 与基础 seed；地区由正式策略自由选择。')
-          print('\n|方案|实体卡组|平均分|P10|中位数|P90|平均PT|')
-          print('|---|---|---:|---:|---:|---:|---:|')
-          for n in names:
-              r=data[n]; scores=sorted(int(x['score']) for x in r); pts=[int(x['skill_pt']) for x in r]
-              q=lambda p:scores[round((len(scores)-1)*p)]
-              print(f'|{n}|{r[0]["deck"]}|{statistics.mean(scores):.1f}|{q(.1)}|{statistics.median(scores):.1f}|{q(.9)}|{statistics.mean(pts):.1f}|')
-          a={int(x['run']):x for x in data[names[0]]}; b={int(x['run']):x for x in data[names[1]]}
-          ds=[int(b[i]['score'])-int(a[i]['score']) for i in range(100)]
-          dp=[int(b[i]['skill_pt'])-int(a[i]['skill_pt']) for i in range(100)]
-          w=sum(x>0 for x in ds); t=sum(x==0 for x in ds); l=sum(x<0 for x in ds)
-          print(f'\n## 2速2耐1智 相对 3速1耐1智\n\n- 平均分差：**{statistics.mean(ds):+.1f}**')
-          print(f'- 平均PT差：**{statistics.mean(dp):+.1f}**')
-          print(f'- 配对胜/平/负：**{w}/{t}/{l}**')
+          python3 - <<'PY' | tee 两配卡120地区各100局报告.md
+          import csv,glob,statistics,collections
+          rows=[]
+          files=glob.glob('results/**/requested-decks-region-matrix.csv',recursive=True)
+          if len(files)!=20: raise SystemExit(f'应有20个分片，实际{len(files)}')
+          for p in files: rows += list(csv.DictReader(open(p,encoding='utf-8',newline='')))
+          if len(rows)!=24000: raise SystemExit(f'应有24000局，实际{len(rows)}')
+          groups=collections.defaultdict(list)
+          for r in rows: groups[(r['build'],int(r['combo_index']),r['region_ids'],r['deck'])].append(r)
+          if len(groups)!=240 or any(len(v)!=100 for v in groups.values()): raise SystemExit('240个方案中存在缺失或重复')
+          builds=['3速1耐1智','2速2耐1智']
+          for b in builds:
+              if {k[1] for k in groups if k[0]==b}!=set(range(120)): raise SystemExit(f'{b}未覆盖全部120组合')
+          print('# 两种指定配卡 × 第三年120地区组合 × 每组合100局')
+          print('\n- 总计：**240个方案，24,000局**')
+          print('- 两套配卡、全部地区组合均使用相同的100个seed')
+          print('- 第三年地区固定；其余决策使用 RecommendedRamenTrainer')
+          print('\n## 各配卡最优地区组合')
+          print('|配卡|实体卡组|最优组合|地区ID|均分|P10|中位数|P90|平均PT|')
+          print('|---|---|---:|---|---:|---:|---:|---:|---:|')
+          ranked={}
+          for b in builds:
+              entries=[]
+              for k,rs in groups.items():
+                  if k[0]!=b: continue
+                  scores=sorted(int(r['score']) for r in rs); pts=[int(r['skill_pt']) for r in rs]
+                  q=lambda p:scores[round((len(scores)-1)*p)]
+                  entries.append((statistics.mean(scores),k,statistics.mean(pts),q(.1),statistics.median(scores),q(.9)))
+              entries.sort(reverse=True); ranked[b]=entries
+              mean,k,pt,p10,p50,p90=entries[0]
+              print(f'|{b}|{k[3]}|{k[1]}|{k[2]}|{mean:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
+          print('\n## 每套配卡前10名')
+          for b in builds:
+              print(f'\n### {b}\n\n|排名|组合|地区ID|均分|P10|中位数|P90|平均PT|')
+              print('|---:|---:|---|---:|---:|---:|---:|---:|')
+              for rank,(mean,k,pt,p10,p50,p90) in enumerate(ranked[b][:10],1):
+                  print(f'|{rank}|{k[1]}|{k[2]}|{mean:.1f}|{p10}|{p50:.1f}|{p90}|{pt:.1f}|')
+          # 同一地区、同一seed比较两配卡；统计各地区谁领先。
+          combo_wins=[]
+          for ci in range(120):
+              aa=next(v for k,v in groups.items() if k[0]==builds[0] and k[1]==ci)
+              bb=next(v for k,v in groups.items() if k[0]==builds[1] and k[1]==ci)
+              a={int(r['run']):int(r['score']) for r in aa}; b={int(r['run']):int(r['score']) for r in bb}
+              ds=[b[i]-a[i] for i in range(100)]
+              combo_wins.append(statistics.mean(ds))
+          print('\n## 同地区配对总览')
+          print(f'\n- 2速2耐1智领先的地区组合：**{sum(x>0 for x in combo_wins)}/120**')
+          print(f'- 持平：**{sum(x==0 for x in combo_wins)}/120**')
+          print(f'- 3速1耐1智领先的地区组合：**{sum(x<0 for x in combo_wins)}/120**')
+          print(f'- 2速2耐1智跨全部地区的平均分差：**{statistics.mean(combo_wins):+.1f}**')
           PY
-          cat 两种配卡100局配对报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 两配卡120地区各100局报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 两种配卡100局配对报告
-          path: 两种配卡100局配对报告.md
+          name: 两配卡120地区各100局总报告
+          path: 两配卡120地区各100局报告.md
           retention-days: 30
