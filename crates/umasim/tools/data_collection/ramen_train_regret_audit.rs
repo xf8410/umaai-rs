@@ -34,7 +34,7 @@ impl Trainer<RamenGame> for AuditTrainer {
    let hm=out.action_results.get(hand).map(|x|x.0.mean()).unwrap_or(f64::NAN);
    let tm=out.action_results.get(teacher).map(|x|x.0.mean()).unwrap_or(f64::NAN);
    let row=DecisionRow{build:self.build.clone(),run:self.run,turn:g.turn(),year:g.current_year(),vital:g.uma.vital,max_vital:g.uma.max_vital,
-    hand_action:a[hand].operation.to_string(),teacher_action:a[teacher].operation.to_string(),agree:hand==teacher,hand_mean:hm,teacher_mean:tm,regret:tm-hm,
+    hand_action:format!("{:?}",a[hand].operation),teacher_action:format!("{:?}",a[teacher].operation),agree:hand==teacher,hand_mean:hm,teacher_mean:tm,regret:tm-hm,
     hand_post_vital:Self::post_vital(g,&a[hand])?,teacher_post_vital:Self::post_vital(g,&a[teacher])?,hand_recovery:Self::recovery(&a[hand]),teacher_recovery:Self::recovery(&a[teacher])};
    self.rows.lock().map_err(|_|anyhow::anyhow!("审计锁损坏"))?.push(row);
   }
