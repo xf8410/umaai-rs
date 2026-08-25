@@ -1,4 +1,4 @@
-name: 配卡×拉面地区组合（20 Job小批测试）
+name: 配卡×拉面地区组合（20 Job手写策略测试）
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
   matrix:
     name: 配卡${{ matrix.composition_index }}-地区0至9
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -30,27 +30,78 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: composition-y3-upstream-ramen
-      - name: Run 10 region combinations
+          shared-key: composition-y3-handwritten
+      - name: Run 10 combinations with handwritten trainer
         run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
-      - name: Validate 10 results
-        shell: bash
+      - name: Validate results
         run: |
           python3 - <<'PY'
           import csv, os
           ci = int(os.environ['COMPOSITION_INDEX'])
-          with open('composition-y3-matrix.csv', encoding='utf-8', newline='') as f:
-              rows = list(csv.DictReader(f))
+          rows = list(csv.DictReader(open('composition-y3-matrix.csv', encoding='utf-8', newline='')))
           combos = {int(r['combo_index']) for r in rows}
           compositions = {int(r['composition_index']) for r in rows}
           if len(rows) != 10 or combos != set(range(10)) or compositions != {ci}:
-              raise SystemExit(
-                  f'结果错误: 配卡={sorted(compositions)}, 行数={len(rows)}, 地区={sorted(combos)}'
-              )
-          print(f'配卡{ci}: 10个地区组合完整')
+              raise SystemExit(f'结果错误: 配卡={sorted(compositions)}, 行数={len(rows)}, 地区={sorted(combos)}')
           PY
       - uses: actions/upload-artifact@v4
         with:
           name: 配卡${{ matrix.composition_index }}-地区0至9
           path: composition-y3-matrix.csv
+          retention-days: 30
+
+  summary:
+    name: 生成最高最低平均分及PT对比报告
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '配卡*-地区0至9'
+          path: results
+      - name: Generate readable report
+        run: |
+          python3 - <<'PY' | tee 配卡地区组合-20Job测试报告.md
+          import csv, glob, collections, statistics
+          grouped = collections.defaultdict(list)
+          for path in glob.glob('results/**/composition-y3-matrix.csv', recursive=True):
+              with open(path, encoding='utf-8', newline='') as f:
+                  for row in csv.DictReader(f):
+                      grouped[int(row['composition_index'])].append(row)
+          if set(grouped) != set(range(20)):
+              raise SystemExit(f'配卡不完整: {sorted(grouped)}')
+          stats = []
+          for ci, rows in sorted(grouped.items()):
+              if len(rows) != 10 or {int(r['combo_index']) for r in rows} != set(range(10)):
+                  raise SystemExit(f'配卡{ci}结果不完整')
+              scores = [int(r['score']) for r in rows]
+              pts = [int(r['skill_pt']) for r in rows]
+              hi = max(rows, key=lambda r: int(r['score']))
+              lo = min(rows, key=lambda r: int(r['score']))
+              stats.append(dict(ci=ci, composition=rows[0]['composition'], deck=rows[0]['deck'], avg=statistics.mean(scores), hi=max(scores), lo=min(scores), avgpt=statistics.mean(pts), hipt=max(pts), lopt=min(pts), hicombo=hi['combo_index'], hiregion=hi['region_ids'], locombo=lo['combo_index'], loregion=lo['region_ids']))
+          base = stats[0]
+          best_avg=max(stats,key=lambda x:x['avg']); worst_avg=min(stats,key=lambda x:x['avg'])
+          best_single=max(stats,key=lambda x:x['hi']); worst_single=min(stats,key=lambda x:x['lo'])
+          best_pt=max(stats,key=lambda x:x['avgpt']); worst_pt=min(stats,key=lambda x:x['avgpt'])
+          print('# 配卡×拉面地区组合：20 Job手写策略测试报告')
+          print('\n> 配卡0–19；每张配卡测试地区组合0–9；每个组合1局；共200局。差值以配卡0为基准。')
+          print('\n## 极值摘要')
+          print(f'- 平均分最高：**配卡{best_avg["ci"]} {best_avg["avg"]:.1f}**；最低：**配卡{worst_avg["ci"]} {worst_avg["avg"]:.1f}**；差距 **{best_avg["avg"]-worst_avg["avg"]:.1f}**。')
+          print(f'- 单局最高分：**配卡{best_single["ci"]} {best_single["hi"]}**；单局最低分：**配卡{worst_single["ci"]} {worst_single["lo"]}**。')
+          print(f'- 平均PT最高：**配卡{best_pt["ci"]} {best_pt["avgpt"]:.1f}**；最低：**配卡{worst_pt["ci"]} {worst_pt["avgpt"]:.1f}**；差距 **{best_pt["avgpt"]-worst_pt["avgpt"]:.1f}**。')
+          print('\n## 配卡对比（按平均分降序）')
+          print('|排名|配卡|结构|平均分|对配卡0|最高分|最高分地区|最低分|最低分地区|平均PT|对配卡0 PT|最高PT|最低PT|')
+          print('|---:|---:|---|---:|---:|---:|---|---:|---|---:|---:|---:|---:|')
+          for rank,s in enumerate(sorted(stats,key=lambda x:x['avg'],reverse=True),1):
+              print(f'|{rank}|{s["ci"]}|{s["composition"]}|{s["avg"]:.1f}|{s["avg"]-base["avg"]:+.1f}|{s["hi"]}|#{s["hicombo"]} {s["hiregion"]}|{s["lo"]}|#{s["locombo"]} {s["loregion"]}|{s["avgpt"]:.1f}|{s["avgpt"]-base["avgpt"]:+.1f}|{s["hipt"]}|{s["lopt"]}|')
+          print('\n## 实际卡组')
+          print('|配卡|卡组ID|')
+          print('|---:|---|')
+          for s in stats: print(f'|{s["ci"]}|{s["deck"]}|')
+          PY
+          cat 配卡地区组合-20Job测试报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 配卡地区组合-20Job测试报告
+          path: 配卡地区组合-20Job测试报告.md
           retention-days: 30
