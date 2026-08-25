@@ -1,4 +1,4 @@
-name: 手写训练与体力搜索Regret修正确认
+name: 训练恢复统一终局搜索AB
 
 on:
   workflow_dispatch:
@@ -7,116 +7,94 @@ permissions:
   contents: read
 
 jobs:
-  audit:
-    name: ${{ matrix.build }}｜片${{ matrix.shard }}
+  ab:
+    name: ${{ matrix.build }}｜${{ matrix.variant }}｜片${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 12
       matrix:
-        build:
-          - 3速1耐1智
-          - 2速2耐1智
-        shard:
-          - 0
-          - 1
+        build: [3速1耐1智, 2速2耐1智]
+        variant: [baseline, unified-search]
+        shard: [0, 1, 2]
     env:
       BUILD: ${{ matrix.build }}
+      VARIANT: ${{ matrix.variant }}
       SHARD: ${{ matrix.shard }}
-      RUNS: 2
+      RUNS: 5
       SEARCH_N: 128
-      BASE_SEED: 717171
+      BASE_SEED: 828282
     steps:
       - uses: actions/checkout@v4
-      - name: 准备实验构造器和二进制
+      - name: 登记实验程序
         run: |
-          python3 scripts/ramen/add_vital_transition_override.py
-          python3 scripts/ramen/add_recipe_continuity_override.py
-          python3 scripts/ramen/add_random_decimal_override.py
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('crates/umasim/Cargo.toml')
-          s = p.read_text()
-          block = '''[[bin]]
-          name = "ramen_train_regret_audit"
-          path = "tools/data_collection/ramen_train_regret_audit.rs"
-          required-features = ["experiment-tools"]
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text()
+          block='''[[bin]]
+          name = "unified_train_search_ab"
+          path = "tools/data_collection/unified_train_search_ab.rs"
 
           '''
-          if block not in s:
-              s = s.replace('[features]', block + '[features]')
+          if block not in s:s=s.replace('[features]',block+'[features]')
           p.write_text(s)
           PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ramen-train-regret-audit
+          shared-key: unified-train-search-ab
       - name: 编译检查
-        run: cargo check -p umasim --bin ramen_train_regret_audit --features experiment-tools --no-default-features
-      - name: 运行修正审计
-        run: cargo run -p umasim --bin ramen_train_regret_audit --release --features experiment-tools --no-default-features
+        run: cargo check -p umasim --bin unified_train_search_ab --no-default-features
+      - name: 运行AB
+        run: cargo run -p umasim --bin unified_train_search_ab --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: 审计-${{ matrix.build }}-${{ matrix.shard }}
-          path: train-regret-*.csv
+          name: AB-${{ matrix.build }}-${{ matrix.variant }}-${{ matrix.shard }}
+          path: unified-train-search-ab.csv
           retention-days: 30
 
   summary:
-    name: 汇总修正审计
-    needs: audit
+    name: 汇总统一搜索AB
+    needs: ab
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: 审计-*
+          pattern: AB-*
           path: results
-      - name: 生成报告
+      - name: 汇总
         run: |
-          python3 - <<'PY' | tee 训练与体力Regret修正确认报告.md
-          import csv, glob, statistics, collections
-          ds, gs = [], []
-          for p in glob.glob('results/**/train-regret-decisions.csv', recursive=True):
-              ds += list(csv.DictReader(open(p)))
-          for p in glob.glob('results/**/train-regret-games.csv', recursive=True):
-              gs += list(csv.DictReader(open(p)))
-          builds = ['3速1耐1智', '2速2耐1智']
-          print('# 训练与体力 Regret 修正确认\n')
-          print('每套4局；每个多候选Train状态128次完整终局rollout。老师选择和regret统一使用搜索加权均值；随机恢复动作的后体力标记为未知。\n')
-          print('|配卡|局数|均分|PT|状态/局|分歧率|加权regret/局|恢复类分歧/局|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|')
+          python3 - <<'PY' | tee 训练恢复统一终局搜索AB报告.md
+          import csv,glob,statistics
+          rows=[]
+          for p in glob.glob('results/**/unified-train-search-ab.csv',recursive=True):rows+=list(csv.DictReader(open(p)))
+          builds=['3速1耐1智','2速2耐1智'];variants=['baseline','unified-search']
+          if any(len([r for r in rows if r['build']==b and r['variant']==v])!=15 for b in builds for v in variants):
+              raise SystemExit({(b,v):len([r for r in rows if r['build']==b and r['variant']==v]) for b in builds for v in variants})
+          def pct(xs,p):
+              x=sorted(xs);return x[round((len(x)-1)*p)]
+          print('# 训练恢复统一终局搜索 AB\n')
+          print('同一15个种子严格配对；统一搜索只接管Train阶段，在训练、休息、友人外出、普通外出、比赛等全部合法动作间以128次完整终局rollout的加权均值选择。其他阶段沿用正式策略。\n')
+          print('|配卡|方案|均分|P10|P90|最高|PT|五维和|速|耐|力|根|智|搜索点/局|训练|休息|友人|普通外出|')
+          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
           for b in builds:
-              g = [r for r in gs if r['build'] == b]
-              d = [r for r in ds if r['build'] == b]
-              m = lambda k: statistics.mean(float(r[k]) for r in g)
-              print(f"|{b}|{len(g)}|{m('score'):.1f}|{m('skill_pt'):.1f}|{m('searched'):.1f}|{100*sum(r['agree']=='false' for r in d)/len(d):.1f}%|{m('total_regret'):.1f}|{m('recovery_disagree'):.1f}|")
-          print('\n## 动作类别分歧\n')
-          print('|配卡|转移|次数|平均加权regret|累计加权regret|')
-          print('|---|---|---:|---:|---:|')
+           for v in variants:
+            rr=[r for r in rows if r['build']==b and r['variant']==v];m=lambda k:statistics.mean(float(r[k]) for r in rr);sc=[int(r['score']) for r in rr]
+            print(f"|{b}|{v}|{m('score'):.1f}|{pct(sc,.1)}|{pct(sc,.9)}|{max(sc)}|{m('skill_pt'):.1f}|{m('five_sum'):.1f}|{m('speed'):.1f}|{m('stamina'):.1f}|{m('power'):.1f}|{m('guts'):.1f}|{m('wisdom'):.1f}|{m('searched'):.1f}|{m('train'):.1f}|{m('rest'):.1f}|{m('friend_outing'):.1f}|{m('normal_outing'):.1f}|")
+          print('\n## 配对差值\n')
+          print('|配卡|均分Δ|PTΔ|五维和Δ|胜/平/负|P10Δ|P90Δ|最高Δ|')
+          print('|---|---:|---:|---:|---|---:|---:|---:|')
           for b in builds:
-              groups = collections.defaultdict(list)
-              for r in ds:
-                  if r['build'] == b and r['agree'] == 'false':
-                      groups[r['transition']].append(float(r['regret']))
-              for k, v in sorted(groups.items(), key=lambda kv: sum(kv[1]), reverse=True):
-                  print(f'|{b}|{k}|{len(v)}|{statistics.mean(v):.1f}|{sum(v):.1f}|')
-          print('\n## 年份与体力区间\n')
-          print('|配卡|年|体力段|状态|分歧率|平均regret|手写恢复率|老师恢复率|')
-          print('|---|---:|---|---:|---:|---:|---:|---:|')
-          for b in builds:
-              for y in ['1', '2', '3']:
-                  for label, lo, hi in [('0-19',0,20),('20-39',20,40),('40-59',40,60),('60+',60,999)]:
-                      rows = [x for x in ds if x['build'] == b and x['year'] == y and lo <= int(x['vital']) < hi]
-                      if rows:
-                          print(f"|{b}|{y}|{label}|{len(rows)}|{100*sum(x['agree']=='false' for x in rows)/len(rows):.1f}%|{statistics.mean(float(x['regret']) for x in rows):.1f}|{100*sum(x['hand_recovery']=='true' for x in rows)/len(rows):.1f}%|{100*sum(x['teacher_recovery']=='true' for x in rows)/len(rows):.1f}%|")
-          print('\n## 最大加权regret决策（前30）\n')
-          print('|配卡|局|回合|年|体力|手写|老师|手写加权|老师加权|regret|手写后体|老师后体|')
-          print('|---|---:|---:|---:|---:|---|---|---:|---:|---:|---|---|')
-          for r in sorted(ds, key=lambda x: float(x['regret']), reverse=True)[:30]:
-              print(f"|{r['build']}|{r['run']}|{r['turn']}|{r['year']}|{r['vital']}|{r['hand_action']}|{r['teacher_action']}|{float(r['hand_weighted']):.0f}|{float(r['teacher_weighted']):.0f}|{float(r['regret']):.0f}|{r['hand_post_vital']}|{r['teacher_post_vital']}|")
+           base={int(r['run']):r for r in rows if r['build']==b and r['variant']=='baseline'};new={int(r['run']):r for r in rows if r['build']==b and r['variant']=='unified-search'}
+           d=[int(new[i]['score'])-int(base[i]['score']) for i in sorted(base)];pt=[int(new[i]['skill_pt'])-int(base[i]['skill_pt']) for i in sorted(base)];fs=[int(new[i]['five_sum'])-int(base[i]['five_sum']) for i in sorted(base)];bs=[int(base[i]['score']) for i in sorted(base)];ns=[int(new[i]['score']) for i in sorted(base)]
+           w=sum(x>0 for x in d);t=sum(x==0 for x in d);l=sum(x<0 for x in d)
+           print(f'|{b}|{statistics.mean(d):+.1f}|{statistics.mean(pt):+.1f}|{statistics.mean(fs):+.1f}|{w}/{t}/{l}|{pct(ns,.1)-pct(bs,.1):+}|{pct(ns,.9)-pct(bs,.9):+}|{max(ns)-max(bs):+}|')
+          print('\n说明：15局只用于验证结构方向和可达到的收益上界，不足以直接固化搜索为正式策略。若显著为正，再蒸馏高频分歧为低成本规则并做300局配对。')
           PY
-          cat 训练与体力Regret修正确认报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 训练恢复统一终局搜索AB报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 训练与体力Regret修正确认总报告
-          path: 训练与体力Regret修正确认报告.md
+          name: 训练恢复统一终局搜索AB总报告
+          path: 训练恢复统一终局搜索AB报告.md
           retention-days: 30
