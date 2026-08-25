@@ -898,6 +898,12 @@ impl RamenAction {
                 params.is_shining,
                 is_xiahesu
             );
+            // 观测：友情训练回合数（纯采集，不影响逻辑）
+            if params.is_shining {
+                if let Some(slot) = game.ramen.yearly_friend_turns.get_mut(game.ramen.obs_year) {
+                    *slot += 1;
+                }
+            }
         }
         Ok(())
     }

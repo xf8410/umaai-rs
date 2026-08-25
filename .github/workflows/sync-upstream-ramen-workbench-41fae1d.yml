@@ -1,0 +1,58 @@
+name: 手动同步上游ramen_workbench-41fae1d
+on: {workflow_dispatch: {}}
+permissions: {contents: write}
+concurrency:
+  group: sync-upstream-ramen-workbench-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      UPSTREAM_SHA: 41fae1d9bc3dce26decf01ba3bab494a13721350
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: 按固定提交手动同步生产源码
+        run: |
+          set -euo pipefail
+          base="https://raw.githubusercontent.com/xulai1001/umaai-rs/$UPSTREAM_SHA"
+          files=(
+            crates/umasim/src/game/ramen/policy.rs
+            crates/umasim/src/game/ramen/action.rs
+            crates/umasim/src/game/ramen/rules.rs
+            crates/umasim/src/game/ramen/state.rs
+            crates/umasim/src/bench.rs
+          )
+          for f in "${files[@]}"; do
+            curl --fail --location --retry 3 "$base/$f" --output "$f.upstream"
+            test -s "$f.upstream"
+            mv "$f.upstream" "$f"
+          done
+          grep -F 'n_waste as f32 * 10.0' crates/umasim/src/game/ramen/policy.rs
+          grep -F 'yearly_gauge_overflow' crates/umasim/src/game/ramen/state.rs
+          grep -F 'yearly_friend_turns' crates/umasim/src/bench.rs
+          if grep -q 'region_low_count_youqing_weight' crates/umasim/src/game/ramen/policy.rs; then
+            echo '弃用字段仍存在' >&2; exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: sync-upstream-41fae1d}
+      - name: 编译并验证地区策略
+        run: |
+          cargo check -p umasim --no-default-features
+          cargo test -p umasim test_region_build_sensitivity --no-default-features -- --nocapture
+          cargo test -p umasim test_region_selection_per_build --no-default-features -- --nocapture
+      - name: 提交到当前工作分支
+        run: |
+          if git diff --quiet; then echo '已同步，无变化'; exit 0; fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            crates/umasim/src/game/ramen/policy.rs \
+            crates/umasim/src/game/ramen/action.rs \
+            crates/umasim/src/game/ramen/rules.rs \
+            crates/umasim/src/game/ramen/state.rs \
+            crates/umasim/src/bench.rs
+          git commit -m 'sync(ramen): apply upstream workbench 41fae1d'
+          git push origin HEAD:${{ github.ref_name }}

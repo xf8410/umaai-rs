@@ -17,7 +17,7 @@ use anyhow::Result;
 
 use super::{
     effects::calc_ramen_training_effect,
-    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options}
+    rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options},
 };
 use crate::{
     game::{
@@ -106,6 +106,9 @@ pub struct RamenPolicyConfig {
     /// 第 1 年地区只有 `xunlian`、第 2/3 年只有 `youqing`，两项不会同时非零；
     /// 且同一年内 `pt_bonus` / `hint_count` 恒定，故本权重的绝对值不影响 argmax，
     /// 只影响打印出来的分数量级。
+    ///
+    /// `score_region` 内部用 `youqing / |at_trains|`（单格你qing）替代原始你qing，
+    /// 避免"覆盖广但单格低"的反例地区（Y2 id 5 你qing=10 覆盖 5 位）天然胜出。
     pub region_youqing_weight: f32,
     // ===== Event =====
     /// 事件体力每点折算
@@ -340,6 +343,12 @@ impl RamenPolicy {
     }
 
     /// RegionSelect 阶段：按地区静态价值打分选组合（含第 3 年 120 组合全枚举，O(360) 便宜）
+    ///
+    /// 每个组合的分数 = 逐地区 `score_region` 累加（`youqing / |at_trains|` 标准化
+    /// 后单格友情加成与覆盖位数无关，避免 Y2 id 5 等"覆盖广但单格低"反例天然胜出）。
+    /// 曾实验的"少卡位加权"（`low_count_youqing`）全 101 种验证显示：智向 build
+    /// 严重受损（-3447），改写为"主训位加权"方向；但 `bias_sum` 已隐式表达 build
+    /// 训练倾向——本公式即"按卡组自适应"的最简落地，无需额外加权项。
     pub fn decide_region(
         &self, game: &RamenGame, _year_idx: usize, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
@@ -603,8 +612,23 @@ impl RamenPolicy {
 
     // ========== RegionSelect 单地区价值 ==========
 
-    /// 单个地区的静态价值（xunlian×训练倾向 + pt_bonus + hint）
-    fn score_region(&self, game: &RamenGame, region_id: usize) -> Result<f32> {
+    /// 单个地区的静态价值（`bias_sum × youqing` + 无卡位惩罚）
+    ///
+    /// 语义：`region.youqing` 在 `at_trains` 内每个训练位**独立生效**——
+    /// 单点 youqing=60 at_trains=[智] → 智位训练时获得 +60；
+    /// 三点 youqing=40 at_trains=[速力智] → 速/力/智**每个**位训练时都获得 +40。
+    /// 因此选地区时优先选"覆盖 build 主训位 + 高 youqing"的组合。
+    ///
+    /// **无卡位惩罚**（`waste_penalty = 10`）：每个"build 在该位无卡"的训练位 -10。
+    /// 旧 plain 的 `max(0.5)` 让"覆盖广且含无卡位"地区（Y2 id 5 覆盖 5 位含 2 无卡位）
+    /// 评分偏高，与"含真实卡位"的窄覆盖单点（id 9 智）平局；用 waste 惩罚让
+    /// id 5 评分显著低于 id 9，build 真正训练时拿到的是"覆盖 build 主训位"的
+    /// 高 youqing 地区而非"覆盖广但无卡位"的反例。
+    ///
+    /// `deck_can_split` 不影响地区组合选择——影响的是 build 训练分布广度
+    /// （有分身 → 训练分布更广），但单地区独立打分层面 `bias_sum × youqing - waste`
+    /// 已隐含这一信号（覆盖 build 主训位的地区 bias_sum 高）。
+    pub fn score_region(&self, game: &RamenGame, region_id: usize) -> Result<f32> {
         let region = RAMENDATA
             .get()
             .and_then(|d| d.ramen_region_effect.get(region_id))
@@ -617,15 +641,19 @@ impl RamenPolicy {
                 bias[t as usize] += 1.0;
             }
         }
-        // 该地区覆盖的训练位在卡组里的分量；0.5 下限避免「一张都没有」直接归零
-        let bias_sum: f32 = region
-            .at_trains
-            .iter()
-            .map(|&t| {
-                let t = t as usize;
-                if t < 5 { bias[t].max(0.5) } else { 0.0 }
-            })
-            .sum();
+        // 该地区覆盖的训练位在卡组里的分量；无卡位贡献 0
+        let mut bias_sum = 0.0f32;
+        let mut n_waste = 0u32;
+        for &t in &region.at_trains {
+            let t = t as usize;
+            if t < 5 {
+                if bias[t] > 0.0 {
+                    bias_sum += bias[t];
+                } else {
+                    n_waste += 1;
+                }
+            }
+        }
         // xunlian（第 1 年）与 youqing（第 2/3 年）都按 bias_sum 缩放：
         // 第 2/3 年地区的 xunlian 恒为 0，若只算 xunlian 则同年所有候选同分、
         // argmax 恒取第一个，卡组构成完全不参与决策。
@@ -633,7 +661,8 @@ impl RamenPolicy {
             * (region.xunlian as f32 * self.config.region_xunlian_weight
                 + region.youqing as f32 * self.config.region_youqing_weight)
             + region.pt_bonus as f32 * self.config.region_pt_weight
-            + region.hint_count as f32 * self.config.region_hint_weight)
+            + region.hint_count as f32 * self.config.region_hint_weight
+            - n_waste as f32 * 10.0) // 每个无卡位 -10
     }
 
     // ========== Event 打分 ==========
@@ -884,6 +913,100 @@ mod tests {
             RamenAction::new(Operation::NormalOuting),
             RamenAction::new(Operation::Clinic),
         ]
+    }
+
+    /// 每个 build 跑一遍地区选择决策，打印 build 配置 + 三年的地区选择（含地区名）。
+    ///
+    /// 输出格式示例：
+    /// ```text
+    /// speed (3speed+1stamina+1wisdom):
+    ///   Y1 = [0, 1, 4] (札幌-速/函馆-耐/东京-智)
+    ///   Y2 = [7, 8, 9] (京都-耐根/阪神-耐力/小仓-智)
+    ///   Y3 = [11, 17, 19] (函馆-耐/京都-速耐智/小仓-速根智)
+    /// ```
+    ///
+    /// 用于人工审查"按卡组自适应"的地区选择是否合理——覆盖 build 主训位、
+    /// 避开含无卡位的单点、组合内部不重复浪费训练位等。
+    #[test]
+    fn test_region_selection_per_build() -> anyhow::Result<()> {
+        use crate::{bench, game::InheritInfo, gamedata::ramen::RAMENDATA};
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        init_global()?;
+
+        // 把 build counts 渲染成 "3speed+1stamina+1wisdom" 形式
+        fn build_display(counts: &[usize; 5]) -> String {
+            const NAMES: [&str; 5] = ["speed", "stamina", "power", "guts", "wisdom"];
+            let mut parts = Vec::with_capacity(5);
+            for (i, &c) in counts.iter().enumerate() {
+                if c > 0 {
+                    parts.push(format!("{c}{}", NAMES[i]));
+                }
+            }
+            parts.join("+")
+        }
+
+        // 把 [id, id, id] 渲染成 "0 (札幌-速)/1 (函馆-耐)/4 (东京-智)"
+        fn combo_display(combo: &[usize; 3]) -> String {
+            let ramen_data = RAMENDATA.get().expect("RAMENDATA 未初始化");
+            let names: Vec<String> = combo
+                .iter()
+                .map(|&rid| {
+                    ramen_data
+                        .ramen_region_effect
+                        .get(rid)
+                        .map(|r| format!("{rid} ({})", r.name))
+                        .unwrap_or_else(|| format!("{rid} (?)"))
+                })
+                .collect();
+            names.join("/")
+        }
+
+        // 从 bench_config.toml 读 build 配置，按声明序遍历
+        let builds = bench::load_player_builds()?;
+        let inherit = InheritInfo {
+            blue_count: [15, 0, 0, 0, 3],
+            extra_count: [10, 10, 20, 20, 20, 40]
+        };
+        // 固定 uma 与 friend，与 bench_compositions / region_matrix 一致
+        const UMA: u32 = 102_601;
+        const FRIEND: u32 = 303_054;
+
+        // 7 个 build 中仅有 sta0_wis2 满足种类 ≥ 4（deck_can_split=true）。
+        // 其他 6 个是残缺 build，地区拉面分身/finals extra/hint_special 不生效。
+        // 这里只测地区打分本身，不依赖游戏机制生效。
+        let policy = RamenPolicy::default();
+
+        println!("\n========== 地区选择诊断（每个 build × 3 年） ==========");
+        for build in &builds {
+            // 把 build counts 转成 6 张 idrank（速耐力根智按序取代表卡 + 友人卡）
+            // 这里直接复用 bench::select_representatives + DeckComposition::build_deck
+            let representatives = bench::select_representatives(&bench::CardPickOpts::default())?;
+            let deck_ids = build.build_deck(&representatives.picked, FRIEND)?;
+            let game = crate::game::ramen::RamenGame::newgame(UMA, &deck_ids, inherit.clone())?;
+
+            let mut lines = Vec::new();
+            for year_idx in 0..3 {
+                let combos = crate::game::ramen::rules::get_region_combinations(year_idx)?;
+                let actions: Vec<RamenAction> = combos
+                    .iter()
+                    .map(|&c| RamenAction::no_ramen(Operation::RegionSelect(c)))
+                    .collect();
+                let (idx, _) = policy.decide_region(&game, year_idx, &actions)?;
+                let chosen = combos[idx];
+                let label = if year_idx == 0 { "Y1" } else if year_idx == 1 { "Y2" } else { "Y3" };
+                lines.push(format!("  {label} = {}", combo_display(&chosen)));
+            }
+            println!(
+                "\nbuild={} ({}):\n{}",
+                build.name(),
+                build_display(&build.counts),
+                lines.join("\n")
+            );
+        }
+        Ok(())
     }
 
     /// 守门 1：生病时必须治病（优先于训练/休息）

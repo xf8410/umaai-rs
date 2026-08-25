@@ -37,7 +37,10 @@ path = "tools/data_collection/y3_train_pt_trace.rs"
 name = "composition_weight_matrix"
 path = "tools/data_collection/composition_weight_matrix.rs"
 
-# 以下工具由专项脚本临时注入候选参数入口，不属于常规发布构建目标。
+[[bin]]
+name = "composition_y3_matrix"
+path = "src/bin/composition_y3_matrix.rs"
+
 [[bin]]
 name = "exact_weight_confirm"
 path = "tools/data_collection/exact_weight_confirm.rs"
@@ -81,18 +84,8 @@ required-features = ["experiment-tools"]
 [features]
 default = ["cli", "diag"]
 diag = []
-# 仅用于显式启用需要实验脚本配套处理的数据采集工具。
 experiment-tools = []
-cli = [
-    "dep:inquire",
-    "dep:comfy-table",
-    "dep:flexi_logger",
-    "dep:env_logger",
-    "dep:indicatif",
-    "dep:text-to-ascii-art",
-    "dep:clap",
-    "dep:tokio",
-]
+cli = ["dep:inquire", "dep:comfy-table", "dep:flexi_logger", "dep:env_logger", "dep:indicatif", "dep:text-to-ascii-art", "dep:clap", "dep:tokio"]
 no-color = ["colored/no-color"]
 onnx = ["dep:tract-onnx"]
 
@@ -116,7 +109,6 @@ parse-display = "0.11.0"
 colored.workspace = true
 csv.workspace = true
 lexopt.workspace = true
-
 inquire = { workspace = true, optional = true }
 comfy-table = { workspace = true, optional = true }
 flexi_logger = { workspace = true, optional = true }
@@ -125,6 +117,5 @@ indicatif = { workspace = true, optional = true }
 text-to-ascii-art = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
-
 tract-onnx = { workspace = true, optional = true }
 indexmap.workspace = true

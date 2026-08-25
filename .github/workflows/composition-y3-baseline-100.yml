@@ -1,0 +1,51 @@
+name: 当前配卡吃面训练与友人审计
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 注入实验入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "eat_friend_audit"
+          path = "tools/data_collection/eat_friend_audit.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: {shared-key: eat-friend-audit}
+      - run: cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
+      - name: 汇总
+        run: |
+          python3 - <<'PY' | tee 吃面训练与友人审计报告.md
+          import csv,collections,statistics
+          rows=list(csv.DictReader(open('eat-friend-audit.csv')));g=collections.defaultdict(list)
+          for r in rows:g[r['build']].append(r)
+          print('# 当前配卡吃面训练与友人审计\n')
+          print('|配卡|局数|平均吃面|平均吃后训练|平均覆盖命中|平均错位|吃后非训练|平均点友人训练|羁绊60后点友人|平均友人外出|吃面计数不一致局|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for b,rs in g.items():
+            m=lambda k:statistics.mean(int(r[k])for r in rs);bad=sum(int(r['eat_archived'])!=int(r['eat_seen'])for r in rs)
+            print(f"|{b}|{len(rs)}|{m('eat_seen'):.2f}|{m('post_train'):.2f}|{m('aligned'):.2f}|{m('misaligned'):.2f}|{m('post_nontrain'):.2f}|{m('friend_train'):.2f}|{m('friend_train_after60'):.2f}|{m('friend_outing'):.2f}|{bad}|")
+          print('\n覆盖命中表示训练位属于该面 at_trains；错位时基础拉面效果仍生效，但地区定向效果未命中。')
+          PY
+          cat 吃面训练与友人审计报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 当前配卡吃面训练与友人审计
+          path: |
+            eat-friend-audit.csv
+            吃面训练与友人审计报告.md
+          retention-days: 30
