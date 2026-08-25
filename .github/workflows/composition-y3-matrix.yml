@@ -1,15 +1,29 @@
-name: 当前配卡吃面训练与友人审计
+name: 吃面后训练门控三臂矩阵
 on: {workflow_dispatch: {}}
 permissions: {contents: read}
 jobs:
-  audit:
+  matrix:
+    name: ${{ matrix.mode }}｜片${{ matrix.shard }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline,soft150,hard]
+        shard: [0,1,2]
+    env:
+      GATE_MODE: ${{ matrix.mode }}
+      RUNS: 100
+      BASE_SEED: 606060
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - name: 注入共同实验入口与门控臂
+        run: |
           python3 scripts/ramen/add_vital_transition_override.py
           python3 scripts/ramen/add_recipe_continuity_override.py
           python3 scripts/ramen/add_random_decimal_override.py
+          if [ "$GATE_MODE" = soft150 ]; then POST_EAT_SOFT_THRESHOLD=150 python3 scripts/ramen/add_post_eat_soft_gate.py; fi
+          if [ "$GATE_MODE" = hard ]; then python3 scripts/ramen/fix_post_eat_covered_training.py; fi
           python3 - <<'PY'
           from pathlib import Path
           p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
@@ -24,27 +38,49 @@ jobs:
           PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with: {shared-key: eat-friend-audit}
-      - run: cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
-      - name: 汇总
-        run: |
-          python3 - <<'PY' | tee 吃面训练与友人审计报告.md
-          import csv,collections,statistics
-          rows=list(csv.DictReader(open('eat-friend-audit.csv')));g=collections.defaultdict(list)
-          for r in rows:g[r['build']].append(r)
-          print('# 当前配卡吃面训练与友人审计\n')
-          print('|配卡|局数|平均吃面|平均吃后训练|平均覆盖命中|平均错位|吃后非训练|平均点友人训练|羁绊60后点友人|平均友人外出|吃面计数不一致局|')
-          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
-          for b,rs in g.items():
-            m=lambda k:statistics.mean(int(r[k])for r in rs);bad=sum(int(r['eat_archived'])!=int(r['eat_seen'])for r in rs)
-            print(f"|{b}|{len(rs)}|{m('eat_seen'):.2f}|{m('post_train'):.2f}|{m('aligned'):.2f}|{m('misaligned'):.2f}|{m('post_nontrain'):.2f}|{m('friend_train'):.2f}|{m('friend_train_after60'):.2f}|{m('friend_outing'):.2f}|{bad}|")
-          print('\n覆盖命中表示训练位属于该面 at_trains；错位时基础拉面效果仍生效，但地区定向效果未命中。')
-          PY
-          cat 吃面训练与友人审计报告.md >> "$GITHUB_STEP_SUMMARY"
+        with: {shared-key: post-eat-three-arm}
+      - run: |
+          export BASE_SEED=$((606060 + SHARD * 1000003))
+          cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
+          mv eat-friend-audit.csv "$GATE_MODE-$SHARD.csv"
       - uses: actions/upload-artifact@v4
         with:
-          name: 当前配卡吃面训练与友人审计
-          path: |
-            eat-friend-audit.csv
-            吃面训练与友人审计报告.md
+          name: 门控-${{ matrix.mode }}-${{ matrix.shard }}
+          path: ${{ matrix.mode }}-${{ matrix.shard }}.csv
+          retention-days: 30
+  summary:
+    needs: matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {pattern: '门控-*', path: results, merge-multiple: true}
+      - name: 配对汇总
+        run: |
+          python3 - <<'PY' | tee 吃面后训练门控三臂报告.md
+          import csv,glob,collections,statistics,math
+          rows=[]
+          for p in glob.glob('results/*.csv'): rows += list(csv.DictReader(open(p)))
+          g=collections.defaultdict(list)
+          for r in rows:g[(r['build'],r['mode'])].append(r)
+          print('# 吃面后训练门控三臂矩阵\n')
+          print('- baseline：吃后必须训练，但训练位不限')
+          print('- soft150：覆盖训练相对全局最佳损失 ≤150 策略分时切换到覆盖训练')
+          print('- hard：吃后只能选择该面 at_trains 覆盖训练\n')
+          print('|配卡|臂|局数|均分|P10|平均PT|覆盖命中|错位|吃后非训练|友人训练|羁绊60后友人|外出|')
+          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for b in ['3速1耐1智','2速2耐1智']:
+            for m in ['baseline','soft150','hard']:
+              rs=g[(b,m)]; scores=sorted(int(r['score'])for r in rs)
+              av=lambda k:statistics.mean(int(r[k])for r in rs)
+              print(f"|{b}|{m}|{len(rs)}|{statistics.mean(scores):.1f}|{scores[len(scores)//10-1]}|{av('skill_pt'):.1f}|{av('aligned'):.2f}|{av('misaligned'):.2f}|{av('post_nontrain'):.2f}|{av('friend_train'):.2f}|{av('friend_train_after60'):.2f}|{av('friend_outing'):.2f}|")
+          print('\n## 相对 baseline（同臂规模；三分片独立种子）\n')
+          for b in ['3速1耐1智','2速2耐1智']:
+            base=statistics.mean(int(r['score'])for r in g[(b,'baseline')])
+            print(f'- {b}: soft150 {statistics.mean(int(r["score"])for r in g[(b,"soft150")])-base:+.1f}；hard {statistics.mean(int(r["score"])for r in g[(b,"hard")])-base:+.1f}')
+          PY
+          cat 吃面后训练门控三臂报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 吃面后训练门控三臂总报告
+          path: 吃面后训练门控三臂报告.md
           retention-days: 30
