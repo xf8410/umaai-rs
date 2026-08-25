@@ -1,71 +1,51 @@
-name: 配卡0基准100局验收
-
-on:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: composition-y3-baseline-100-${{ github.ref }}
-  cancel-in-progress: true
-
+name: 当前配卡吃面训练与友人审计
+on: {workflow_dispatch: {}}
+permissions: {contents: read}
 jobs:
-  baseline:
-    name: 配卡0-10地区各10局
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      COMPOSITION_INDEX: 0
-      COMBO_START: 0
-      COMBO_END: 10
-      RUNS: 10
     steps:
       - uses: actions/checkout@v4
+      - name: 注入实验入口
+        run: |
+          python3 scripts/ramen/add_vital_transition_override.py
+          python3 scripts/ramen/add_recipe_continuity_override.py
+          python3 scripts/ramen/add_random_decimal_override.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('crates/umasim/Cargo.toml');s=p.read_text();mark='[features]'
+          block='''[[bin]]
+          name = "eat_friend_audit"
+          path = "tools/data_collection/eat_friend_audit.rs"
+          required-features = ["experiment-tools"]
+
+          '''
+          if block not in s:s=s.replace(mark,block+mark)
+          p.write_text(s)
+          PY
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: composition-y3-handwritten
-      - name: Run baseline 100 games
-        run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
-      - name: Validate and summarize
+        with: {shared-key: eat-friend-audit}
+      - run: cargo run -p umasim --bin eat_friend_audit --release --features experiment-tools --no-default-features
+      - name: 汇总
         run: |
-          python3 - <<'PY' | tee 配卡0基准100局报告.md
-          import csv, statistics
-          rows=list(csv.DictReader(open('composition-y3-matrix.csv',encoding='utf-8',newline='')))
-          if len(rows)!=100:
-              raise SystemExit(f'应有100局，实际{len(rows)}局')
-          if {int(r['composition_index']) for r in rows}!={0}:
-              raise SystemExit('混入非配卡0结果')
-          if {int(r['combo_index']) for r in rows}!=set(range(10)):
-              raise SystemExit('地区组合应为0至9')
-          if any(sum(int(r['combo_index'])==i for r in rows)!=10 for i in range(10)):
-              raise SystemExit('每个地区组合必须恰好10局')
-          scores=[int(r['score']) for r in rows]
-          pts=[int(r['skill_pt']) for r in rows]
-          scores_sorted=sorted(scores)
-          def pct(xs,p):
-              return xs[round((len(xs)-1)*p)]
-          print('# 配卡0基准100局验收')
-          print('\n- 配卡：'+rows[0]['composition'])
-          print('- 实体卡组：'+rows[0]['deck'])
-          print('- 地区组合：0–9，每个组合10局，共100局')
-          print(f'- 平均分：**{statistics.mean(scores):.1f}**')
-          print(f'- 最低 / P10 / 中位 / P90 / 最高：**{min(scores)} / {pct(scores_sorted,.1)} / {statistics.median(scores):.1f} / {pct(scores_sorted,.9)} / {max(scores)}**')
-          print(f'- 标准差：**{statistics.pstdev(scores):.1f}**')
-          print(f'- 平均技能PT：**{statistics.mean(pts):.1f}**')
-          print('\n## 各地区组合')
-          print('|组合|地区ID|局数|平均分|平均PT|')
-          print('|---:|---|---:|---:|---:|')
-          for i in range(10):
-              rs=[r for r in rows if int(r['combo_index'])==i]
-              print(f'|{i}|{rs[0]["region_ids"]}|{len(rs)}|{statistics.mean(int(r["score"]) for r in rs):.1f}|{statistics.mean(int(r["skill_pt"]) for r in rs):.1f}|')
+          python3 - <<'PY' | tee 吃面训练与友人审计报告.md
+          import csv,collections,statistics
+          rows=list(csv.DictReader(open('eat-friend-audit.csv')));g=collections.defaultdict(list)
+          for r in rows:g[r['build']].append(r)
+          print('# 当前配卡吃面训练与友人审计\n')
+          print('|配卡|局数|平均吃面|平均吃后训练|平均覆盖命中|平均错位|吃后非训练|平均点友人训练|羁绊60后点友人|平均友人外出|吃面计数不一致局|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          for b,rs in g.items():
+            m=lambda k:statistics.mean(int(r[k])for r in rs);bad=sum(int(r['eat_archived'])!=int(r['eat_seen'])for r in rs)
+            print(f"|{b}|{len(rs)}|{m('eat_seen'):.2f}|{m('post_train'):.2f}|{m('aligned'):.2f}|{m('misaligned'):.2f}|{m('post_nontrain'):.2f}|{m('friend_train'):.2f}|{m('friend_train_after60'):.2f}|{m('friend_outing'):.2f}|{bad}|")
+          print('\n覆盖命中表示训练位属于该面 at_trains；错位时基础拉面效果仍生效，但地区定向效果未命中。')
           PY
-          cat 配卡0基准100局报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 吃面训练与友人审计报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡0基准100局结果
+          name: 当前配卡吃面训练与友人审计
           path: |
-            composition-y3-matrix.csv
-            配卡0基准100局报告.md
+            eat-friend-audit.csv
+            吃面训练与友人审计报告.md
           retention-days: 30
