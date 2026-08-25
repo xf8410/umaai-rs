@@ -185,6 +185,7 @@ pub struct LocalRamenConfig {
     /// `0.0` 关闭。配置 token `pro150` 对应 `150.0`。
     pub friend_proactive_weight: f32,
 
+
     /// 吃面必成价值权重，无量纲。
     ///
     /// 吃面回合训练失败率下降（`fail_rate_drop`：Y1 30% / Y2 50% / Y3 100%，
@@ -598,11 +599,13 @@ impl LocalRamenTrainer {
 
     /// 友人外出 +2 隐藏风味是否不溢出（上限 4，见 `do_friend_outing`）。
     ///
-    /// 溢出时 +2 中超出部分浪费，友人的隐藏风味补给价值应视为 0，
-    /// 优先恢复场景（体力低）应退回休息而非友人。
+    /// 溢出时 +2 中超出部分浪费——隐藏风味补给价值归零，友人只剩体力/属性/完链
+    /// 价值，与休息无本质区别；友人次数有限（[0,2,5]），应留给"不溢出 + 低体力"
+    /// 的完整价值回合，溢出回合退回休息。
     fn friend_hidden_not_overflow(&self, g: &RamenGame) -> bool {
         g.ramen.special_feeling <= 2
     }
+
 
     /// 下一段友人外出的动态价值。
     ///
@@ -921,7 +924,9 @@ impl LocalRamenTrainer {
                             || (x.operation == Operation::FriendOuting
                                 && self.friend_outing_within_pacing(g)
                                 // 体力低时应优先友人（恢复 48~80 体力 + 属性 + 完链，比休息值），
-                                // 但隐藏风味不溢出时才行（友人 +2 上限 4，溢出浪费）
+                                // 但隐藏风味不溢出时才行：溢出时友人 +2 补给浪费，只剩
+                                // 体力/属性价值，与休息无本质区别；友人次数有限，应留给
+                                // "不溢出 + 低体力"的完整价值回合。
                                 && self.friend_hidden_not_overflow(g))
                     })
                 })
