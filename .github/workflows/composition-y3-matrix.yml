@@ -1,4 +1,4 @@
-name: 手写训练与体力搜索Regret初审
+name: 手写训练与体力搜索Regret修正确认
 on: {workflow_dispatch: {}}
 permissions: {contents: read}
 jobs:
@@ -15,12 +15,11 @@ jobs:
       BUILD: ${{ matrix.build }}
       SHARD: ${{ matrix.shard }}
       RUNS: 2
-      SEARCH_N: 32
+      SEARCH_N: 128
       BASE_SEED: 717171
     steps:
       - uses: actions/checkout@v4
-      - name: 注入正式实验构造器并登记审计程序
-        run: |
+      - run: |
           python3 scripts/ramen/add_vital_transition_override.py
           python3 scripts/ramen/add_recipe_continuity_override.py
           python3 scripts/ramen/add_random_decimal_override.py
@@ -39,45 +38,51 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: ramen-train-regret-audit}
+      - run: cargo check -p umasim --bin ramen_train_regret_audit --features experiment-tools --no-default-features
       - run: cargo run -p umasim --bin ramen_train_regret_audit --release --features experiment-tools --no-default-features
       - uses: actions/upload-artifact@v4
-        with:
-          name: 审计-${{ matrix.build }}-${{ matrix.shard }}
-          path: train-regret-*.csv
-          retention-days: 30
+        with: {name: 审计-${{ matrix.build }}-${{ matrix.shard }}, path: 'train-regret-*.csv', retention-days: 30}
   summary:
     needs: audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
-        with: {pattern: '审计-*', path: results, merge-multiple: false}
+        with: {pattern: '审计-*', path: results}
       - run: |
-          python3 - <<'PY' | tee 训练与体力Regret初审报告.md
-          import csv,glob,collections,statistics
+          python3 - <<'PY' | tee 训练与体力Regret修正确认报告.md
+          import csv,glob,statistics,collections
           ds=[];gs=[]
           for p in glob.glob('results/**/train-regret-decisions.csv',recursive=True):ds+=list(csv.DictReader(open(p)))
           for p in glob.glob('results/**/train-regret-games.csv',recursive=True):gs+=list(csv.DictReader(open(p)))
-          print('# 手写训练与体力搜索 Regret 初审\n')
-          print('本轮每套配卡4局、每个多候选Train状态32次完整终局rollout；只观察，不让搜索接管真实动作。\n')
-          print('|配卡|局数|均分|PT|搜索状态/局|分歧率|累计regret/局|恢复类分歧/局|')
+          builds=['3速1耐1智','2速2耐1智']
+          print('# 训练与体力 Regret 修正确认\n')
+          print('每套4局；每个多候选Train状态128次完整终局rollout。老师选择和regret统一使用搜索的加权均值；外出等随机恢复动作的后体力标记为未知。\n')
+          print('|配卡|局数|均分|PT|状态/局|分歧率|加权regret/局|恢复类分歧/局|')
           print('|---|---:|---:|---:|---:|---:|---:|---:|')
-          for b in ['3速1耐1智','2速2耐1智']:
-            g=[r for r in gs if r['build']==b];d=[r for r in ds if r['build']==b];mean=lambda rs,k:statistics.mean(float(r[k]) for r in rs)
-            print(f"|{b}|{len(g)}|{mean(g,'score'):.1f}|{mean(g,'skill_pt'):.1f}|{mean(g,'searched'):.1f}|{100*sum(r['agree']=='false' for r in d)/len(d):.1f}%|{mean(g,'total_regret'):.1f}|{mean(g,'recovery_disagree'):.1f}|")
-          print('\n## 按年份与体力区间\n')
-          print('|配卡|年|体力段|状态数|分歧率|平均regret|手写恢复率|老师恢复率|平均手写后体力|平均老师后体力|')
-          print('|---|---:|---|---:|---:|---:|---:|---:|---:|---:|')
-          for b in ['3速1耐1智','2速2耐1智']:
+          for b in builds:
+           g=[r for r in gs if r['build']==b];d=[r for r in ds if r['build']==b];m=lambda k:statistics.mean(float(r[k]) for r in g)
+           print(f"|{b}|{len(g)}|{m('score'):.1f}|{m('skill_pt'):.1f}|{m('searched'):.1f}|{100*sum(r['agree']=='false' for r in d)/len(d):.1f}%|{m('total_regret'):.1f}|{m('recovery_disagree'):.1f}|")
+          print('\n## 动作类别分歧\n')
+          print('|配卡|转移|次数|平均加权regret|累计加权regret|')
+          print('|---|---|---:|---:|---:|')
+          for b in builds:
+           g=collections.defaultdict(list)
+           for r in ds:
+            if r['build']==b and r['agree']=='false':g[r['transition']].append(float(r['regret']))
+           for k,v in sorted(g.items(),key=lambda kv:sum(kv[1]),reverse=True):print(f'|{b}|{k}|{len(v)}|{statistics.mean(v):.1f}|{sum(v):.1f}|')
+          print('\n## 年份与体力区间\n')
+          print('|配卡|年|体力段|状态|分歧率|平均regret|手写恢复率|老师恢复率|')
+          print('|---|---:|---|---:|---:|---:|---:|---:|')
+          for b in builds:
            for y in ['1','2','3']:
-            for label,lo,hi in [('0-19',0,20),('20-39',20,40),('40-59',40,60),('60+',60,999)]:
+            for lab,lo,hi in [('0-19',0,20),('20-39',20,40),('40-59',40,60),('60+',60,999)]:
              r=[x for x in ds if x['build']==b and x['year']==y and lo<=int(x['vital'])<hi]
-             if not r:continue
-             print(f"|{b}|{y}|{label}|{len(r)}|{100*sum(x['agree']=='false' for x in r)/len(r):.1f}%|{statistics.mean(float(x['regret']) for x in r):.1f}|{100*sum(x['hand_recovery']=='true' for x in r)/len(r):.1f}%|{100*sum(x['teacher_recovery']=='true' for x in r)/len(r):.1f}%|{statistics.mean(int(x['hand_post_vital']) for x in r):.1f}|{statistics.mean(int(x['teacher_post_vital']) for x in r):.1f}|")
-          print('\n## 最大regret决策（前30）\n')
-          print('|配卡|局|回合|年|体力|手写|老师|手写均值|老师均值|regret|手写后体|老师后体|')
-          print('|---|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|')
-          for r in sorted(ds,key=lambda x:float(x['regret']),reverse=True)[:30]:print(f"|{r['build']}|{r['run']}|{r['turn']}|{r['year']}|{r['vital']}|{r['hand_action']}|{r['teacher_action']}|{float(r['hand_mean']):.0f}|{float(r['teacher_mean']):.0f}|{float(r['regret']):.0f}|{r['hand_post_vital']}|{r['teacher_post_vital']}|")
+             if r:print(f"|{b}|{y}|{lab}|{len(r)}|{100*sum(x['agree']=='false' for x in r)/len(r):.1f}%|{statistics.mean(float(x['regret']) for x in r):.1f}|{100*sum(x['hand_recovery']=='true' for x in r)/len(r):.1f}%|{100*sum(x['teacher_recovery']=='true' for x in r)/len(r):.1f}%|")
+          print('\n## 最大加权regret决策（前30）\n')
+          print('|配卡|局|回合|年|体力|手写|老师|手写加权|老师加权|regret|手写后体|老师后体|')
+          print('|---|---:|---:|---:|---:|---|---|---:|---:|---:|---|---|')
+          for r in sorted(ds,key=lambda x:float(x['regret']),reverse=True)[:30]:print(f"|{r['build']}|{r['run']}|{r['turn']}|{r['year']}|{r['vital']}|{r['hand_action']}|{r['teacher_action']}|{float(r['hand_weighted']):.0f}|{float(r['teacher_weighted']):.0f}|{float(r['regret']):.0f}|{r['hand_post_vital']}|{r['teacher_post_vital']}|")
           PY
-          cat 训练与体力Regret初审报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 训练与体力Regret修正确认报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
-        with: {name: 训练与体力Regret初审总报告, path: 训练与体力Regret初审报告.md, retention-days: 30}
+        with: {name: 训练与体力Regret修正确认总报告, path: 训练与体力Regret修正确认报告.md, retention-days: 30}
