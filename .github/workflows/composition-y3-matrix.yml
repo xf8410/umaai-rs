@@ -1,4 +1,4 @@
-name: 训练恢复统一终局搜索AB
+name: 两配卡手写真实属性边际矩阵
 
 on:
   workflow_dispatch:
@@ -7,34 +7,32 @@ permissions:
   contents: read
 
 jobs:
-  ab:
-    name: ${{ matrix.build }}｜${{ matrix.variant }}｜片${{ matrix.shard }}
+  matrix:
+    name: ${{ matrix.build }}｜片${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 10
       matrix:
         build: [3速1耐1智, 2速2耐1智]
-        variant: [baseline, unified-search]
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4]
     env:
       BUILD: ${{ matrix.build }}
-      VARIANT: ${{ matrix.variant }}
       SHARD: ${{ matrix.shard }}
-      RUNS: 5
-      SEARCH_N: 128
-      BASE_SEED: 828282
+      RUNS: 20
+      BASE_SEED: 939393
     steps:
       - uses: actions/checkout@v4
-      - name: 登记实验程序
+      - name: 应用真实属性边际实验层并登记程序
         run: |
+          python3 scripts/ramen/add_dynamic_status_balance_v39.py
           python3 - <<'PY'
           from pathlib import Path
           p=Path('crates/umasim/Cargo.toml');s=p.read_text()
           block='''[[bin]]
-          name = "unified_train_search_ab"
-          path = "tools/data_collection/unified_train_search_ab.rs"
+          name = "focused_status_margin_matrix"
+          path = "tools/data_collection/focused_status_margin_matrix.rs"
 
           '''
           if block not in s:s=s.replace('[features]',block+'[features]')
@@ -43,58 +41,61 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: unified-train-search-ab
-      - name: 编译检查
-        run: cargo check -p umasim --bin unified_train_search_ab --no-default-features
-      - name: 运行AB
-        run: cargo run -p umasim --bin unified_train_search_ab --release --no-default-features
+          shared-key: focused-status-margin
+      - run: cargo check -p umasim --bin focused_status_margin_matrix --no-default-features
+      - run: cargo run -p umasim --bin focused_status_margin_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: AB-${{ matrix.build }}-${{ matrix.variant }}-${{ matrix.shard }}
-          path: unified-train-search-ab.csv
+          name: 属性边际-${{ matrix.build }}-${{ matrix.shard }}
+          path: focused-status-margin.csv
           retention-days: 30
 
   summary:
-    name: 汇总统一搜索AB
-    needs: ab
+    name: 汇总手写属性边际矩阵
+    needs: matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: AB-*
+          pattern: 属性边际-*
           path: results
-      - name: 汇总
+      - name: 生成报告
         run: |
-          python3 - <<'PY' | tee 训练恢复统一终局搜索AB报告.md
-          import csv,glob,statistics
+          python3 - <<'PY' | tee 手写真实属性边际矩阵报告.md
+          import csv,glob,statistics,collections
           rows=[]
-          for p in glob.glob('results/**/unified-train-search-ab.csv',recursive=True):rows+=list(csv.DictReader(open(p)))
-          builds=['3速1耐1智','2速2耐1智'];variants=['baseline','unified-search']
-          if any(len([r for r in rows if r['build']==b and r['variant']==v])!=15 for b in builds for v in variants):
-              raise SystemExit({(b,v):len([r for r in rows if r['build']==b and r['variant']==v]) for b in builds for v in variants})
-          def pct(xs,p):
+          for p in glob.glob('results/**/focused-status-margin.csv',recursive=True):rows+=list(csv.DictReader(open(p)))
+          builds=['3速1耐1智','2速2耐1智']
+          expected=2*100*25
+          if len(rows)!=expected:raise SystemExit(f'期望{expected}行，实际{len(rows)}')
+          def q(xs,p):
               x=sorted(xs);return x[round((len(x)-1)*p)]
-          print('# 训练恢复统一终局搜索 AB\n')
-          print('同一15个种子严格配对；统一搜索只接管Train阶段，在训练、休息、友人外出、普通外出、比赛等全部合法动作间以128次完整终局rollout的加权均值选择。其他阶段沿用正式策略。\n')
-          print('|配卡|方案|均分|P10|P90|最高|PT|五维和|速|耐|力|根|智|搜索点/局|训练|休息|友人|普通外出|')
-          print('|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+          print('# 两配卡纯手写真实属性边际矩阵\n')
+          print('- 每套配卡100个同种子样本；基线每种子一次。')
+          print('- 候选仅改变训练动作的属性缺口奖励与近上限衰减；恢复、友人外出、普通外出、吃面、地区等逻辑保持正式基线。')
+          print('- 24个候选：缺口0/25/50/75/100% × 溢出0/25/50/75/100%，排除0/0。\n')
+          print('|配卡|排名|缺口|溢出|均分Δ|P10Δ|P50Δ|P90Δ|P95Δ|最高Δ|PTΔ|五维和Δ|速Δ|耐Δ|力Δ|根Δ|智Δ|胜/平/负|')
+          print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|')
           for b in builds:
-           for v in variants:
-            rr=[r for r in rows if r['build']==b and r['variant']==v];m=lambda k:statistics.mean(float(r[k]) for r in rr);sc=[int(r['score']) for r in rr]
-            print(f"|{b}|{v}|{m('score'):.1f}|{pct(sc,.1)}|{pct(sc,.9)}|{max(sc)}|{m('skill_pt'):.1f}|{m('five_sum'):.1f}|{m('speed'):.1f}|{m('stamina'):.1f}|{m('power'):.1f}|{m('guts'):.1f}|{m('wisdom'):.1f}|{m('searched'):.1f}|{m('train'):.1f}|{m('rest'):.1f}|{m('friend_outing'):.1f}|{m('normal_outing'):.1f}|")
-          print('\n## 配对差值\n')
-          print('|配卡|均分Δ|PTΔ|五维和Δ|胜/平/负|P10Δ|P90Δ|最高Δ|')
-          print('|---|---:|---:|---:|---|---:|---:|---:|')
-          for b in builds:
-           base={int(r['run']):r for r in rows if r['build']==b and r['variant']=='baseline'};new={int(r['run']):r for r in rows if r['build']==b and r['variant']=='unified-search'}
-           d=[int(new[i]['score'])-int(base[i]['score']) for i in sorted(base)];pt=[int(new[i]['skill_pt'])-int(base[i]['skill_pt']) for i in sorted(base)];fs=[int(new[i]['five_sum'])-int(base[i]['five_sum']) for i in sorted(base)];bs=[int(base[i]['score']) for i in sorted(base)];ns=[int(new[i]['score']) for i in sorted(base)]
-           w=sum(x>0 for x in d);t=sum(x==0 for x in d);l=sum(x<0 for x in d)
-           print(f'|{b}|{statistics.mean(d):+.1f}|{statistics.mean(pt):+.1f}|{statistics.mean(fs):+.1f}|{w}/{t}/{l}|{pct(ns,.1)-pct(bs,.1):+}|{pct(ns,.9)-pct(bs,.9):+}|{max(ns)-max(bs):+}|')
-          print('\n说明：15局只用于验证结构方向和可达到的收益上界，不足以直接固化搜索为正式策略。若显著为正，再蒸馏高频分歧为低成本规则并做300局配对。')
+              base={int(r['run']):r for r in rows if r['build']==b and r['variant']=='baseline'}
+              cand=collections.defaultdict(dict)
+              for r in rows:
+                  if r['build']==b and r['variant']=='margin':cand[(int(r['gap']),int(r['overflow']))][int(r['run'])]=r
+              out=[]
+              for key,rr in cand.items():
+                  ids=sorted(base);d=[int(rr[i]['score'])-int(base[i]['score']) for i in ids];pt=[int(rr[i]['skill_pt'])-int(base[i]['skill_pt']) for i in ids];fs=[int(rr[i]['five_sum'])-int(base[i]['five_sum']) for i in ids];bs=[int(base[i]['score']) for i in ids];ns=[int(rr[i]['score']) for i in ids]
+                  attrs=[statistics.mean(int(rr[i][k])-int(base[i][k]) for i in ids) for k in ['speed','stamina','power','guts','wisdom']]
+                  out.append((statistics.mean(d),statistics.mean(pt),statistics.mean(fs),key,d,bs,ns,attrs))
+              out.sort(reverse=True)
+              for rank,(md,mpt,mfs,(gap,over),d,bs,ns,a) in enumerate(out,1):
+                  w=sum(x>0 for x in d);t=sum(x==0 for x in d);l=sum(x<0 for x in d)
+                  print(f'|{b}|{rank}|{gap}%|{over}%|{md:+.1f}|{q(ns,.1)-q(bs,.1):+}|{q(ns,.5)-q(bs,.5):+}|{q(ns,.9)-q(bs,.9):+}|{q(ns,.95)-q(bs,.95):+}|{max(ns)-max(bs):+}|{mpt:+.1f}|{mfs:+.1f}|{a[0]:+.1f}|{a[1]:+.1f}|{a[2]:+.1f}|{a[3]:+.1f}|{a[4]:+.1f}|{w}/{t}/{l}|')
+              promoted=[x for x in out if x[0]>0 and x[1]>0 and x[2]>0]
+              print(f'\n**{b} 三项同时提升候选：{len(promoted)}/24。**\n')
           PY
-          cat 训练恢复统一终局搜索AB报告.md >> "$GITHUB_STEP_SUMMARY"
+          cat 手写真实属性边际矩阵报告.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: 训练恢复统一终局搜索AB总报告
-          path: 训练恢复统一终局搜索AB报告.md
+          name: 手写真实属性边际矩阵总报告
+          path: 手写真实属性边际矩阵报告.md
           retention-days: 30
