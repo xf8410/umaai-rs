@@ -1,4 +1,4 @@
-name: 101配卡构成×120拉面地区矩阵
+name: 每种配卡×120拉面地区排列组合
 on:
   workflow_dispatch:
   pull_request:
@@ -9,11 +9,14 @@ on:
       - '.github/workflows/composition-y3-matrix.yml'
 permissions:
   contents: read
+concurrency:
+  group: composition-y3-matrix-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   matrix:
     name: 配卡${{ matrix.composition }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -21,7 +24,7 @@ jobs:
         composition: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100]
     env:
       COMPOSITION_INDEX: ${{ matrix.composition }}
-      RUNS: 10
+      RUNS: 1
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -31,41 +34,37 @@ jobs:
       - run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡${{ matrix.composition }}-101x120
+          name: 配卡${{ matrix.composition }}-120组合
           path: composition-y3-matrix.csv
           retention-days: 30
   summary:
-    name: 汇总101x120矩阵
+    name: 汇总每种配卡120组合
     if: always()
     needs: matrix
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: '*-101x120'
+          pattern: '*-120组合'
           path: results
       - shell: bash
         run: |
-          python3 - <<'PY' | tee 101x120矩阵报告.md
-          import csv,glob,collections,statistics
+          python3 - <<'PY' | tee 每种配卡120组合报告.md
+          import csv,glob,collections
           rows=[]
           for p in glob.glob('results/**/composition-y3-matrix.csv',recursive=True):
             with open(p,encoding='utf-8',newline='') as f: rows.extend(csv.DictReader(f))
-          if len(rows)!=101*120*10: raise SystemExit(f'行数错误: {len(rows)}')
+          if len(rows)!=101*120: raise SystemExit(f'行数错误: {len(rows)}，期望 {101*120}')
           g=collections.defaultdict(list)
           for r in rows: g[(int(r['composition_index']),int(r['combo_index']))].append(r)
-          if len(g)!=101*120 or any(len(v)!=10 for v in g.values()): raise SystemExit('矩阵不完整')
-          ranked=[]
-          for (ci,xi),v in g.items(): ranked.append((statistics.mean(int(r['score']) for r in v),ci,xi,v[0]['composition'],v[0]['region_ids'],statistics.mean(int(r['skill_pt']) for r in v),statistics.mean(int(r['scenario_pt']) for r in v)))
-          ranked.sort(reverse=True)
-          print('# 101种配卡构成 × 120种第三年拉面地区组合')
-          print('\n- 101种速/耐/力/根/智数量构成；每种使用确定性代表卡。\n- 每个单元格10局；完整育成使用 train,ramen MCTS，仅第三年地区组合固定。\n- 总计 121200 局。\n')
-          print('|排名|配卡构成|地区组合|平均总分|平均技能点|平均场景PT|')
-          print('|---:|---|---|---:|---:|---:|')
-          for n,x in enumerate(ranked[:100],1): print(f'|{n}|{x[3]}|{x[4]}|{x[0]:.1f}|{x[5]:.1f}|{x[6]:.1f}|')
+          if len(g)!=101*120 or any(len(v)!=1 for v in g.values()): raise SystemExit('每种配卡的120个地区组合不完整')
+          print('# 每种配卡的120个拉面地区排列组合')
+          print('\n- 101种速/耐/力/根/智配卡结构；每种分别测试120个拉面地区排列组合。')
+          print('- 每个配卡×地区组合单元格运行1局，共12,120局。')
+          print('- 本工作流只随 ramen_workbench PR 分支运行，不进入 master。')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: 101x120矩阵报告
-          path: 101x120矩阵报告.md
+          name: 每种配卡120组合报告
+          path: 每种配卡120组合报告.md
           retention-days: 30
