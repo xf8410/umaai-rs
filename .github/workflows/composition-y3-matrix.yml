@@ -1,4 +1,4 @@
-name: 配卡×拉面地区组合（20 Job手写策略测试）
+name: 3速1耐1智 vs 2速2耐1智（各100局配对）
 
 on:
   workflow_dispatch:
@@ -7,58 +7,73 @@ permissions:
   contents: read
 
 concurrency:
-  group: composition-y3-test-${{ github.ref }}
+  group: requested-composition-pair-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  baseline:
-    name: 配卡0基准-10地区各10局
+  run:
+    name: ${{ matrix.build }}-100局
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        build: [3速1耐1智, 2速2耐1智]
     env:
-      COMPOSITION_INDEX: 0
-      COMBO_START: 0
-      COMBO_END: 10
-      RUNS: 10
+      BUILD: ${{ matrix.build }}
+      RUNS: 100
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: composition-y3-handwritten
-      - name: Run baseline 100 games
-        run: cargo run -p umasim --bin composition_y3_matrix --release --no-default-features
-      - name: Validate and summarize
-        run: |
-          python3 - <<'PY' | tee 配卡0基准100局报告.md
-          import csv, statistics
-          rows=list(csv.DictReader(open('composition-y3-matrix.csv',encoding='utf-8',newline='')))
-          if len(rows)!=100: raise SystemExit(f'应有100局，实际{len(rows)}局')
-          if {int(r['composition_index']) for r in rows}!={0}: raise SystemExit('混入非配卡0结果')
-          if {int(r['combo_index']) for r in rows}!=set(range(10)): raise SystemExit('地区组合应为0至9')
-          if any(sum(int(r['combo_index'])==i for r in rows)!=10 for i in range(10)): raise SystemExit('每个地区组合必须恰好10局')
-          scores=[int(r['score']) for r in rows]; pts=[int(r['skill_pt']) for r in rows]; ss=sorted(scores)
-          def pct(p): return ss[round((len(ss)-1)*p)]
-          print('# 配卡0基准100局验收')
-          print('\n- 配卡：'+rows[0]['composition'])
-          print('- 实体卡组：'+rows[0]['deck'])
-          print('- 地区组合：0–9，每个组合10局，共100局')
-          print(f'- 平均分：**{statistics.mean(scores):.1f}**')
-          print(f'- 最低 / P10 / 中位 / P90 / 最高：**{min(scores)} / {pct(.1)} / {statistics.median(scores):.1f} / {pct(.9)} / {max(scores)}**')
-          print(f'- 标准差：**{statistics.pstdev(scores):.1f}**')
-          print(f'- 平均技能PT：**{statistics.mean(pts):.1f}**')
-          print('\n## 各地区组合')
-          print('|组合|地区ID|局数|平均分|平均PT|')
-          print('|---:|---|---:|---:|---:|')
-          for i in range(10):
-              rs=[r for r in rows if int(r['combo_index'])==i]
-              print(f'|{i}|{rs[0]["region_ids"]}|10|{statistics.mean(int(r["score"]) for r in rs):.1f}|{statistics.mean(int(r["skill_pt"]) for r in rs):.1f}|')
-          PY
-          cat 配卡0基准100局报告.md >> "$GITHUB_STEP_SUMMARY"
+          shared-key: composition-pair-100
+      - run: cargo run -p umasim --bin composition_pair_100 --release --no-default-features
       - uses: actions/upload-artifact@v4
         with:
-          name: 配卡0基准100局结果
-          path: |
-            composition-y3-matrix.csv
-            配卡0基准100局报告.md
+          name: ${{ matrix.build }}-100局原始结果
+          path: composition-pair-100.csv
+          retention-days: 30
+
+  summary:
+    name: 生成同seed配对报告
+    needs: run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-100局原始结果'
+          path: results
+      - name: Summarize
+        run: |
+          python3 - <<'PY' | tee 两种配卡100局配对报告.md
+          import csv,glob,statistics
+          data={}
+          for p in glob.glob('results/**/composition-pair-100.csv',recursive=True):
+              rows=list(csv.DictReader(open(p,encoding='utf-8',newline='')))
+              if len(rows)!=100: raise SystemExit(f'{p}不是100局')
+              data[rows[0]['build']]=rows
+          names=['3速1耐1智','2速2耐1智']
+          if set(data)!=set(names): raise SystemExit(f'结果不完整: {list(data)}')
+          print('# 3速1耐1智 vs 2速2耐1智：100局同 seed 配对')
+          print('\n> 使用 PR #15 实验马娘、继承、代表卡选择、RecommendedRamenTrainer 与基础 seed；地区由正式策略自由选择。')
+          print('\n|方案|实体卡组|平均分|P10|中位数|P90|平均PT|')
+          print('|---|---|---:|---:|---:|---:|---:|')
+          for n in names:
+              r=data[n]; scores=sorted(int(x['score']) for x in r); pts=[int(x['skill_pt']) for x in r]
+              q=lambda p:scores[round((len(scores)-1)*p)]
+              print(f'|{n}|{r[0]["deck"]}|{statistics.mean(scores):.1f}|{q(.1)}|{statistics.median(scores):.1f}|{q(.9)}|{statistics.mean(pts):.1f}|')
+          a={int(x['run']):x for x in data[names[0]]}; b={int(x['run']):x for x in data[names[1]]}
+          ds=[int(b[i]['score'])-int(a[i]['score']) for i in range(100)]
+          dp=[int(b[i]['skill_pt'])-int(a[i]['skill_pt']) for i in range(100)]
+          w=sum(x>0 for x in ds); t=sum(x==0 for x in ds); l=sum(x<0 for x in ds)
+          print(f'\n## 2速2耐1智 相对 3速1耐1智\n\n- 平均分差：**{statistics.mean(ds):+.1f}**')
+          print(f'- 平均PT差：**{statistics.mean(dp):+.1f}**')
+          print(f'- 配对胜/平/负：**{w}/{t}/{l}**')
+          PY
+          cat 两种配卡100局配对报告.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 两种配卡100局配对报告
+          path: 两种配卡100局配对报告.md
           retention-days: 30
