@@ -1,0 +1,61 @@
+name: 一次性合并上游 ramen_workbench
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 合并固定上游提交并保留本地实验文件
+        env:
+          UPSTREAM_SHA: b25960c9bd138e41e9524087e0a97e4ccf320564
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/xulai1001/umaai-rs.git
+          git fetch upstream ramen_workbench
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+
+          if git merge --no-ff --no-commit "$UPSTREAM_SHA"; then
+            echo '上游可自动合并'
+          else
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            printf '冲突文件：\n%s\n' "$conflicts"
+            test -n "$conflicts"
+            # 上游生产代码已经继续演进；冲突处采用上游版本。
+            while IFS= read -r file; do
+              git checkout --theirs -- "$file"
+              git add "$file"
+            done <<< "$conflicts"
+          fi
+
+          # 保留本分支独有的第三年地区矩阵工具，并在上游 Cargo 清单中注册。
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/umasim/Cargo.toml')
+          s = p.read_text()
+          block = '''\n[[bin]]\nname = "y3_region_matrix_corrected"\npath = "src/bin/y3_region_matrix_corrected.rs"\nrequired-features = ["experiment-tools"]\n'''
+          if 'name = "y3_region_matrix_corrected"' not in s:
+              marker = '\n[features]\n'
+              if marker not in s:
+                  raise SystemExit('Cargo.toml 缺少 [features] 标记')
+              s = s.replace(marker, block + marker, 1)
+              p.write_text(s)
+          PY
+          git add crates/umasim/Cargo.toml \
+            crates/umasim/src/bin/y3_region_matrix_corrected.rs \
+            .github/workflows/y3-region-matrix-corrected.yml
+
+          if git diff --name-only --diff-filter=U | grep -q .; then
+            echo '仍有未解决冲突' >&2
+            git diff --name-only --diff-filter=U >&2
+            exit 1
+          fi
+          git commit -m 'merge: sync upstream ramen_workbench at b25960c'
+          git push origin HEAD:${{ github.ref_name }}
