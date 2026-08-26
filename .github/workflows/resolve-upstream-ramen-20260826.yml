@@ -1,16 +1,20 @@
 name: 一次性合并上游 ramen_workbench
 on:
-  workflow_dispatch:
+  push:
+    branches: [workbench/resolve-upstream-ramen-20260826]
 permissions:
   contents: write
+concurrency:
+  group: resolve-upstream-ramen-20260826
+  cancel-in-progress: false
 jobs:
   merge:
+    if: ${{ !startsWith(github.event.head_commit.message, 'merge: sync upstream ramen_workbench') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: {fetch-depth: 0}
       - name: 合并固定上游提交并保留本地实验文件
         env:
           UPSTREAM_SHA: b25960c9bd138e41e9524087e0a97e4ccf320564
@@ -21,21 +25,18 @@ jobs:
           git remote add upstream https://github.com/xulai1001/umaai-rs.git
           git fetch upstream ramen_workbench
           test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
-
           if git merge --no-ff --no-commit "$UPSTREAM_SHA"; then
             echo '上游可自动合并'
           else
             conflicts="$(git diff --name-only --diff-filter=U)"
             printf '冲突文件：\n%s\n' "$conflicts"
             test -n "$conflicts"
-            # 上游生产代码已经继续演进；冲突处采用上游版本。
+            # 冲突的生产文件采用上游新实现；本地独有实验文件不在冲突集合中。
             while IFS= read -r file; do
               git checkout --theirs -- "$file"
               git add "$file"
             done <<< "$conflicts"
           fi
-
-          # 保留本分支独有的第三年地区矩阵工具，并在上游 Cargo 清单中注册。
           python3 - <<'PY'
           from pathlib import Path
           p = Path('crates/umasim/Cargo.toml')
@@ -45,17 +46,9 @@ jobs:
               marker = '\n[features]\n'
               if marker not in s:
                   raise SystemExit('Cargo.toml 缺少 [features] 标记')
-              s = s.replace(marker, block + marker, 1)
-              p.write_text(s)
+              p.write_text(s.replace(marker, block + marker, 1))
           PY
-          git add crates/umasim/Cargo.toml \
-            crates/umasim/src/bin/y3_region_matrix_corrected.rs \
-            .github/workflows/y3-region-matrix-corrected.yml
-
-          if git diff --name-only --diff-filter=U | grep -q .; then
-            echo '仍有未解决冲突' >&2
-            git diff --name-only --diff-filter=U >&2
-            exit 1
-          fi
+          git add crates/umasim/Cargo.toml crates/umasim/src/bin/y3_region_matrix_corrected.rs .github/workflows/y3-region-matrix-corrected.yml
+          test -z "$(git diff --name-only --diff-filter=U)"
           git commit -m 'merge: sync upstream ramen_workbench at b25960c'
           git push origin HEAD:${{ github.ref_name }}
