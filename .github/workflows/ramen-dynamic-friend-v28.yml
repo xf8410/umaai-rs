@@ -1,27 +1,22 @@
 name: Ramen dynamic friend outing v28
 on:
   push:
-    branches: [workbench/skill-pt-matrix-distill]
-    paths: [.github/workflows/ramen-dynamic-friend-v28.yml]
+    branches: [ramen_workbench, 'workbench/**']
+    paths:
+      - '.github/workflows/ramen-dynamic-friend-v28.yml'
+      - 'crates/umasim/**'
+      - 'scripts/ramen/restore_dynamic_friend_outing_v28.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
-permissions: {contents: write}
+permissions: {contents: read}
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  # 本实验显式声明唯一的运行时 patch；未声明的注入一律不允许。
+  PATCH_LIST: scripts/ramen/restore_dynamic_friend_outing_v28.py
 jobs:
-  patch:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - run: python3 scripts/restore_dynamic_friend_outing_v28.py
-      - run: cargo fmt -- crates/umasim/src/trainer/local_ramen_trainer.rs
-      - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
-      - run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add crates/umasim/src/trainer/local_ramen_trainer.rs
-          git commit -m 'fix: restore dynamic friend outing valuation'
-          git push origin HEAD:workbench/skill-pt-matrix-distill
   matrix:
-    needs: patch
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -43,8 +38,12 @@ jobs:
       RUNS_PER_SHARD: 100
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with: {ref: ${{ github.sha }}, fetch-depth: 0}
+      - name: Verify immutable source
+        run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@stable
+      - name: Apply explicitly declared experiment patch（job 内临时应用，不改写任何分支）
+        run: python3 scripts/ramen/restore_dynamic_friend_outing_v28.py
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: ramen-dynamic-friend-v28}
       - run: cargo run -p umasim --bin skill_pt_phase_matrix --release --no-default-features
@@ -52,20 +51,20 @@ jobs:
         with: {name: 'v28-${{ matrix.variant.name }}-shard${{ matrix.shard }}', path: matrix-result.csv, retention-days: 14}
   summary:
     needs: matrix
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with: {ref: ${{ github.sha }}, fetch-depth: 0}
+      - name: Verify immutable source
+        run: python3 scripts/verify_experiment_source.py
       - uses: actions/download-artifact@v4
         with: {pattern: v28-*, path: matrix-results}
       - name: Generate report
         env: {REPORT_PATH: 'benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md'}
         run: |
           python3 scripts/summarize_skill_pt_matrix.py
+          printf '\nsource_sha=%s\npatch_list=%s\n' "$SOURCE_SHA" "$PATCH_LIST" >> "$REPORT_PATH"
           cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
-      - run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md
-          git commit -m 'bench: publish dynamic friend outing v28'
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+      - uses: actions/upload-artifact@v4
+        with: {name: ramen-dynamic-friend-v28-report-${{ github.run_id }}, path: benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md, retention-days: 30}
