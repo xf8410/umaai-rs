@@ -8,6 +8,7 @@
 - **方案 E 确认 PT 不打折**：残余折扣只作用于副属性，PT 独立计分；单点启发式无法观测的跨回合项承认上限、留给 MCTS
 - **显示与数值修复**：训练数值计算明细恢复输出（cli/core + turn_flow 按阶段分摊）；拉面五维上限硬截断移除（speed 恢复 3100）；bench 强制地区策略 All 不受手动模式影响
 - **测试适配**：`eat_guarantee_value_on_risky_train` 改用无比赛候选回合；新增比赛面板折算性质测试
+- **弱位训练偏好（双层级，区分吃面/不吃面）+ 按 build 自适应查表**：新增 `LocalRamenConfig.ramen_weak_train_boost`——吃面前在 `ramen_window_alignment` 放大 at_trains 卡少位 raw，吃面后在 `decide_train` 耦合分支之外对卡少位训练加分。**跨 build × 100 seed 扫描证实 build 异质性极强**——按智卡数查表（推荐 preset 默认启用）：智卡≤1 → 5.0（speed/stamina/spd2_gut0 正向，stamina +1061 t=4.0 wins 60%）；智卡=2 → 0.0 关闭（speed_wisdom/sta0_wis2 触发的位 count≤1 不在 at_trains 主选区→只改地区选择→挤出智训练）；智卡=3 → 2.0（power_wisdom/wisdom 微调）。`override > 0` 实验固定值；`< 0` 显式关闭。`matrix_variant weakboost<N>` token + `with_experiment_overrides` weakboost 参数同步添加
 
 ## 2026-08-25
 - **体力门限参数上调（不吃面门限 30→40）**：向上扫描发现软目标（pre 25~60 × w 0.5~3）无效（吃面时体力本就高，均 63-96，几乎不触发）、hard_floor 15 最优（提高降分）；真正生效的是**不吃面回合门限 `vital_rest` 30→40**——300 局配对总加权 +397（7/7 build 正，stamina +915 / spd2_gut0 +722 / speed +592），失败率 1.5%→**0.3%**、大失败 24→1、训练时体力均 66→71。45 回落（门限过高休息过多）

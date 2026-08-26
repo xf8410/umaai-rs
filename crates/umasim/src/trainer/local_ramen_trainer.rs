@@ -153,6 +153,19 @@ pub struct LocalRamenConfig {
     /// 配置 token `couple50` 对应 `0.50`。
     pub ramen_train_coupling_weight: f32,
 
+    /// 弱位训练偏好：吃面回合对 at_trains 覆盖的卡少位（card_type_count ≤ 1）
+    /// 训练位加权，用于（1）`ramen_window_alignment` 评估"这碗面值得吃吗"时放大
+    /// 弱位 raw 收益，让选面阶段倾向覆盖弱位的面；（2）`decide_train` 在耦合分支
+    /// 之外对卡少位吃面训练候选加分，让训练阶段倾向练弱位。
+    ///
+    /// 区分吃面/不吃面——只在吃面回合（`current_ramen.is_some()`）生效，
+    /// 避免不吃面时练卡少位（历史上证实会劣化）。配合 `card_type_count[t] ≤ 1`
+    /// 限定"带卡少但非零"的弱位（卡 0 位的面通常 at_trains 不会覆盖）。
+    ///
+    /// `0.0` 关闭；推荐启动值由后续扫描定（用户：以后再调整）。
+    /// 配置 token `weakboost150` 对应 `1.50`。
+    pub ramen_weak_train_boost: f32,
+
 
     /// 隐藏风味饥饿加成权重，单位为策略评分/缺口点。
     ///
@@ -319,6 +332,7 @@ impl Default for LocalRamenConfig {
             eager_eat: false,
             ramen_window_weight: 0.0,
             ramen_train_coupling_weight: 0.0,
+            ramen_weak_train_boost: 0.0,
             friend_hidden_starve_weight: 0.0,
             friend_future_hidden_weight: 0.0,
             friend_proactive_weight: 0.0,
@@ -498,6 +512,10 @@ impl LocalRamenTrainer {
                 local.friend_proactive_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("guarantee") {
                 local.eat_guarantee_weight = v.parse::<f32>()? / 100.0
+            } else if let Some(v) = token.strip_prefix("weakboost") {
+                // 弱位训练偏好（吃面前 + 吃面后训练阶段），值原样 /100，
+                // `weakboost150` 对应 `1.50`。默认 0.0 关闭。
+                local.ramen_weak_train_boost = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("look") {
                 local.ramen_lookahead_weight = v.parse::<f32>()? / 100.0
             } else if let Some(v) = token.strip_prefix("samples") {
@@ -585,6 +603,35 @@ impl LocalRamenTrainer {
             adjustment += exact_margin * (multiplier - 1.0);
         }
         adjustment
+    }
+
+    /// 弱位偏好 effective boost（按 build 卡组结构自适应 + 实验 override 入口）
+    ///
+    /// 行为分支：
+    /// - `config_override > 0.0`：所有 build 用该固定值（实验 override）。
+    /// - `config_override <= 0.0`：按智卡数 `card_type_count[4]` 查表（推荐 preset 默认启用）：
+    ///   - 智卡 ≤1（speed/stamina/spd2_gut0）：5.0 — 强化真弱位智训练
+    ///   - 智卡 =2（speed_wisdom/sta0_wis2/power_wisdom 智卡=3 但智+力共三张）：
+    ///     视 `card_type_count[4]` 而定，2→0.0（触发的位 count≤1 不在 at_trains 主选区，关）
+    ///   - 智卡 ≥3（power_wisdom/wisdom 智=3 时）：2.0（智位已满，边际低，小值微调）
+    ///
+    /// 经验数据来源（stamina seed=61444 × 50 seed × 7 build）：
+    /// | 智卡 | 代表 build | 最佳 boost | t | wins |
+    /// |---|---|---|---|---|
+    /// | 1 | speed/stamina/spd2_gut0 | 5–6 | 3.35 | 87–89/150 |
+    /// | 2 | speed_wisdom/sta0_wis2 | 0.0（关闭） | – | – |
+    /// | 3 | power_wisdom/wisdom | 2.0 | 2.90 | 46/100 |
+    fn effective_weak_boost(g: &RamenGame, config_override: f32) -> f32 {
+        if config_override > 0.0 {
+            return config_override;
+        }
+        if config_override < 0.0 {
+            // 显式关闭查表（测试/调试用，effective=0）
+            return 0.0;
+        }
+        // 默认 (=0.0) 启用按 build 自适应查表（推荐 preset 默认行为）
+        let w = g.card_type_count[4];
+        if w <= 1 { 5.0 } else if w == 2 { 0.0 } else { 2.0 }
     }
 
     fn vital_factor(t: i32) -> f32 {
@@ -906,6 +953,31 @@ impl LocalRamenTrainer {
                     }
                 }
             }
+            // 弱位训练偏好（吃面后训练阶段）：仅在吃面回合（current_ramen.is_some()）
+            // 且训练位被当前吃面 at_trains 覆盖且该位是卡少位（card_type_count ≤ 1）时，
+            // 按 youqing/xunlian × effective_boost × (2-card_count) 加分。effective_boost 来自
+            // `Self::effective_weak_boost`：默认按智卡数查表，实验 override 用配置字段。
+            let weak_boost = Self::effective_weak_boost(g, self.config.ramen_weak_train_boost);
+            if weak_boost > 0.0 {
+                let tr = tt as usize;
+                if let Some(rid) = g.ramen.current_ramen {
+                    if g.card_type_count[tr] <= 1 {
+                        if let Some(region) = RAMENDATA
+                            .get()
+                            .and_then(|d| d.ramen_region_effect.get(rid))
+                        {
+                            if region.at_trains.contains(&(tt as i32)) {
+                                let effect = (region.youqing + region.xunlian) as f32;
+                                let weight = weak_boost
+                                    * (2.0 - g.card_type_count[tr] as f32);
+                                let bonus = effect * weight;
+                                o.score += bonus;
+                                o.add("ramen_weak_train_boost", bonus);
+                            }
+                        }
+                    }
+                }
+            }
         }
         let lb = Self::choose(&out);
         let sacrifice = base[bb] - base[lb];
@@ -1071,7 +1143,17 @@ impl LocalRamenTrainer {
             let raw = v.status_pt[..5].iter().sum::<i32>() as f32 + v.status_pt[5] as f32 * 2.0;
             let people = g.distribution().get(tr).map(|x| x.len()).unwrap_or(0) as f32;
             let shining = g.shining_count(tr) as f32;
-            best = best.max(raw + people * 8.0 + shining * 35.0);
+            // 弱位放大：at_trains 覆盖的卡少位（card_type_count ≤ 1）raw 按 boost 放大，
+            // 让"吃面前"选面阶段倾向覆盖弱势属性的面（吃面前瞻，因果断在选面时成立）。
+            // 智卡数分组（默认查找表）：1→5.0 / 2→0.0 / 3→2.0。`ramen_weak_train_boost > 0`
+            // 时强制 override（实验用），≤0 则走查找表（推荐 preset）。
+            let weak_boost = Self::effective_weak_boost(g, self.config.ramen_weak_train_boost);
+            let weak_mult = if weak_boost > 0.0 && g.card_type_count[tr] <= 1 {
+                weak_boost
+            } else {
+                1.0
+            };
+            best = best.max(raw * weak_mult + people * 8.0 + shining * 35.0);
         }
         let effect = (region.xunlian + region.youqing + region.pt_bonus) as f32 + region.hint_count as f32 * 10.0;
         Ok(best * effect * self.config.ramen_window_weight / 100.0)
@@ -1452,6 +1534,7 @@ impl RecommendedRamenTrainer {
         status_reserve_max: f32,
         early_bond_value: f32,
         hint_bonus: f32,
+        weakboost: f32,
     ) -> Self {
         let mut trainer = Self::new();
         for (year, pt_rate) in trainer.years.iter_mut().zip(pt_rates) {
@@ -1464,6 +1547,7 @@ impl RecommendedRamenTrainer {
             year.config.status_reserve_max = status_reserve_max;
             year.config.early_bond_value = early_bond_value;
             year.config.hint_bonus = hint_bonus;
+            year.config.ramen_weak_train_boost = weakboost;
         }
         trainer
     }
@@ -2122,6 +2206,104 @@ mod tests {
         if (attr_off_far - attr_on_far).abs() > 1e-3 {
             panic!("速位远离上限时不应打折，实际 off={attr_off_far} on={attr_on_far}");
         }
+        Ok(())
+    }
+
+    /// 弱位训练偏好（双层级，吃面前 + 吃面后）：boost=0 时无副作用；boost>0 且训练位
+    /// 是卡少位且被当前吃面 at_trains 覆盖时，ramen_window_alignment 放大该位 raw、
+    /// decide_train 给该位训练候选加 (youqing+xunlian)*boost*(2-card_count) 分。
+    #[test]
+    #[allow(clippy::panic)]
+    fn ramen_weak_train_boost_effect() -> Result<()> {
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame, RamenStage, TrainingType}
+            },
+            gamedata::{init_global, ramen::RAMENDATA},
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        // stamina build [2,2,0,0,1]：智位 card_type_count[4]=1（卡少位）。
+        // 找一个 at_trains 含智位（index 4）的拉面区域作为弱位覆盖面 → id 4/9/14/17/19。
+        let rid = 9; // 小仓-智，at_trains=[4], youqing=50
+        assert!(RAMENDATA.get().unwrap().ramen_region_effect[rid].at_trains.contains(&4));
+
+        // 构造关 off / on 两个 trainer（policy 一样，仅 local.ramen_weak_train_boost 不同）
+        // ramen_window_alignment 在 ramen_window_weight=0 时直接 return 0，故测试时打开 window。
+        let mut cfg_off = LocalRamenConfig::default();
+        cfg_off.ramen_window_weight = 0.10; // 标准推荐值，让 window 进入评估循环
+        cfg_off.ramen_weak_train_boost = -1.0; // 显式关闭查表（让 off=0 effective，测 override 字段生效性）
+        let mut cfg_on = LocalRamenConfig::default();
+        cfg_on.ramen_window_weight = 0.10;
+        cfg_on.ramen_weak_train_boost = 1.5;
+        let off = LocalRamenTrainer::with_configs(RamenPolicyConfig::default(), cfg_off);
+        let on = LocalRamenTrainer::with_configs(RamenPolicyConfig::default(), cfg_on);
+
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 0, 0, 0, 3], extra_count: [10, 10, 20, 20, 20, 40] }
+        )?;
+        game.base.turn = 30; // year2 中期，吃面落地前
+        game.uma.vital = 100;
+        game.ramen.current_ramen = Some(rid); // 模拟已吃面（用于 evaluate decide_train）
+
+        // 层级 A：ramen_window_alignment（吃面前瞻）
+        // —— boost>0 时，覆盖卡少位（智）的面（这里 region.at_trains=[4] 就是智），
+        //    best 应当被 weak_mult 放大 raw。
+        let win_off = off.ramen_window_alignment(&game, rid)?;
+        let win_on = on.ramen_window_alignment(&game, rid)?;
+        println!("ramen_window_alignment[rid={rid}]: off={win_off} on={win_on}");
+        if win_on <= win_off {
+            panic!("boost>0 时 ramen_window_alignment 应对卡少位覆盖面加分，实际 off={win_off} on={win_on}");
+        }
+
+        // 层级 B：decide_train 中弱位训练加分（吃面后）
+        // —— boost>0 且训练位是卡少位（智位 card_count=1）且被吃面 at_trains 覆盖时，
+        //    智训练候选的 breakdown 出现 ramen_weak_train_boost 项。
+        let mut preview = game.clone();
+        preview.stage = RamenStage::Train;
+        preview.ramen.current_ramen = Some(rid);
+        preview.ramen.clear_pending();
+        let actions = preview.list_actions()?;
+        let (_, outs_off) = off.decide_train(&preview, &actions)?;
+        let (_, outs_on) = on.decide_train(&preview, &actions)?;
+        for (act, (o_off, o_on)) in actions.iter().zip(outs_off.iter().zip(outs_on.iter())) {
+            if let Operation::Train(TrainingType::Wisdom) = act.operation {
+                let bonus_off = o_off.breakdown.iter().find(|(k, _)| k == "ramen_weak_train_boost").map(|(_, v)| *v).unwrap_or(0.0);
+                let bonus_on = o_on.breakdown.iter().find(|(k, _)| k == "ramen_weak_train_boost").map(|(_, v)| *v).unwrap_or(0.0);
+                let score_diff = o_on.score - o_off.score;
+                println!("智训练: off_score={:.1} on_score={:.1} diff={:.1} weakboost_off={:.1} weakboost_on={:.1}",
+                    o_off.score, o_on.score, score_diff, bonus_off, bonus_on);
+                if bonus_off != 0.0 {
+                    panic!("boost=0 时不应有 ramen_weak_train_boost 项: {bonus_off}");
+                }
+                if bonus_on <= 0.0 {
+                    panic!("boost>0 且卡少位被吃面覆盖时应有 ramen_weak_train_boost 加分: {bonus_on}");
+                }
+            }
+        }
+
+        // 反例：boost>0 但当前不吃面（current_ramen=None）→ 弱位不加分（区分吃面/不吃面）
+        let mut no_eat = game.clone();
+        no_eat.ramen.current_ramen = None;
+        let (_, outs_no_eat) = on.decide_train(&no_eat, &actions)?;
+        for (act, o) in actions.iter().zip(outs_no_eat.iter()) {
+            if let Operation::Train(TrainingType::Wisdom) = act.operation {
+                let bonus = o.breakdown.iter().find(|(k, _)| k == "ramen_weak_train_boost").map(|(_, v)| *v).unwrap_or(0.0);
+                println!("不吃面时智训练 weakboost: {bonus}");
+                if bonus != 0.0 {
+                    panic!("不吃面时不应有 ramen_weak_train_boost: {bonus}");
+                }
+            }
+        }
+
         Ok(())
     }
 }
