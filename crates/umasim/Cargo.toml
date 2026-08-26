@@ -14,6 +14,11 @@ path = "src/bin/ramen_manual.rs"
 required-features = ["cli", "diag"]
 
 [[bin]]
+name = "ramen_player"
+path = "src/bin/ramen_player.rs"
+required-features = ["experiment-tools"]
+
+[[bin]]
 name = "ramen_feature_dataset"
 path = "tools/data_collection/ramen_feature_dataset.rs"
 
