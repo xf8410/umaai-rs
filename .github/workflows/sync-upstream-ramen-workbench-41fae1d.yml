@@ -1,0 +1,49 @@
+name: 手动同步上游ramen_workbench-41fae1d
+on: {workflow_dispatch: {}}
+permissions: {contents: write}
+concurrency:
+  group: resolve-upstream-ramen-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - name: 合并固定上游提交并保留本地实验文件
+        env:
+          UPSTREAM_SHA: b25960c9bd138e41e9524087e0a97e4ccf320564
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/xulai1001/umaai-rs.git
+          git fetch upstream ramen_workbench
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+          if git merge --no-ff --no-commit "$UPSTREAM_SHA"; then
+            echo '上游可自动合并'
+          else
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            printf '冲突文件：\n%s\n' "$conflicts"
+            test -n "$conflicts"
+            while IFS= read -r file; do
+              git checkout --theirs -- "$file"
+              git add "$file"
+            done <<< "$conflicts"
+          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('crates/umasim/Cargo.toml')
+          s = p.read_text()
+          block = '''\n[[bin]]\nname = "y3_region_matrix_corrected"\npath = "src/bin/y3_region_matrix_corrected.rs"\nrequired-features = ["experiment-tools"]\n'''
+          if 'name = "y3_region_matrix_corrected"' not in s:
+              marker = '\n[features]\n'
+              if marker not in s:
+                  raise SystemExit('Cargo.toml 缺少 [features] 标记')
+              p.write_text(s.replace(marker, block + marker, 1))
+          PY
+          git add crates/umasim/Cargo.toml crates/umasim/src/bin/y3_region_matrix_corrected.rs .github/workflows/y3-region-matrix-corrected.yml
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m 'merge: sync upstream ramen_workbench at b25960c'
+          git push origin HEAD:${{ github.ref_name }}
