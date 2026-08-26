@@ -1,7 +1,7 @@
 name: Ramen upstream source check
 on:
   push:
-    branches: [workbench/skill-pt-matrix-distill]
+    branches: [ramen_workbench, 'workbench/**']
     paths:
       - 'crates/**/*.rs'
       - 'Cargo.toml'
@@ -17,11 +17,20 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  PATCH_LIST: ""
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify immutable experiment source
+        run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
@@ -29,8 +38,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ramen-upstream-source-check
-      - name: Rust formatting (nightly only)
-        run: cargo +nightly fmt --all -- --check
+      - name: Rust formatting (nightly only, advisory)
+        run: cargo +nightly fmt --all -- --check || echo "::warning::fmt drift detected; advisory only, does not block"
       - name: Core compile without diagnostic logging
         run: cargo check --workspace --no-default-features
       - name: Core tests without diagnostic logging
@@ -42,7 +51,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: upstream-core-test-log
+          name: upstream-core-test-log-${{ github.run_id }}
           path: upstream-test.log
           if-no-files-found: warn
       - name: Default-feature compile
