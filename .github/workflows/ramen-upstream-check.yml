@@ -1,7 +1,7 @@
 name: Ramen upstream source check
 on:
   push:
-    branches: [workbench/skill-pt-matrix-distill]
+    branches: [ramen_workbench, 'workbench/**']
     paths:
       - 'crates/**/*.rs'
       - 'Cargo.toml'
@@ -17,11 +17,20 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  PATCH_LIST: ""
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - name: Verify immutable experiment source
+        run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
