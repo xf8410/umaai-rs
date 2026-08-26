@@ -3,27 +3,38 @@ name: Skill PT phased handwritten strategy v4
 on:
   push:
     branches:
-      - workbench/skill-pt-matrix-distill
+      - ramen_workbench
+      - 'workbench/**'
     paths:
       - .github/workflows/skill-pt-phase-matrix-v4.yml
+      - 'crates/umasim/**'
+      - 'scripts/ramen/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  PATCH_LIST: ""
 
 jobs:
   prep:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { ref: ${{ github.sha }}, fetch-depth: 0 }
+      - run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
       - run: |
           echo '# v4：分年份动态技能 PT 权重' >> "$GITHUB_STEP_SUMMARY"
+          echo "source_sha=${SOURCE_SHA}" >> "$GITHUB_STEP_SUMMARY"
           echo '固定 long/fail0；不改变马娘、卡组、因子，也不引入支援卡分类。18 个年份权重档 × 2 个保护上限 × 4 分片。' >> "$GITHUB_STEP_SUMMARY"
 
   phase:
@@ -65,6 +76,8 @@ jobs:
       RUNS_PER_SHARD: 100
     steps:
       - uses: actions/checkout@v4
+        with: { ref: ${{ github.sha }}, fetch-depth: 0 }
+      - run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -82,8 +95,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: workbench/skill-pt-matrix-distill
+        with: { ref: ${{ github.sha }}, fetch-depth: 0 }
+      - run: python3 scripts/verify_experiment_source.py
       - uses: actions/download-artifact@v4
         with:
           pattern: v4-*
@@ -93,13 +106,10 @@ jobs:
           REPORT_PATH: benchmark-results/skill-pt-phase-v4-${{ github.run_id }}.md
         run: |
           python3 scripts/summarize_skill_pt_matrix.py
+          printf '\nsource_sha=%s\n' "$SOURCE_SHA" >> "$REPORT_PATH"
           cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
-      - name: Commit report
-        env:
-          REPORT_PATH: benchmark-results/skill-pt-phase-v4-${{ github.run_id }}.md
-        run: |
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add "$REPORT_PATH"
-          git commit -m "bench: publish phased skill PT v4 run ${{ github.run_id }}"
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skill-pt-phase-v4-report-${{ github.run_id }}
+          path: benchmark-results/skill-pt-phase-v4-${{ github.run_id }}.md
+          retention-days: 30
