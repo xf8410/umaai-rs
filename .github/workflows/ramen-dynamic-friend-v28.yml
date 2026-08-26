@@ -1,25 +1,36 @@
 name: Ramen dynamic friend outing v28
 on:
-  push:
-    branches: [workbench/skill-pt-matrix-distill]
-    paths: [.github/workflows/ramen-dynamic-friend-v28.yml]
   workflow_dispatch:
+  push:
+    branches: [ramen_workbench, 'workbench/**']
+    paths:
+      - '.github/workflows/ramen-dynamic-friend-v28.yml'
+      - 'crates/umasim/**'
+      - 'scripts/ramen/restore_dynamic_friend_outing_v28.py'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 permissions: {contents: write}
+env:
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  PATCH_LIST: scripts/ramen/restore_dynamic_friend_outing_v28.py
 jobs:
   patch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: {ref: ${{ github.sha }}, fetch-depth: 0}
+      - run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@stable
-      - run: python3 scripts/restore_dynamic_friend_outing_v28.py
+      - run: python3 scripts/ramen/restore_dynamic_friend_outing_v28.py
       - run: cargo fmt -- crates/umasim/src/trainer/local_ramen_trainer.rs
       - run: cargo check -p umasim --bin skill_pt_phase_matrix --no-default-features
       - run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add crates/umasim/src/trainer/local_ramen_trainer.rs
-          git commit -m 'fix: restore dynamic friend outing valuation'
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          git diff --cached --quiet || git commit -m 'fix: restore dynamic friend outing valuation'
+          git push origin HEAD:${GITHUB_REF_NAME}
   matrix:
     needs: patch
     runs-on: ubuntu-latest
@@ -43,7 +54,8 @@ jobs:
       RUNS_PER_SHARD: 100
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with: {ref: ${{ github.sha }}, fetch-depth: 0}
+      - run: python3 scripts/verify_experiment_source.py
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with: {shared-key: ramen-dynamic-friend-v28}
@@ -55,17 +67,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with: {ref: workbench/skill-pt-matrix-distill}
+        with: {ref: ${{ github.sha }}, fetch-depth: 0}
+      - run: python3 scripts/verify_experiment_source.py
       - uses: actions/download-artifact@v4
         with: {pattern: v28-*, path: matrix-results}
       - name: Generate report
         env: {REPORT_PATH: 'benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md'}
         run: |
           python3 scripts/summarize_skill_pt_matrix.py
+          printf '\nsource_sha=%s\npatch_list=%s\n' "$SOURCE_SHA" "$PATCH_LIST" >> "$REPORT_PATH"
           cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
       - run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add benchmark-results/ramen-dynamic-friend-v28-${{ github.run_id }}.md
-          git commit -m 'bench: publish dynamic friend outing v28'
-          git push origin HEAD:workbench/skill-pt-matrix-distill
+          git diff --cached --quiet || git commit -m 'bench: publish dynamic friend outing v28'
+          git push origin HEAD:${GITHUB_REF_NAME}
