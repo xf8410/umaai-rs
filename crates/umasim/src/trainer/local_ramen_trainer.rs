@@ -1047,8 +1047,8 @@ impl LocalRamenTrainer {
         let region_delta = (calc_region_bonus(post) - calc_region_bonus(cur)).max(0) as f32 * 8.;
         let checkpoint = (delta + region_delta) * rem * self.config.checkpoint_scale;
         let year = (g.current_year() - 1) as usize;
-        let d = RAMENDATA.get().unwrap();
-        let threshold = *d.ramen_success_pt.get(year).unwrap_or(&i32::MAX);
+        let d = global!(RAMENDATA);
+        let threshold = d.ramen_success_pt[year];
         let rmj = if cur < threshold && post >= threshold {
             self.config.rmj_cross_bonus
         } else {
@@ -1706,6 +1706,8 @@ impl Trainer<RamenGame> for LocalRamenTrainer {
                 };
                 self.policy.decide_region(g, y, a)?
             }
+            // 缺此分支会落到 `_ => (0, vec![])`，选项二静默变成选项一
+            RamenStage::SuperRamenSelect => self.policy.decide_super_ramen(g, a)?,
             _ => (0, Vec::new())
         };
         self.stash(&o);
@@ -1864,7 +1866,7 @@ mod tests {
         use crate::{
             game::{
                 InheritInfo,
-                ramen::{Operation, RamenAction, RamenGame, RamenStage}
+                ramen::{Operation, RamenGame, RamenStage}
             },
             gamedata::init_global,
             utils::{get_workspace_root, init_test_logger}
@@ -1985,7 +1987,7 @@ mod tests {
         use crate::{
             game::{
                 InheritInfo,
-                ramen::{RamenAction, RamenGame, action::list_ramen_select_actions, policy::RamenPolicyConfig}
+                ramen::{RamenGame, action::list_ramen_select_actions, policy::RamenPolicyConfig}
             },
             gamedata::init_global,
             utils::{get_workspace_root, init_test_logger}
@@ -2144,7 +2146,7 @@ mod tests {
         use crate::{
             game::{
                 InheritInfo,
-                ramen::{Operation, RamenAction, RamenGame, RamenStage, TrainingType}
+                ramen::{Operation, RamenGame, RamenStage, TrainingType}
             },
             gamedata::init_global,
             utils::{get_workspace_root, init_test_logger}
@@ -2218,7 +2220,7 @@ mod tests {
         use crate::{
             game::{
                 InheritInfo,
-                ramen::{Operation, RamenAction, RamenGame, RamenStage, TrainingType}
+                ramen::{Operation, RamenGame, RamenStage, TrainingType}
             },
             gamedata::{init_global, ramen::RAMENDATA},
             utils::{get_workspace_root, init_test_logger}
