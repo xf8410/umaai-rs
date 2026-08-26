@@ -587,7 +587,7 @@ impl Game for RamenGame {
             }
             rows.push(row);
         }
-        // cli 下输出完整表格；core-only 下退化为简化文本（保留训练 + 失败率计算）
+        // cli 下输出完整表格 + 训练数值计算明细；core-only 下退化为简化文本
         #[cfg(feature = "cli")]
         {
             let mut table = Table::new();
@@ -595,9 +595,11 @@ impl Game for RamenGame {
             for col in table.column_iter_mut() {
                 col.set_constraint(ColumnConstraint::Absolute(Width::Percentage(20)));
             }
-            let lines = vec![table.to_string()];
-            // 训练数值计算明细（速 速17 力2 9pt 体力-22 诀窍槽...）暂时屏蔽，
-            // 需要时恢复：self.collect_train_lines(&mut lines, &headers, &dist, show_ramen)?;
+            let mut lines = vec![table.to_string()];
+            // 训练数值计算明细（每训练位一行：数值 + 失败率 + 诀窍槽 A/B/C 增量）
+            // ——玩家手动玩时此为决策依据；调用 `collect_train_lines` 输出 5 行
+            //   紧跟在人头分布表之后，序列化为文字段落（cli 兼容）
+            self.collect_train_lines(&mut lines, &headers, &dist, show_ramen)?;
             Ok(lines.join("\n"))
         }
         #[cfg(not(feature = "cli"))]
@@ -606,8 +608,8 @@ impl Game for RamenGame {
             for (i, row) in rows.iter().enumerate() {
                 lines.push(format!("[{}] {}", i, row.join(" ")));
             }
-            // 训练数值计算明细暂时屏蔽，需要时恢复：
-            // self.collect_train_lines(&mut lines, &headers, &dist, show_ramen)?;
+            // core-only 也保留训练数值计算明细（褪化为文本，仍可用于结构化日志）
+            self.collect_train_lines(&mut lines, &headers, &dist, show_ramen)?;
             Ok(lines.join("\n"))
         }
     }
@@ -1752,9 +1754,6 @@ impl RamenGame {
     /// 被 `explain_distribution` 在 cli / core 两种模式下复用，避免重复实现。
     /// 作为 inherent 方法（不属于 `Game` trait），保证 `Game::explain_distribution` 内
     /// 通过 `self.collect_train_lines(...)` 调用时优先匹配 inherent 实现。
-    ///
-    /// 暂时屏蔽（训练数值计算明细）：调用点已注释，需要时恢复调用并删除本 allow。
-    #[allow(dead_code)]
     fn collect_train_lines(
         &self, lines: &mut Vec<String>, headers: &[String], _dist: &[Vec<i32>], show_ramen: bool
     ) -> Result<()> {
@@ -1798,7 +1797,14 @@ impl RamenGame {
         };
 
         let dist = &self.base.distribution;
-        let support_count = dist[train]
+        // 防护：`distribution` 未填满 5 行（早期回合 / unit-test 直接构造 game 调本方法），
+        // 跳过该位的 buff 统计（不影响 explain_distribution 自身的 line 553 fill）
+        if train >= dist.len() {
+            // 训练位尚未就绪，返回一行只含失败率=0 + 数值零的占位文本，调用方仍可读
+            return Ok(format!("{label} 训练位未就绪"));
+        }
+        let dist_train = &dist[train];
+        let support_count = dist_train
             .iter()
             .filter(|&&p| {
                 p >= 0
@@ -1808,7 +1814,7 @@ impl RamenGame {
             .count();
         // NPC 数量 = 本训练位置实际分配的 Npc 人数（`ramen_memo_cn.md` 算例：
         // NPC数量=3 时加成 floor(3/2)，非固定 5；与生效层 `fill_feeling_gauge` 一致）
-        let npc_count = dist[train]
+        let npc_count = dist_train
             .iter()
             .filter(|&&p| {
                 p >= 0

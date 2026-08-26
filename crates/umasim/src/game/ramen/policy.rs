@@ -25,7 +25,8 @@ use crate::{
         traits::Game
     },
     gamedata::{EventChoice, FreeRaceData, GAMECONSTANTS, ramen::RAMENDATA},
-    global
+    global,
+    utils::system_event
 };
 
 /// 手写策略参数化配置（权重/阈值常量）
@@ -52,14 +53,15 @@ pub struct RamenPolicyConfig {
     /// 主属性快满时"残余收益"折扣强度（方案 E，0~1）。
     ///
     /// 配卡决定训练效率（3 速 build 速位每次 +90 天然更快接近上限），凸评分曲线
-    /// 让策略优先堆满主属性；主属性快满/已满时训练该位只剩副属性 + PT 收益，
-    /// 仍全额计入会诱使策略继续训练已满位、冷落卡少属性。
+    /// 让策略优先堆满主属性；主属性快满/已满时训练该位的主属性差分收益趋近 0，
+    /// 只剩副属性收益——副属性仍全额计入会诱使策略继续训练已满位、冷落卡少属性。
     ///
     /// 按「主属性剩余空间 / (本次主属性收益 × 2)」算有效比率 `ratio`
     /// （剩余不足 2 次训练收益即平滑衰减，提前分流而非等溢出才惩罚），
-    /// 副属性与 PT 收益按 `ratio × 本权重` 打折；主属性本身仍按差分全额
-    /// （`status_gain` 已截断溢出部分）。`0.0` 关闭；`1.0` 全额打折。
-    /// 配置 token `capd100` 对应 `1.0`。
+    /// **副属性收益按 `ratio` 打折**；主属性本身仍按差分全额（`status_gain`
+    /// 已截断溢出部分），**PT 不打折**（PT 是独立追求目标——为拿 PT 继续训练
+    /// 已满位是正当行为，且训练任何位都给 PT，打折只是扭曲选择）。
+    /// `0.0` 关闭；`1.0` 全额打折。配置 token `capd100` 对应 `1.0`。
     pub cap_discount_weight: f32,
     /// 训练失败惩罚（期望值中被扣减的固定分）
     pub failure_penalty: f32,
@@ -77,12 +79,23 @@ pub struct RamenPolicyConfig {
     /// 训练前保留的目标体力（低于此值更倾向休息；高于此值体力收益边际下降）
     pub rest_target_vital: i32,
     // ===== 比赛 =====
-    /// 比赛等级（G2/G1 等）→ 分数折算
+    /// 自由比赛真实收益的折扣（0~1）
     ///
-    /// **仅用于「自选比赛已达标 / 本马娘无自选比赛要求」的场合**：此时比赛纯粹是
-    /// 「用一回合换属性与技能点」，实测（seed 42-81，40 局）该权重每提高一档都在
-    /// 掉分（0→51168 / 300→49129 / 900→43168），故默认 0——不主动打无意义的比赛。
-    pub race_grade_weight: f32,
+    /// 按当前回合等级查 `race_g{grade}` 系统事件面板（与 `do_race` 结算同源），
+    /// 五维 × `race_bonus` 后走 `status_gain` 差分、PT 走 `pt_rate`、体力走
+    /// `train_vital_value`——与训练候选完全同一评分管线，天然同尺度可比。
+    /// 总收益再乘本折扣后参与 argmax。
+    ///
+    /// 折扣用途（双重）：
+    /// 1. 比赛 PT 走 `pt_rate`（×8）折算偏高——比赛单回合给 40-80 PT（×race_bonus），
+    ///    PT 贡献 320-640 分，远超训练单回合 PT（7-28 → 56-224 分）。面板按同一
+    ///    pt_rate 折算会让比赛在收益尚可的训练回合也胜出，挤占正常训练。
+    /// 2. 补偿「比赛当回合不增长训练等级（train_level_count）」的长期机会成本。
+    /// 实测（stamina build, seed=61444）：0.7 下比赛分 ~500 全面压过最佳训练
+    /// 358~505，自动局 20 场比赛 + 12 次被迫休息、仅 1.1 万训练收益；降到 ~0.3
+    /// 后比赛只在「平凡回合」（无彩圈/无拉面/失败率高，训练 ~100 分）胜出，
+    /// 恰好兑现"自由比赛只提高下限"的语义。
+    pub race_panel_discount: f32,
     /// 自选比赛缺口的紧迫度权重
     ///
     /// 打分形态 `weight × 缺口场数 / 区间内剩余可比赛回合数`：区间宽裕时接近 0
@@ -153,7 +166,7 @@ impl Default for RamenPolicyConfig {
             rest_base: 20.0,
             rest_vital_value: 2.5,
             rest_target_vital: 55,
-            race_grade_weight: 0.0,
+            race_panel_discount: 0.3,
             race_free_urgency_weight: 2000.0,
             race_gate_slack: 1,
             outing_base: 15.0,
@@ -486,26 +499,95 @@ impl RamenPolicy {
 
     /// 自选比赛打分
     ///
-    /// - 有未补齐缺口且**本回合等级满足**：`urgency × 缺口 / 剩余可比赛回合`——区间宽裕时
-    ///   接近 0（不打扰训练），越接近截止越高，与硬守门形成「软倾向 + 硬兜底」两层。
-    /// - 本回合等级不满足：打也不计数，不给 urgency（降级为普通比赛分，避免白打浪费回合）。
-    /// - 剩余有效回合少于缺口（摆烂，打完也不够）：同样不给 urgency（打了也白打）。
-    /// - 无要求或已达标：退化为按比赛等级折算（`race_grade_weight`，默认 0）。
-    fn score_race(&self, game: &RamenGame) -> (f32, String) {
+    /// 双层逻辑（用户确认保留）：
+    /// - **赛程压力**（`race_free_urgency_weight`）：有未补齐缺口且本回合等级满足时，
+    ///   `urgency × 缺口 / 剩余可比赛回合`——区间宽裕时接近 0（不打扰训练），越接近
+    ///   截止越高，与硬守门形成「软倾向 + 硬兜底」两层。
+    /// - **真实收益**（[`Self::score_race_panel`]）：把比赛当作一次「五维各 +3~5、
+    ///   PT +25~50 再乘 `race_bonus`、体力 -15、零失败率」的特殊训练，走与训练候选
+    ///   同一评分管线折算成与训练同尺度的分数。
+    ///
+    /// 组合方式：
+    /// - 有缺口且等级满足：真实收益 + 赛程压力叠加（缺口的紧迫度叠加在收益上）
+    /// - 摆烂（剩余回合不足补齐缺口）：只算真实收益，不给 urgency（打了也不够数）
+    /// - 无要求 / 已达标 / 等级不满足：纯真实收益（比赛本身值多少就是多少）
+    fn score_race(&self, game: &RamenGame) -> Result<(f32, String)> {
+        let (panel, panel_desc) = self.score_race_panel(game)?;
         if let Some(free) = game.uma.find_free_race(game.turn()) {
             let need = free.count.saturating_sub(game.uma.count_free_race(free));
             if need > 0 && race_turn_qualified(game.turn(), free) {
                 let remain = remaining_race_slots(game.turn(), free);
-                // 摆烂：剩余有效回合少于缺口，打完也不够 → 不再引导比赛
+                // 摆烂：剩余有效回合少于缺口，打完也不够 → 只算真实收益，不叠压力
                 if remain < need {
-                    return (0.0, format!("自选比赛(缺{need}场/剩{remain}回合,摆烂)"));
+                    return Ok((panel, format!("自选比赛(缺{need}场/剩{remain}回合,摆烂)+{panel_desc}")));
                 }
-                let val = self.config.race_free_urgency_weight * need as f32 / remain as f32;
-                return (val, format!("自选比赛(缺{need}场/剩{remain}回合)"));
+                let urgency = self.config.race_free_urgency_weight * need as f32 / remain as f32;
+                return Ok((panel + urgency, format!("自选比赛(缺{need}场/剩{remain}回合)+{panel_desc}")));
             }
         }
+        Ok((panel, panel_desc))
+    }
+
+    /// 比赛真实收益折算：按当前回合等级查 `race_g{grade}` 面板，走训练同管线
+    ///
+    /// 面板来源与 `BaseAction::do_race` 完全同源（`system_event("race_g{grade}")`），
+    /// 避免手抄数据漂移。收益结构（`events.json`）：
+    ///
+    /// | 等级 | 五维 | PT | 体力 |
+    /// |---|---|---|---|
+    /// | G1 (race_g1) | [3,3,3,3,3] | 50 | -15（或随机 -5/-20） |
+    /// | G2 (race_g2) | [2,3,2,3,2] | 40 | -15 |
+    /// | G3 (race_g3) | [2,2,2,2,2] | 35 | -15 |
+    /// | OP (race_g4) | [1,2,1,2,1] | 25 | -15 |
+    ///
+    /// 全部乘 `race_bonus = (100 + uma.race_bonus) / 100`（与 `do_race` 的
+    /// `map_status` 乘算一致）。体力按确定分支 -15 计（随机分支期望 -15，
+    /// 两分支五维/PT 相同，取确定分支即可）。
+    ///
+    /// 折算管线与 `score_train_action` 的训练分支一致：
+    /// `Σ status_gain(五维差分) + PT×pt_rate − 体力×train_vital_value`，
+    /// 无彩圈（shining=0）、无失败率（fail_adj=0）——这正是「平凡回合」的衡量。
+    /// 总收益乘 [`race_panel_discount`](Self::race_panel_discount) 补偿训练等级机会成本。
+    ///
+    /// 注意：自由比赛只是「用一回合换固定小收益」——提高的是策略下限
+    /// （平凡回合不白白浪费），实际收益很低，不是高分的主要来源；
+    /// 该机制仅负责让比赛在收益可比的尺度上参与决策，不负责解释高分。
+    fn score_race_panel(&self, game: &RamenGame) -> Result<(f32, String)> {
         let grade = game_race_grade(game);
-        (grade * self.config.race_grade_weight, format!("比赛(等级{grade})"))
+        if grade <= 0.0 {
+            return Ok((0.0, "无比赛".to_string()));
+        }
+        let grade = grade as usize;
+        let event = system_event(&format!("race_g{grade}"))?;
+        // 取确定分支（choices[0][0]）；随机分支五维/PT 相同、体力期望同为 -15
+        let value = event
+            .choices
+            .first()
+            .and_then(|c| c.first())
+            .map(|c| c.value.clone())
+            .ok_or_else(|| anyhow::anyhow!("比赛事件 {grade} 缺少确定分支"))?;
+        let race_bonus = (100 + game.uma.race_bonus) as f32 / 100.0;
+        // 五维差分（与 do_race 相同乘算后 floor? do_race 用 round；此处同 round 一致）
+        let mut attr_gain = 0.0;
+        let mut statuses = [0i32; 6];
+        for i in 0..6 {
+            statuses[i] = (value.status_pt[i] as f32 * race_bonus).round() as i32;
+        }
+        for i in 0..5 {
+            attr_gain += self.status_gain(game, i, statuses[i]);
+        }
+        let pt_gain = statuses[5] as f32;
+        let vital_cost = (-value.vital).max(0) as f32 * self.config.train_vital_value;
+        let gross = attr_gain + pt_gain * self.config.pt_rate - vital_cost;
+        let val = gross * self.config.race_panel_discount;
+        let panel_desc = format!(
+            "比赛(G{grade} 五维{:?}×{:.2} PT+{pt_gain:.0} 体力{} 折扣{:.2})",
+            statuses[..5].to_vec(),
+            race_bonus,
+            value.vital,
+            self.config.race_panel_discount
+        );
+        Ok((val, panel_desc))
     }
 
     // ========== Train 动作打分 ==========
@@ -528,8 +610,10 @@ impl RamenPolicy {
                     base_fail_rate
                 };
                 // 属性增益（five_status_final_score 差分，与 calc_score 一致）
-                // 方案 E：主属性快满时副属性按有效比率打折（残余收益折扣）；
-                // PT 是真实收益（训练任何位都给，与溢出无关）不打折。
+                // 方案 E：主属性快满时副属性按有效比率打折（残余收益折扣），提前分流——
+                // 已满位的主属性差分收益趋近 0（status_gain 截断），副属性仍全额会把
+                // 训练吸在已满位、冷落卡少属性（2026-08-26 实测 turn65 耐已满 attr=0）。
+                // PT 不打折：PT 是独立追求目标，为拿 PT 继续训练已满位是正当行为。
                 let inc_main = value.status_pt[train].max(0);
                 let cap_left = (game.uma().five_status_limit[train] - game.uma().five_status[train]).max(0);
                 let ratio = if self.config.cap_discount_weight > 0.0 && inc_main > 0 {
@@ -549,6 +633,9 @@ impl RamenPolicy {
                 let pt_gain = value.status_pt[5] as f32;
                 // 注：`status_gain` 内部已乘 status_rate，此处不可再乘（否则成平方）
                 let attr = attr_gain;
+                // PT 不打折：PT 是独立追求目标（终局 skill_pt 直接计分），
+                // 为拿 PT 继续训练已满位是正当行为；打折只会扭曲"PT vs 属性"的取舍
+                // （训练等级成长等跨回合前瞻留给 MCTS 搜索，单点启发式承认上限）。
                 let pt = pt_gain * self.config.pt_rate;
                 // 体力成本（消耗按 train_vital_value 折算）
                 let vital_cost = (-value.vital).max(0) as f32 * self.config.train_vital_value;
@@ -570,7 +657,7 @@ impl RamenPolicy {
                 );
             }
             Operation::Race => {
-                let (val, reason) = self.score_race(game);
+                let (val, reason) = self.score_race(game)?;
                 out.add("race", val);
                 out.score = val;
                 out.reason = reason;
@@ -1531,7 +1618,7 @@ mod tests {
         Ok(())
     }
 
-    /// 软倾向：等级不满足回合不给 urgency 分（比赛降级为普通分，避免白打）
+    /// 软倾向：等级不满足回合不给 urgency 分，但给真实收益分（比赛本身值多少就是多少）
     #[test]
     fn test_score_race_skips_nonqualified_turn() -> anyhow::Result<()> {
         let workspace_root = get_workspace_root()?;
@@ -1541,20 +1628,74 @@ mod tests {
 
         let policy = RamenPolicy::default();
 
-        // 101901 回合 54（G2，等级不满足）：比赛分应为 0（race_grade_weight=0），reason 说明等级
+        // 101901 回合 54（G2，等级不满足）：只有真实收益分，没有 urgency，reason 说明比赛面板
         let mut game = make_free_race_game_uma(101901)?;
         game.base.turn = 54;
-        let (val, reason) = policy.score_race(&game);
+        let (val, reason) = policy.score_race(&game)?;
         println!("回合 54 (G2) score_race: val={val} reason={reason}");
-        assert_eq!(val, 0.0, "等级不满足回合不应给 urgency 分");
-        assert!(reason.starts_with("比赛"), "reason 应为普通比赛分: {reason}");
+        assert!(val > 0.0, "等级不满足回合也应给真实收益分（比赛本身有收益）: val={val}");
+        assert!(reason.starts_with("比赛"), "reason 应为比赛面板分: {reason}");
 
-        // 回合 55（G1，等级满足，缺口 3、剩 4 有效回合）：给 urgency 分
+        // 回合 55（G1，等级满足，缺口 3、剩 4 有效回合）：真实收益 + urgency 叠加
         game.base.turn = 55;
-        let (val, reason) = policy.score_race(&game);
-        println!("回合 55 (G1) score_race: val={val} reason={reason}");
-        assert!(val > 0.0, "等级满足回合应给 urgency 分");
-        assert!(reason.contains("自选比赛"), "reason 应为自选比赛: {reason}");
+        let (val2, reason2) = policy.score_race(&game)?;
+        println!("回合 55 (G1) score_race: val={val2} reason={reason2}");
+        assert!(val2 > val, "等级满足回合应叠加 urgency（真实收益+赛程压力）: {val} -> {val2}");
+        assert!(reason2.contains("自选比赛"), "reason 应为自选比赛: {reason2}");
+        Ok(())
+    }
+
+    /// 真实收益面板折算的性质验证（`score_race_panel`）：
+    /// - 无比赛回合（`race_grades[turn]=0`）→ 0 分
+    /// - 有比赛回合 → 五维 × race_bonus 差分 + PT×pt_rate − 体力成本，乘折扣后为正
+    /// - `race_bonus` 越高收益越高（乘算生效）
+    /// - `race_panel_discount` 越小收益越低（折扣生效）
+    #[test]
+    fn test_score_race_panel_properties() -> anyhow::Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        // 无自选比赛要求的马娘（102601），中段属性保证差分非零
+        let mut game = make_game()?;
+        game.uma.vital = 100;
+        game.uma.five_status = [1000; 5];
+        let policy = RamenPolicy::default();
+
+        // 无比赛回合（race_grades[12]=0）：0 分
+        game.base.turn = 12;
+        let (val0, reason0) = policy.score_race_panel(&game)?;
+        println!("turn=12 (无比赛) panel: val={val0} reason={reason0}");
+        assert_eq!(val0, 0.0, "无比赛回合面板应为 0");
+
+        // G1 回合（race_grades[22]=1）：正收益且 reason 含面板信息
+        game.base.turn = 22;
+        let (val, reason) = policy.score_race_panel(&game)?;
+        println!("turn=22 (G1) panel: val={val} reason={reason}");
+        assert!(val > 0.0, "G1 比赛应有正收益: {val}");
+        assert!(reason.contains("G1"), "reason 应含等级: {reason}");
+
+        // race_bonus 乘算：60 → 1.6 倍，比分不加成的版本高
+        let mut no_bonus = game.clone();
+        no_bonus.uma.race_bonus = 0;
+        let (val_nb, _) = policy.score_race_panel(&no_bonus)?;
+        println!("race_bonus=0 panel: {val_nb} vs race_bonus=60: {val}");
+        assert!(val > val_nb, "race_bonus 应放大收益: {val_nb} -> {val}");
+
+        // 折扣生效：0.3 档应比 0.7 档低（显式构造两档，不依赖默认值）
+        let low_disc = RamenPolicy::new(RamenPolicyConfig {
+            race_panel_discount: 0.3,
+            ..RamenPolicyConfig::default()
+        });
+        let high_disc = RamenPolicy::new(RamenPolicyConfig {
+            race_panel_discount: 0.7,
+            ..RamenPolicyConfig::default()
+        });
+        let (val_ld, _) = low_disc.score_race_panel(&game)?;
+        let (val_hd, _) = high_disc.score_race_panel(&game)?;
+        println!("折扣0.3 panel: {val_ld} vs 折扣0.7: {val_hd}");
+        assert!(val_ld < val_hd, "更低折扣应降低收益: {val_ld} vs {val_hd}");
         Ok(())
     }
 

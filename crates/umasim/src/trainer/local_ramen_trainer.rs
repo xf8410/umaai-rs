@@ -1923,7 +1923,11 @@ mod tests {
             &[302424, 302894, 303044, 302924, 303024, 303054],
             InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
         )?;
-        game.base.turn = 50; // 第三年
+        // 用无自选比赛候选的回合（can_self_race 需 turn>12）：
+        // 本测试要验证的是「低体力训练失败率>0 → 吃面必成价值>0」这一机制，
+        // 而非比赛/训练的取舍——若放在 G1 回合，自由比赛真实收益会让策略
+        // 正确改选比赛（pre_action=Race），吃面必成价值按设计降为 0，前提不成立。
+        game.base.turn = 12;
         game.uma.vital = 45; // 速位失败率 (100-45)*(52-45)/40 ≈ 9.6% > 0
         // 智已满上限（训练边际≈0），其余中段属性训练收益高且失败率>0，
         // 策略本回合打算训练（而非休息）→ 吃面必成价值应>0
@@ -1950,7 +1954,7 @@ mod tests {
             }
         }
         println!(
-            "turn=50 vital=45: 吃面候选={has_eat} eat_guarantee={guarantee} 候选数={} pre_action={:?}",
+            "turn=12 vital=45: 吃面候选={has_eat} eat_guarantee={guarantee} 候选数={} pre_action={:?}",
             actions.len(),
             pre
         );
@@ -2121,3 +2125,4 @@ mod tests {
         Ok(())
     }
 }
+
