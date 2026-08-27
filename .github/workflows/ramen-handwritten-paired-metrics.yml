@@ -10,7 +10,7 @@ on:
       - crates/umasim/src/trainer/local_ramen_trainer.rs
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   paired-metrics:
@@ -24,8 +24,6 @@ jobs:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build candidate metric runner
-        run: cargo check -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Run candidate metrics
         env:
           SIDE: candidate
@@ -37,16 +35,13 @@ jobs:
             ramen_workbench:refs/remotes/upstream/ramen_workbench
           git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
           cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
-      - name: Build baseline metric runner
-        working-directory: /tmp/ramen-baseline
-        run: cargo check -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Run exact baseline metrics
         working-directory: /tmp/ramen-baseline
         env:
           SIDE: baseline
           OUT: ${{ github.workspace }}/baseline-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
-      - name: Require score, attribute score, and skill PT all to improve
+      - name: Build report and record gate decision
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -60,21 +55,41 @@ jobs:
 
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
-          keys = ['score_mean', 'attribute_score_mean', 'skill_pt_mean']
-          print('baseline:', {key: base[key] for key in keys})
-          print('candidate:', {key: cand[key] for key in keys})
-          failed = [key for key in keys if not cand[key] > base[key]]
-          if failed:
-              raise SystemExit('candidate did not strictly improve: ' + ', '.join(failed))
-          report = '# Ramen handwritten paired metrics\n\n' + ''.join(
-              f'- {key}: {base[key]:.3f} -> {cand[key]:.3f} ({cand[key] - base[key]:+.3f})\n'
-              for key in keys
-          )
-          Path('paired-metrics-report.md').write_text(report, encoding='utf-8')
-          print('PASS: score, attribute score, and skill PT all strictly improved')
+          keys = [
+              ('score_mean', '总分'),
+              ('attribute_score_mean', '属性评分'),
+              ('skill_pt_mean', '技能PT'),
+          ]
+          lines = ['# Ramen handwritten paired metrics（2速1耐2智）', '',
+                   f"基线：上游 ramen_workbench @ a6e1f48，配对局数 {int(base['runs'])}",
+                   '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
+          ok = True
+          for key, label in keys:
+              delta = cand[key] - base[key]
+              passed = delta > 0
+              ok = ok and passed
+              verdict = '提升' if passed else '未提升'
+              lines.append(f'|{label}|{base[key]:.3f}|{cand[key]:.3f}|{delta:+.3f}|{verdict}|')
+          lines.append('')
+          conclusion = '三项全部严格提升，通过' if ok else '存在未提升指标，失败'
+          lines.append(f'**整体结论：{conclusion}**')
+          Path('paired-metrics-report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          Path('.gate-result').write_text('pass' if ok else 'fail', encoding='utf-8')
+          print('\n'.join(lines))
           PY
           cat paired-metrics-report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish report to workbench branch
+        if: always() && hashFiles('paired-metrics-report.md') != ''
+        run: |
+          mkdir -p benchmark-results
+          cp paired-metrics-report.md benchmark-results/paired-metrics-report-latest.md
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add benchmark-results/paired-metrics-report-latest.md
+          git diff --cached --quiet || git commit -m "bench: publish paired metrics report run ${{ github.run_id }}"
+          git push origin HEAD:workbench/ramen-mcts-iteration
       - uses: actions/upload-artifact@v4
+        if: always() && hashFiles('paired-metrics-report.md') != ''
         with:
           name: ramen-handwritten-paired-metrics-${{ github.run_id }}
           path: |
@@ -82,3 +97,9 @@ jobs:
             candidate-metrics.txt
             paired-metrics-report.md
           retention-days: 30
+      - name: Enforce strict improvement gate
+        run: |
+          if [ "$(cat .gate-result)" != "pass" ]; then
+            echo "Gate failed: 指标未全部提升，报告见仓库 benchmark-results/paired-metrics-report-latest.md"
+            exit 1
+          fi
