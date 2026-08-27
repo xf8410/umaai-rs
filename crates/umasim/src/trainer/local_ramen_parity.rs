@@ -5,6 +5,11 @@
 //! 邻域收缩确认（run 33051023023）：gap=1.0 两组合均 PT 转负，
 //! ov075 总量更低，(0.75, 1.0) 为该机制局部峰值——此轴关闭。
 //!
+//! 多卡组口径（run 33052347955 起支持 DECK_COUNTS 切换卡组）：
+//! 弱位 boost 从显式关闭（-1.0）改为传 0.0＝启用上游查找表
+//! （智卡≤1→5.0 / =2→0.0 / ≥3→2.0）。对已验证的 2速1耐2智两者同为 0，
+//! 结果不变；对其他卡组则与上游 preset 行为严格一致。
+//!
 //! 默认＝上游 preset ＋ 已验证增益。环境变量 `RAMEN_VARIANT` 用
 //! 带数值后缀的 token 做**绝对值覆盖**，可自由组合：
 //! - `gapNNN`   短板追赶强度 NNN%（默认 75）
@@ -12,7 +17,7 @@
 //! - `winNNN`   吃面训练窗口权重 NNN/1000（默认 100，即 0.10）
 //! - `sacNNN`   长期结构牺牲上限 NNN（默认 140）
 //! - `rwcNNN`   地区弱位覆盖加分 NNN（默认 0）
-//! - `pt32`     分年技能 PT 权重 32/32/32（已知负收益，仅保留复验）
+//! - `pt32`     分年技能 PT 权重 32/32/32（2速1耐2智上已知负收益，仅保留复验）
 //! 未声明字段落回默认；未知 token 直接报错，防止实验漂移。
 
 use anyhow::{anyhow, Result};
@@ -86,7 +91,7 @@ impl IterationRamenTrainer {
                 reserve_max,
                 early_bond,
                 hint_bonus,
-                -1.0, // 弱位 boost 显式关闭：本卡组智卡=2，查找表结果同为 0.0
+                0.0, // 弱位 boost：走上游查找表（0.0＝自适应），对任意卡组与 preset 等价
                 region_weak_cover_weight,
                 true // 选面覆盖位预演硬门：回退根因的修复项，永久保持开启
             ),
@@ -104,9 +109,10 @@ impl IterationRamenTrainer {
         Ok(value)
     }
 
-    /// 解析 NNN‰ 数值后缀（`win150` → 0.15）；非法后缀报错。
+    /// 解析 NNN 数值后缀映射到千分比（`win150` → 0.15）；非法后缀报错。
     fn parse_per_mille(token: &str, per_mille: &str) -> Result<f32> {
-        let value: f32 = per_mille.parse().map_err(|_| anyhow!("token {token} 数值段非法: {per_mille}"))?;
+        let value: f32 =
+            per_mille.parse().map_err(|_| anyhow!("token {token} 数值段非法: {per_mille}"))?;
         Ok(value / 1000.0)
     }
 }
