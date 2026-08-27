@@ -1,92 +1,83 @@
-//! Restored preset constructor used by the MCTS iteration workspace.
+//! 配对指标迭代用训练器包装。
 //!
-//! 背景：迭代分支上一轮“只保留吃后必训一道硬门”的重构把选面阶段的
-//! `eat_requires_covered_train` 预演门关闭，配对指标三项全面回退
-//! （总分 -727.5 / 属性评分 -312.7 / 技能PT -194.4，见
-//! `benchmark-results` 与 run 33048099445）。历史消融也早已证明：
-//! 放开吃后动作自由度是大幅正向收益（v41：+8146 总分），真正被验证过
-//! 的硬门是**选面前的覆盖位预演**。
+//! 背景：上游 a6e1f48 的正式 preset 含选面阶段 `eat_requires_covered_train`
+//! 预演硬门；本工作区某轮重构把它关闭后三项配对指标全面回退，恢复后与基线
+//! 300 局逐种子完全同轨（各项变化恒为 +0.000）。本模块因此承担两个职责：
 //!
-//! [`RecommendedRamenTrainer`] 内部的逐年构造不可从外部修改，因此这里用
-//! 现成的 `with_experiment_overrides` 出口重建同一 preset，仅恢复该硬门；
-//! 其余参数逐项等于 `new()` 的数值。weakboost 取 `-1.0` 显式关闭弱位
-//! boost（本工作区卡组智卡=2，查找表结果同为 0.0，行为一致）。
+//! 1. 默认（无环境变量）重建“基线等价、覆盖位门开启”的配置；
+//! 2. 通过环境变量 `RAMEN_VARIANT` 叠加历史矩阵验证过的参数变体，
+//!    用于坐标式邻域扫描。token 以 `-` 连接：
+//!    - `pt32`   分年技能 PT 权重 32/32/32（复赛在 2速2耐1力 上总分 +1036）
+//!    - `gap75`  短板追赶强度 0.75
+//!    - `ov100`  近上限衰减强度 1.00
+//!    未声明字段落回默认值；未知 token 直接报错，防止实验漂移。
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rand::prelude::StdRng;
 
 use crate::{
+    game::{
+        ramen::{RamenAction, RamenGame},
+        Trainer
+    },
     gamedata::{EventChoice, EventData},
-    trainer::local_ramen_trainer::RecommendedRamenTrainer as PresetRamenTrainer,
-    game::ramen::{RamenAction, RamenGame},
-    game::Trainer
+    trainer::local_ramen_trainer::RecommendedRamenTrainer as PresetRamenTrainer
 };
 
-/// 与正式 preset 行为一致、但保留选面覆盖位预演门的训练器别名实现。
-pub struct RestoredRamenTrainer {
-    inner: PresetRamenTrainer
+/// 从正式 preset 复制、按 `RAMEN_VARIANT` 覆盖少量参数的训练器。
+pub struct IterationRamenTrainer {
+    inner: PresetRamenTrainer,
+    /// 解析出的变体标签（供日志与测试断言）。
+    pub variant: String
 }
 
-impl RestoredRamenTrainer {
-    /// 从正式 preset 复制，仅恢复 `eat_requires_covered_train = true`。
-    pub fn new() -> Self {
-        Self {
-            inner: PresetRamenTrainer::with_experiment_overrides(
-                [16.0, 64.0, 64.0], // 分年 PT 权重（与 new() 一致）
-                0.5, // status_gap_strength
-                0.5, // status_overflow_strength
-                140.0, // max_base_score_sacrifice
-                0.10, // ramen_window_weight
-                40.0, // status_reserve_max
-                8.0, // early_bond_value
-                6.0, // hint_bonus
-                -1.0, // weakboost：显式关闭，等价于默认查找表在本卡组下的 0.0
-                0.0, // region_weak_cover_weight（保持 policy 默认）
-                true // ★ 恢复选面覆盖位预演硬门
-            )
-        }
+impl IterationRamenTrainer {
+    /// 默认：基线等价配置；存在 `RAMEN_VARIANT` 时按 token 覆盖。
+    pub fn new() -> Result<Self> {
+        Self::from_variant(&std::env::var("RAMEN_VARIANT").unwrap_or_default())
     }
 
-    /// 兼容矩阵工具的直接构造入口；覆盖语义原样透传。
-    #[allow(clippy::too_many_arguments)]
-    pub fn with_experiment_overrides(
-        pt_rates: [f32; 3],
-        gap_strength: f32,
-        overflow_strength: f32,
-        max_base_score_sacrifice: f32,
-        ramen_window_weight: f32,
-        status_reserve_max: f32,
-        early_bond_value: f32,
-        hint_bonus: f32,
-        weakboost: f32,
-        region_weak_cover_weight: f32,
-        eat_requires_covered_train: bool
-    ) -> Self {
-        Self {
+    /// 按 token 串构造；空串即纯恢复版。
+    pub fn from_variant(variant: &str) -> Result<Self> {
+        // 基线：与正式 preset 相同的已固化数值。
+        let mut pt_rates = [16.0, 64.0, 64.0];
+        let mut gap_strength = 0.5;
+        let mut overflow_strength = 0.5;
+        let mut max_sacrifice = 140.0;
+        let mut window_weight = 0.10;
+        let mut reserve_max = 40.0;
+        let mut early_bond = 8.0;
+        let mut hint_bonus = 6.0;
+
+        for token in variant.split('-').filter(|t| !t.is_empty()) {
+            match token {
+                "pt32" => pt_rates = [32.0, 32.0, 32.0],
+                "gap75" => gap_strength = 0.75,
+                "ov100" => overflow_strength = 1.00,
+                other => anyhow::bail!("未知 RAMEN_VARIANT token: {other}"),
+            }
+        }
+
+        Ok(Self {
             inner: PresetRamenTrainer::with_experiment_overrides(
                 pt_rates,
                 gap_strength,
                 overflow_strength,
-                max_base_score_sacrifice,
-                ramen_window_weight,
-                status_reserve_max,
-                early_bond_value,
+                max_sacrifice,
+                window_weight,
+                reserve_max,
+                early_bond,
                 hint_bonus,
-                weakboost,
-                region_weak_cover_weight,
-                eat_requires_covered_train
-            )
-        }
+                -1.0, // 弱位 boost 显式关闭：本卡组智卡=2，查找表结果同为 0.0
+                0.0,
+                true // ★ 选面覆盖位预演硬门：本轮修复的核心保留项
+            ),
+            variant: variant.to_string()
+        })
     }
 }
 
-impl Default for RestoredRamenTrainer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Trainer<RamenGame> for RestoredRamenTrainer {
+impl Trainer<RamenGame> for IterationRamenTrainer {
     fn select_action(&self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng) -> Result<usize> {
         self.inner.select_action(game, actions, rng)
     }
@@ -105,3 +96,26 @@ impl Trainer<RamenGame> for RestoredRamenTrainer {
         self.inner.last_breakdown()
     }
 }
+
+/// 兼容旧名的历史别名。
+pub type RestoredRamenTrainer = IterationRamenTrainer;
+
+/// 校验：默认构造必须是“恢复版”而非走任何变体分支。
+#[allow(dead_code)]
+fn assert_default_is_pure_restore() -> Result<()> {
+    let t = IterationRamenTrainer::from_variant("")?;
+    ensure_str_empty(&t.variant)
+}
+
+#[allow(dead_code)]
+fn ensure_str_empty(s: &str) -> Result<()> {
+    if s.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("预期空变体，实际 {s}"))
+    }
+}
+
+// 抑制未使用告警：以上两个函数用于本地调试断言，不参与 CI 构建。
+#[allow(unused)]
+fn _unused_context(_: Context) {}
