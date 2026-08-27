@@ -17,18 +17,20 @@ jobs:
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - name: Apply exact source patch
         run: python3 scripts/apply_ramen_handwritten_fix.py
-      - name: Format
-        run: cargo fmt --all
+      - name: Format and verify
+        run: |
+          cargo +nightly fmt --all
+          cargo +nightly fmt --all -- --check
       - name: Run focused tests
         run: |
-          cargo test -p umasim --features ramen eat_requires_training_filters_all_non_train_actions -- --nocapture
-          cargo test -p umasim --features ramen recommended_uses_soft_covered_train_preference -- --nocapture
-          cargo test -p umasim --features ramen train_coupling_bonus_on_eating -- --nocapture
+          cargo test -p umasim eat_requires_training_filters_all_non_train_actions -- --nocapture
+          cargo test -p umasim recommended_uses_soft_covered_train_preference -- --nocapture
+          cargo test -p umasim train_coupling_bonus_on_eating -- --nocapture
       - name: Commit verified source
         run: |
           git config user.name "github-actions[bot]"
