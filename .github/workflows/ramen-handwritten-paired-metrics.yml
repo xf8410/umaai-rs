@@ -14,10 +14,16 @@ permissions:
 
 jobs:
   paired-metrics:
+    name: paired-metrics (${{ matrix.deck }})
+    strategy:
+      fail-fast: false
+      matrix:
+        deck: ['2速1耐2智']
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       RUNS: '300'
+      DECK_LABEL: ${{ matrix.deck }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,6 +50,7 @@ jobs:
       - name: Build report and record gate decision
         run: |
           python3 - <<'PY'
+          import os
           from pathlib import Path
 
           def read(path):
@@ -55,13 +62,15 @@ jobs:
 
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
+          deck = os.environ['DECK_LABEL']
           keys = [
               ('score_mean', '总分'),
               ('attribute_score_mean', '属性评分'),
               ('skill_pt_mean', '技能PT'),
           ]
-          lines = ['# Ramen handwritten paired metrics（2速1耐2智）', '',
-                   f"基线：上游 ramen_workbench @ a6e1f48，配对局数 {int(base['runs'])}",
+          lines = ['# Ramen handwritten paired metrics', '',
+                   f'配卡：{deck}，基线：上游 ramen_workbench @ a6e1f48，'
+                   f"配对局数 {int(base['runs'])}",
                    '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
           ok = True
           for key, label in keys:
@@ -91,7 +100,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always() && hashFiles('paired-metrics-report.md') != ''
         with:
-          name: ramen-handwritten-paired-metrics-${{ github.run_id }}
+          name: ramen-handwritten-paired-metrics-${{ matrix.deck }}-${{ github.run_id }}
           path: |
             baseline-metrics.txt
             candidate-metrics.txt
