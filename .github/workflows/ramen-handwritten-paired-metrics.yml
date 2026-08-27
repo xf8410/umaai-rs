@@ -34,28 +34,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # sac 峰值定位（老卡组）：candidate 默认已含冠军 gap75/ov100
+          # sacrificial-cap 峰值仍在上升段：老卡组 140→220 单调加速，继续加码探顶
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: sac200
-            variant_env: sac200
+            variant: sac240
+            variant_env: sac240
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: sac220
-            variant_env: sac220
-          # 最大杠杆移植 + 双增益叠加（比赛卡组）
+            variant: sac260
+            variant_env: sac260
+          # 比赛卡组：把 sac 轴抬到与老卡组同步验证的更高点并保持 win 叠加
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac180
-            variant_env: sac180
+            variant: sac220-win200
+            variant_env: sac220-win200
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac180-win200
-            variant_env: sac180-win200
+            variant: sac240-win200
+            variant_env: sac240-win200
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
