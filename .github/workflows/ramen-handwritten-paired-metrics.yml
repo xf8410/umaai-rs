@@ -38,57 +38,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ===== 深水矿脉复扫批：v44 前定值的参数在当前锁定栈上的联合再检 @300 =====
-          # 每卡组 4 个正交探针：cook55 / Y3门禁放松 / 友人饥饿400 / 友人主动250。
-          # 过严格闸门的进入组合复验，最终 r800 定档后并入固化默认值。
-          # 底座：老卡组 = hint9-res60；比赛卡组 = sac180-win200-hint9-res60。
+          # ===== 深水矿脉·组合复验批 @300 =====
+          # 单探针结论（run 33073451266）：cook55 双卡组全绿且幅度最大；
+          # y3loose 双绿、老卡组 PT 增益最高(+18.8)；prw250 仅老卡组绿；
+          # stv400 双负——食材告罄补给权重 300 即上游局部最优，该轴关闭。
+          # 本批验证三个过闸项的联合效应，下一批幸存者升 r800 后固化。
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: hint9-res60-cook55
-            variant_env: hint9-res60-cook55
-            runs_count: '300'
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: hint9-res60-y3loose
-            variant_env: hint9-res60-y3pre15-y3sf25-y3hard10
+            variant: cook55-y3loose
+            variant_env: hint9-res60-cook55-y3pre15-y3sf25-y3hard10
             runs_count: '300'
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: hint9-res60-stv400
-            variant_env: hint9-res60-stv400
-            runs_count: '300'
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: hint9-res60-prw250
-            variant_env: hint9-res60-prw250
+            variant: cook55-y3loose-prw250
+            variant_env: hint9-res60-cook55-y3pre15-y3sf25-y3hard10-prw250
             runs_count: '300'
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac180-hr-cook55
-            variant_env: sac180-win200-hint9-res60-cook55
-            runs_count: '300'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-hr-y3loose
-            variant_env: sac180-win200-hint9-res60-y3pre15-y3sf25-y3hard10
-            runs_count: '300'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-hr-stv400
-            variant_env: sac180-win200-hint9-res60-stv400
-            runs_count: '300'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-hr-prw250
-            variant_env: sac180-win200-hint9-res60-prw250
+            variant: sac180-cy3combo
+            variant_env: sac180-win200-hint9-res60-cook55-y3pre15-y3sf25-y3hard10
             runs_count: '300'
     runs-on: ubuntu-latest
     timeout-minutes: 120
