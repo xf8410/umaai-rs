@@ -1,7 +1,6 @@
-name: Apply ramen handwritten constraint fix
+name: Cleanup one-shot ramen fix tooling
 
 on:
-  workflow_dispatch:
   push:
     branches: [workbench/ramen-mcts-iteration]
     paths: [.github/workflows/apply-ramen-handwritten-fix.yml]
@@ -10,35 +9,18 @@ permissions:
   contents: write
 
 jobs:
-  apply-and-test:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - name: Apply exact source patch
-        run: python3 scripts/apply_ramen_handwritten_fix.py
-      - name: Format and verify
+      - name: Remove one-shot patch tooling
         run: |
-          cargo +nightly fmt --all
-          cargo +nightly fmt --all -- --check
-      - name: Run focused tests
-        run: |
-          cargo test -p umasim eat_requires_training_filters_all_non_train_actions -- --nocapture
-          cargo test -p umasim recommended_uses_soft_covered_train_preference -- --nocapture
-          cargo test -p umasim train_coupling_bonus_on_eating -- --nocapture
-      - name: Commit verified source
-        run: |
+          git rm .github/workflows/apply-ramen-handwritten-fix.yml
+          git rm scripts/apply_ramen_handwritten_fix.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add crates/umasim/src/trainer/local_ramen_trainer.rs
-          if git diff --cached --quiet; then
-            echo "No source change to commit"
-            exit 1
-          fi
-          git commit -m "fix(ramen): enforce post-eat training as the only hard gate"
+          git commit -m "chore: remove one-shot handwritten fix tooling"
           git push origin HEAD:workbench/ramen-mcts-iteration
