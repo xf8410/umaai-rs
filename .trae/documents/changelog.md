@@ -1,6 +1,6 @@
 # UmaAI-RS 变更日志
 
-本文件用于简要记录每次任务的修改内容。
+本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
 
 ## 2026-08-27（本轮）
 - **MCTS rollout 与 fallback 切到正式推荐策略**：搜索评分改用 `RecommendedRamenTrainer`（含吃面联动/体力门限/友人节奏/动态属性平衡等全机制），门控全关时与推荐策略逐位等价；新增 `for_rollout()` 关闭 breakdown 采集避免线程锁争用。诊断工具落盘 `trainer_overhead_diagnostic` 与 `mcts_rollout_switch_verify`
