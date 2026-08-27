@@ -38,12 +38,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # sac230 在 800 局下 PT 翻负（-0.918），补齐候补配方 sac180-win200 的 800 局证据，
-          # 与既有 sac230-win200-r800 报告并列供 A/B 决策
+          # 凹分口径：比赛卡组两候补各 800 局，输出含 max/P50/P90 与 PT 达标率
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac180-win200-r800
+            variant: sac230-win200-hunt
+            variant_env: sac230-win200
+            runs_count: '800'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-win200-hunt
             variant_env: sac180-win200
             runs_count: '800'
     runs-on: ubuntu-latest
@@ -118,6 +123,23 @@ jobs:
           lines.append('')
           conclusion = '三项全部严格提升，通过' if ok else '存在未提升指标，失败'
           lines.append(f'**整体结论：{conclusion}**')
+
+          # —— 凹分参考段（不进闸门；v2 输出键存在才展示）——
+          ref_keys = [
+              ('score_max', '总分max'),
+              ('score_p50', '总分P50'),
+              ('score_p90', '总分P90'),
+              ('skill_pt_max', '技能PT max'),
+              ('skill_pt_p90', '技能PT P90'),
+              ('skill_pt_ge_7500_rate', 'PT≥7500达标率'),
+              ('skill_pt_ge_8000_rate', 'PT≥8000达标率'),
+          ]
+          if all(k in base for k, _ in ref_keys):
+              lines += ['', '## 凹分口径参考（vs 上游基线同种子分布）', '',
+                        '|指标|基线|候选|差值|', '|---|---:|---:|---:|']
+              for key, label in ref_keys:
+                  b, c = num(base, key), num(cand, key)
+                  lines.append(f'|{label}|{b:.3f}|{c:.3f}|{c-b:+.3f}|')
           Path('paired-metrics-report.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           Path('.gate-result').write_text('pass' if ok else 'fail', encoding='utf-8')
           print('\n'.join(lines))
