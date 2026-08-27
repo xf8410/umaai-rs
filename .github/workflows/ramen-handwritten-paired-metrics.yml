@@ -38,28 +38,47 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ===== 深水矿脉·组合复验批 @300 =====
-          # 单探针结论（run 33073451266）：cook55 双卡组全绿且幅度最大；
-          # y3loose 双绿、老卡组 PT 增益最高(+18.8)；prw250 仅老卡组绿；
-          # stv400 双负——食材告罄补给权重 300 即上游局部最优，该轴关闭。
-          # 本批验证三个过闸项的联合效应，下一批幸存者升 r800 后固化。
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: cook55-y3loose
-            variant_env: hint9-res60-cook55-y3pre15-y3sf25-y3hard10
+          # ===== 第三卡组 3速1耐1智（31001）开局批 @300 =====
+          # 底座暂用老卡组冠军栈（hint9-res60），本批建立该卡组参照系。
+          # 情报源：上游 v46/v47 专项优化（未晋级）：放宽长期结构220均分最高、
+          # 对盘权重12/18为正（与另两卡组相反）、属性预留40进前列；
+          # 外加本轮深水双胜者 cook55 / y3loose。
+          # stv 轴已封盘（双卡组皆负）；prw 待该轴在其他卡组定型后再验。
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: base
+            variant_env: ''
             runs_count: '300'
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: cook55-y3loose-prw250
-            variant_env: hint9-res60-cook55-y3pre15-y3sf25-y3hard10-prw250
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: sac220
+            variant_env: sac220
             runs_count: '300'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-cy3combo
-            variant_env: sac180-win200-hint9-res60-cook55-y3pre15-y3sf25-y3hard10
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: win120
+            variant_env: win120
+            runs_count: '300'
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: res40
+            variant_env: res40
+            runs_count: '300'
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: cook55
+            variant_env: cook55
+            runs_count: '300'
+          - deck_slug: deck31001
+            deck_label: 3速1耐1智
+            deck_counts: '31001'
+            variant: y3loose
+            variant_env: y3pre15-y3sf25-y3hard10
             runs_count: '300'
     runs-on: ubuntu-latest
     timeout-minutes: 120
