@@ -13,6 +13,12 @@
 //! 均值外，额外输出分布摘要：总分的 max/P50/P90，技能 PT 的 max 与达标率
 //! （≥7500 / ≥8000）。分位数用最近邻秩法；纯后处理，不改任何模拟路径，
 //! 均值与旧版逐位一致。
+//!
+//! # 并行执行（perf 2026-08-27）
+//!
+//! 局与局之间按 `run_idx` 派生种子、互不依赖，改为 Rayon 并行；
+//! `collect` 保持索引顺序 ⇒ 输出与串行版逐位一致。线程数可用
+//! `RAYON_NUM_THREADS` 覆盖（CI runner 默认即核数）。
 
 use std::{env, fs::File, io::Write};
 
@@ -104,13 +110,16 @@ fn main() -> Result<()> {
 
     println!("composition={label} counts={counts:?} runs={runs}");
 
-    let mut outcomes = Vec::with_capacity(runs as usize);
-    for run_idx in 0..runs {
-        let trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_idx);
-        let outcome = bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_idx, &trainer)
-            .with_context(|| format!("run failed at run_idx={run_idx}"))?;
-        outcomes.push(outcome);
-    }
+    // —— 并行跑批：per-index 种子确定性，输出顺序 = 输入顺序（与旧版逐位一致）——
+    use rayon::prelude::*;
+    let outcomes: Vec<bench::GameOutcome> = (0..runs)
+        .into_par_iter()
+        .map(|run_idx| {
+            let trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), run_idx);
+            bench::run_seeded(UMA, &deck, &INHERIT, BASE_SEED, run_idx, &trainer)
+                .with_context(|| format!("run failed at run_idx={run_idx}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let (score, attribute_score, skill_pt) = metric(&outcomes);
 
