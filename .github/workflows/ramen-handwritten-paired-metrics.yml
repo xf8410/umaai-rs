@@ -34,22 +34,30 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 比赛用卡组：锁定冠军版直接验证
+          # 比赛卡组 2速1力1根1智：本分支优化主战场
+          # champion＝gap75/ov100 锁定默认（上一轮 variant_env 显式为空，修复 plain 字面量泄漏）
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: plain
+            variant: champion
+            variant_env: ''
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: win150
+            variant: pt32
+            variant_env: pt32
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: win200
+            variant_env: win200
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       RUNS: '300'
       DECK_COUNTS: ${{ matrix.deck_counts }}
       DECK_LABEL: ${{ matrix.deck_label }}
-      RAMEN_VARIANT: ${{ matrix.variant == 'plain' && '' || matrix.variant }}
+      RAMEN_VARIANT: ${{ matrix.variant_env }}
     steps:
       - uses: actions/checkout@v4
         with:
