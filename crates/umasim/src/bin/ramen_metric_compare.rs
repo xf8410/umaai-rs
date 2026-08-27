@@ -1,8 +1,11 @@
 //! 配对验证 ramen 手写策略：同一批规则种子比较 baseline 与 candidate。
 //!
-//! 卡组固定为 2速1耐2智（`counts=[2,1,0,0,2]`，各类型代表卡 + 固定友人卡），
-//! 与其他矩阵工具的配卡口径一致。`SIDE` 只作输出标签；真正的配对比较由
-//! 工作流分别在本仓库（candidate）与上游基线 checkout 中运行本程序后完成。
+//! 卡组通过环境变量配置（各类型代表卡 + 固定友人卡），与其他矩阵工具的
+//! 配卡口径一致：
+//! - `DECK_COUNTS` 五位数字「速耐力根智」各类型张数（默认 `21002`＝2速1耐2智）；
+//! - `DECK_LABEL` 自由文本标签（默认跟随 counts）。
+//! `SIDE` 只作输出标签；真正的配对比较由工作流分别在本仓库（candidate）
+//! 与上游基线 checkout 中运行本程序后完成。
 
 use std::{env, fs::File, io::Write};
 
@@ -23,6 +26,24 @@ const INHERIT: InheritInfo = InheritInfo {
     blue_count: [15, 0, 0, 0, 3],
     extra_count: [10, 10, 20, 20, 20, 40]
 };
+
+/// 解析五位数字卡组规格「速耐力根智」，例如 `21002`。
+fn parse_deck_counts(spec: &str) -> Result<[usize; 5]> {
+    let bytes = spec.as_bytes();
+    ensure!(
+        bytes.len() == 5 && bytes.iter().all(u8::is_ascii_digit),
+        "DECK_COUNTS 必须是 5 位数字（速耐力根智）: {spec}"
+    );
+    let counts: [usize; 5] = bytes
+        .iter()
+        .map(|b| (b - b'0') as usize)
+        .collect::<Vec<_>>()
+        .try_into()
+        .expect("长度已校验为 5");
+    let total: usize = counts.iter().sum();
+    ensure!(total == 5, "支援卡总数必须为 5（另有 1 张固定友人卡）: {spec} 合计 {total}");
+    Ok(counts)
+}
 
 fn metric(outcomes: &[bench::GameOutcome]) -> (f64, f64, f64) {
     let n = outcomes.len().max(1) as f64;
@@ -55,10 +76,16 @@ fn main() -> Result<()> {
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
 
-    let composition =
-        DeckComposition { counts: [2, 1, 0, 0, 2], name: "2速1耐2智".to_string() };
+    let counts = parse_deck_counts(&env::var("DECK_COUNTS").unwrap_or_else(|_| "21002".to_string()))?;
+    let label = env::var("DECK_LABEL").unwrap_or_else(|_| format!("{counts:?}"));
+    let composition = DeckComposition {
+        counts,
+        name: label.clone()
+    };
     let reps = bench::select_representatives(&CardPickOpts::default())?;
     let deck = composition.build_deck(&reps.picked, FRIEND)?;
+
+    println!("composition={label} counts={counts:?} runs={runs}");
 
     let mut outcomes = Vec::with_capacity(runs as usize);
     for run_idx in 0..runs {
