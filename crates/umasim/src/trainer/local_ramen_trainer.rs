@@ -2079,7 +2079,7 @@ mod tests {
         use crate::{
             game::{
                 InheritInfo,
-                ramen::{Operation, RamenAction, RamenGame, RamenStage, action::list_ramen_select_actions}
+                ramen::{RamenGame, RamenStage}
             },
             gamedata::init_global,
             utils::{get_workspace_root, init_test_logger}
@@ -2100,7 +2100,7 @@ mod tests {
         let mut local_off = LocalRamenConfig::default();
         local_off.eat_requires_covered_train = false;
         local_off.ramen_window_weight = 0.10;
-        let off = LocalRamenTrainer::with_configs(policy, local_off);
+        let _off = LocalRamenTrainer::with_configs(policy, local_off);
 
         let mut game = RamenGame::newgame(
             102601,
@@ -2116,7 +2116,9 @@ mod tests {
         game.ramen.selected_regions = [0, 1, 4]; // 第1年地区：0 速面 / 1 耐面 / 4 智面
 
         // 局面 A：速低有空间 + 智满 → 最优训练必非智 → 智面 (id 4) 应被门控拒绝
-        game.uma.five_status = [600, 1000, 1000, 1000, 2400];
+        // 「满」一律从实际上限取，不写字面量：上限 = 剧本基值 + 继承，会随剧本数据与
+        // 蓝因子变化，写死数字会让夹具在上限变动后静默失去「满」的语义。
+        game.uma.five_status = [600, 1000, 1000, 1000, game.uma.five_status_limit[4]];
         let pass_rid4 = on.eat_covered_train_passes(&game, 4)?;
         println!("局面A(智满): 智面通过={pass_rid4}");
         if pass_rid4 {
@@ -2125,7 +2127,8 @@ mod tests {
 
         // 局面 B：其他位全满 + 智低 → 最优训练必是智 → 智面 (id 4) 应通过、速面 (id 0) 拒绝
         // 打印落地面后的候选分布确认最优位
-        game.uma.five_status = [3100, 2400, 2200, 2200, 600];
+        game.uma.five_status = game.uma.five_status_limit;
+        game.uma.five_status[4] = 600;
         {
             let mut preview = game.clone();
             preview.stage = RamenStage::Train;

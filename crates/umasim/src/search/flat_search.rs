@@ -83,7 +83,7 @@ enum LeafEvaluator {
 }
 
 impl LeafEvaluator {
-    fn name(&self) -> &'static str {
+    fn _name(&self) -> &'static str {
         match self {
             LeafEvaluator::Handwritten => "handwritten",
             #[cfg(feature = "onnx")]
