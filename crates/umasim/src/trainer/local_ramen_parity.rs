@@ -12,7 +12,7 @@
 //!    - `ov100`  近上限衰减强度 1.00
 //!    未声明字段落回默认值；未知 token 直接报错，防止实验漂移。
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rand::prelude::StdRng;
 
 use crate::{
@@ -43,11 +43,11 @@ impl IterationRamenTrainer {
         let mut pt_rates = [16.0, 64.0, 64.0];
         let mut gap_strength = 0.5;
         let mut overflow_strength = 0.5;
-        let mut max_sacrifice = 140.0;
-        let mut window_weight = 0.10;
-        let mut reserve_max = 40.0;
-        let mut early_bond = 8.0;
-        let mut hint_bonus = 6.0;
+        let max_sacrifice = 140.0;
+        let window_weight = 0.10;
+        let reserve_max = 40.0;
+        let early_bond = 8.0;
+        let hint_bonus = 6.0;
 
         for token in variant.split('-').filter(|t| !t.is_empty()) {
             match token {
@@ -100,22 +100,14 @@ impl Trainer<RamenGame> for IterationRamenTrainer {
 /// 兼容旧名的历史别名。
 pub type RestoredRamenTrainer = IterationRamenTrainer;
 
-/// 校验：默认构造必须是“恢复版”而非走任何变体分支。
-#[allow(dead_code)]
-fn assert_default_is_pure_restore() -> Result<()> {
-    let t = IterationRamenTrainer::from_variant("")?;
-    ensure_str_empty(&t.variant)
-}
+/// 单候选解析：未知 token 必须报错而不是静默回退，防止实验漂移。
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[allow(dead_code)]
-fn ensure_str_empty(s: &str) -> Result<()> {
-    if s.is_empty() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!("预期空变体，实际 {s}"))
+    #[test]
+    fn unknown_variant_token_fails() {
+        let err = IterationRamenTrainer::from_variant("nonsense").expect_err("必须报错");
+        assert!(err.to_string().contains("未知 RAMEN_VARIANT token"));
     }
 }
-
-// 抑制未使用告警：以上两个函数用于本地调试断言，不参与 CI 构建。
-#[allow(unused)]
-fn _unused_context(_: Context) {}
