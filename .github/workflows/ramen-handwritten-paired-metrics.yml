@@ -79,11 +79,13 @@ jobs:
                    '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
           ok = True
           for key, label in keys:
-              delta = num(cand, key) - num(base, key)
+              base_mean = num(base, key)
+              cand_mean = num(cand, key)
+              delta = cand_mean - base_mean
               passed = delta > 0
               ok = ok and passed
               verdict = '提升' if passed else '未提升'
-              lines.append(f'|{label}|{num(base, key):.3f}|{cand[key]:.3f}|{delta:+.3f}|{verdict}|')
+              lines.append(f'|{label}|{base_mean:.3f}|{cand_mean:.3f}|{delta:+.3f}|{verdict}|')
           lines.append('')
           conclusion = '三项全部严格提升，通过' if ok else '存在未提升指标，失败'
           lines.append(f'**整体结论：{conclusion}**')
