@@ -6,6 +6,13 @@
 //! - `DECK_LABEL` 自由文本标签（默认跟随 counts）。
 //! `SIDE` 只作输出标签；真正的配对比较由工作流分别在本仓库（candidate）
 //! 与上游基线 checkout 中运行本程序后完成。
+//!
+//! # 凹分口径（schema v2）
+//!
+//! 比赛取的是「多次育成里最好的一次」，均值会低估可争取的上限。因此除三项
+//! 均值外，额外输出分布摘要：总分的 max/P50/P90，技能 PT 的 max 与达标率
+//! （≥7500 / ≥8000）。分位数用最近邻秩法；纯后处理，不改任何模拟路径，
+//! 均值与旧版逐位一致。
 
 use std::{env, fs::File, io::Write};
 
@@ -43,6 +50,16 @@ fn parse_deck_counts(spec: &str) -> Result<[usize; 5]> {
     let total: usize = counts.iter().sum();
     ensure!(total == 5, "支援卡总数必须为 5（另有 1 张固定友人卡）: {spec} 合计 {total}");
     Ok(counts)
+}
+
+/// 最近邻秩分位数：`p ∈ [0,1]`，空样本返回 0。
+fn percentile(sorted: &[f64], p: f64) -> f64 {
+    let n = sorted.len();
+    if n == 0 {
+        return 0.0;
+    }
+    let idx = ((p * n as f64).ceil() as usize).clamp(1, n) - 1;
+    sorted[idx]
 }
 
 fn metric(outcomes: &[bench::GameOutcome]) -> (f64, f64, f64) {
@@ -96,6 +113,14 @@ fn main() -> Result<()> {
     }
 
     let (score, attribute_score, skill_pt) = metric(&outcomes);
+
+    // —— 凹分口径：分布摘要（纯后处理）——
+    let mut scores: Vec<f64> = outcomes.iter().map(|x| x.score as f64).collect();
+    scores.sort_by(|a, b| a.total_cmp(b));
+    let mut pts: Vec<f64> = outcomes.iter().map(|x| x.skill_pt as f64).collect();
+    pts.sort_by(|a, b| a.total_cmp(b));
+    let rate_ge = |v: &[f64], t: f64| v.iter().filter(|&&x| x >= t).count() as f64 / v.len().max(1) as f64;
+
     let side = env::var("SIDE").unwrap_or_else(|_| "unknown".to_string());
     let path = env::var("OUT").unwrap_or_else(|_| "ramen-metrics.txt".to_string());
     let mut file = File::create(path)?;
@@ -105,5 +130,12 @@ fn main() -> Result<()> {
     writeln!(file, "score_mean={score:.9}")?;
     writeln!(file, "attribute_score_mean={attribute_score:.9}")?;
     writeln!(file, "skill_pt_mean={skill_pt:.9}")?;
+    writeln!(file, "score_max={:.9}", scores.last().copied().unwrap_or(0.0))?;
+    writeln!(file, "score_p50={:.9}", percentile(&scores, 0.50))?;
+    writeln!(file, "score_p90={:.9}", percentile(&scores, 0.90))?;
+    writeln!(file, "skill_pt_max={:.9}", pts.last().copied().unwrap_or(0.0))?;
+    writeln!(file, "skill_pt_p90={:.9}", percentile(&pts, 0.90))?;
+    writeln!(file, "skill_pt_ge_7500_rate={:.9}", rate_ge(&pts, 7500.0))?;
+    writeln!(file, "skill_pt_ge_8000_rate={:.9}", rate_ge(&pts, 8000.0))?;
     Ok(())
 }
