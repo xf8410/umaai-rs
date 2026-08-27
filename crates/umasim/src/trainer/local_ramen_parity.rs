@@ -3,24 +3,25 @@
 //! 锁定决策日志（配对局数 300、基线上游 ramen_workbench @ a6e1f48）：
 //! - 动态属性平衡 gap=0.75 / overflow=1.00（run 33050390060，三绿）
 //! - 邻域收缩确认（run 33051023023）：(0.75, 1.0) 为该机制局部峰值，轴关闭
-//! - 牺牲上限梯度（run 33053124071 → 33065858798 → 33067050082）：
-//!   140→180→200→220→240 单调上升，**260 达峰**（总分 +146.9 / 属性 +109.0 /
-//!   PT +16.230），280 回落至 +144.6——峰值确认，已固化为下述默认值
-//! - PT 权重 32 均匀档在 2速1耐2智 与 2速1力1根1智 双卡组均全负，永久关闭
+//! - 牺牲上限梯度：老卡组 **260 达峰**（800 局复验 +113.7 三绿，run 33067654585），
+//!   已并入默认；比赛卡组 sac230-win200 在 800 局 PT 翻负（run 33068471011），
+//!   sac180-win200 三绿（+30.3 / +27.0 / +1.11）——A/B 定案见凹分口径 hunt 对比
+//! - PT 权重 32 均匀档在两卡组均全负，永久关闭
 //!
 //! 卡组专用配方（在默认之上用 token 叠加）：
 //! - `2速1耐2智`（counts=21002）＝本文件默认即可，无需 token
-//! - `2速1力1根1智`（counts=20111）＝`sac230-win200`
-//!   （run 33067050082：总分 +123.257 / 属性 +109.550 / PT +1.970；
-//!    235 起 PT 过悬崖 −0.033，故此为严格三项正的最优格）
+//! - `2速1力1根1智`（counts=20111）＝`sac180-win200` 或 `sac230-win200`（见决策日志）
 //!
-//! 默认＝上游 preset ＋ 上述已验证增益（sac260 已并入）。环境变量
-//! `RAMEN_VARIANT` 用带数值后缀的 token 做**绝对值覆盖**，可自由组合：
+//! 默认＝上游 preset ＋ 上述已验证增益。环境变量 `RAMEN_VARIANT` 用带数值后缀的
+//! token 做**绝对值覆盖**，可自由组合：
 //! - `gapNNN`   短板追赶强度 NNN%（默认 75）
 //! - `ovNNN`    近上限衰减强度 NNN%（默认 100）
 //! - `winNNN`   吃面训练窗口权重 NNN/1000（默认 100，即 0.10）
 //! - `sacNNN`   长期结构牺牲上限 NNN（默认 260，原上游 preset 为 140）
 //! - `rwcNNN`   地区弱位覆盖加分 NNN（默认 0）
+//! - `bondN`    前期羁绊目标 N*10（默认 bond8 = 80 羁绊起点）
+//! - `hintN`    Hint 加成偏好权重 N*10（默认 hint6 = 60）
+//! - `resN`     当年保留目标体力下限 N（默认 res40；res0 放开留体能约束）
 //! - `pt32`     分年技能 PT 权重 32/32/32（已知双卡组负收益，仅保留复验）
 //! 未声明字段落回默认；未知 token 直接报错，防止实验漂移。
 
@@ -59,13 +60,12 @@ impl IterationRamenTrainer {
         let mut pt_rates = [16.0, 64.0, 64.0];
         let mut gap_strength = 0.75;
         let mut overflow_strength = 1.00;
-        // 牺牲上限：sac 阶梯 260 处达峰（run 33065858798 / 33067050082），
-        // 上游 preset 的 140 明显保守。
+        // 牺牲上限：sac 阶梯 260 处达峰，上游 preset 的 140 明显保守。
         let mut max_sacrifice = 260.0;
         let mut window_weight = 0.10;
-        let reserve_max = 40.0;
-        let early_bond = 8.0;
-        let hint_bonus = 6.0;
+        let mut reserve_max = 40.0;
+        let mut early_bond = 8.0;
+        let mut hint_bonus = 6.0;
         let mut region_weak_cover_weight = 0.0;
 
         for token in variant.split('-').filter(|t| !t.is_empty()) {
@@ -82,6 +82,16 @@ impl IterationRamenTrainer {
             } else if let Some(raw) = token.strip_prefix("rwc") {
                 region_weak_cover_weight =
                     raw.parse().map_err(|_| anyhow!("token {token} 数值段非法: {raw}"))?;
+            } else if let Some(tenths) = token.strip_prefix("bond") {
+                // bond8 → 8.0
+                early_bond =
+                    tenths.parse::<f32>().map_err(|_| anyhow!("token {token} 数值段非法: {tenths}"))? / 10.0;
+            } else if let Some(tenths) = token.strip_prefix("hint") {
+                // hint6 → 6.0
+                hint_bonus =
+                    tenths.parse::<f32>().map_err(|_| anyhow!("token {token} 数值段非法: {tenths}"))? / 10.0;
+            } else if let Some(raw) = token.strip_prefix("res") {
+                reserve_max = raw.parse().map_err(|_| anyhow!("token {token} 数值段非法: {raw}"))?;
             } else {
                 return Err(anyhow!("未知 RAMEN_VARIANT token: {token}"));
             }
@@ -163,6 +173,7 @@ mod tests {
         // 两个卡组的最终配方必须都能干净解析（绝对值覆盖，顺序无关）。
         assert!(IterationRamenTrainer::from_variant("").is_ok());
         assert!(IterationRamenTrainer::from_variant("sac260").is_ok());
+        assert!(IterationRamenTrainer::from_variant("sac180-win200").is_ok());
         assert!(IterationRamenTrainer::from_variant("sac230-win200").is_ok());
         assert_eq!(
             IterationRamenTrainer::from_variant("sac230-win200")
@@ -170,5 +181,19 @@ mod tests {
                 .variant,
             "sac230-win200"
         );
+    }
+
+    #[test]
+    fn expansion_tokens_parse_cleanly() {
+        // 正交初筛批新增的三组 token（老卡组与比赛卡组共用同一解析器）。
+        for v in ["bond12", "hint9", "res60", "sac260-bond12-hint9-res60"] {
+            assert!(
+                IterationRamenTrainer::from_variant(v).is_ok(),
+                "组合 token 应可解析: {v}"
+            );
+        }
+        // 残缺数值段必须报错而不是吞掉。
+        assert!(IterationRamenTrainer::from_variant("bondx").is_err());
+        assert!(IterationRamenTrainer::from_variant("reshigh").is_err());
     }
 }
