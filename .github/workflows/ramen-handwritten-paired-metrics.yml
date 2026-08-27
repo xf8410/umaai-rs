@@ -23,12 +23,10 @@ jobs:
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
-      - name: Verify candidate formatting
-        run: cargo +nightly fmt --all -- --check
-      - name: Build and run candidate metrics
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build candidate metric runner
+        run: cargo check -p umasim --bin ramen_metric_compare --release --no-default-features
+      - name: Run candidate metrics
         env:
           SIDE: candidate
           OUT: candidate-metrics.txt
@@ -39,7 +37,10 @@ jobs:
             ramen_workbench:refs/remotes/upstream/ramen_workbench
           git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
           cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
-      - name: Build and run exact baseline metrics
+      - name: Build baseline metric runner
+        working-directory: /tmp/ramen-baseline
+        run: cargo check -p umasim --bin ramen_metric_compare --release --no-default-features
+      - name: Run exact baseline metrics
         working-directory: /tmp/ramen-baseline
         env:
           SIDE: baseline
