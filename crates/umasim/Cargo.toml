@@ -105,6 +105,11 @@ path = "tools/data_collection/mcts_rollout_switch_verify.rs"
 name = "sim_profiler"
 path = "tools/data_collection/sim_profiler.rs"
 
+[[bin]]
+name = "mine_pair_matrix"
+path = "tools/data_collection/mine_pair_matrix.rs"
+required-features = ["experiment-tools"]
+
 [features]
 default = ["cli", "diag"]
 diag = []
