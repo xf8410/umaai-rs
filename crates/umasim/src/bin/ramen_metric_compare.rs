@@ -55,7 +55,8 @@ fn main() -> Result<()> {
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
 
-    let composition = DeckComposition { counts: [2, 1, 0, 0, 2], name: String::new() };
+    let composition =
+        DeckComposition { counts: [2, 1, 0, 0, 2], name: "2速1耐2智".to_string() };
     let reps = bench::select_representatives(&CardPickOpts::default())?;
     let deck = composition.build_deck(&reps.picked, FRIEND)?;
 
