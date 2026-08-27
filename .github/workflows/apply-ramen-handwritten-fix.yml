@@ -1,0 +1,39 @@
+name: Apply ramen handwritten constraint fix
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/ramen-mcts-iteration
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply exact source patch
+        run: python3 scripts/apply_ramen_handwritten_fix.py
+      - name: Format
+        run: cargo fmt --all
+      - name: Run focused tests
+        run: |
+          cargo test -p umasim --features ramen eat_requires_training_filters_all_non_train_actions -- --nocapture
+          cargo test -p umasim --features ramen recommended_uses_soft_covered_train_preference -- --nocapture
+          cargo test -p umasim --features ramen train_coupling_bonus_on_eating -- --nocapture
+      - name: Commit verified source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/umasim/src/trainer/local_ramen_trainer.rs
+          if git diff --cached --quiet; then
+            echo "No source change to commit"
+            exit 1
+          fi
+          git commit -m "fix(ramen): enforce post-eat training as the only hard gate"
+          git push origin HEAD:workbench/ramen-mcts-iteration
