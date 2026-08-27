@@ -636,34 +636,63 @@ cargo run --release --bin bench_compositions -- --runs 100 --seed 42 --trainer h
 - `test_build_all_composition_decks` — 验证全部构成都生成 5 张普通卡 + 1 张固定友人
 - `umasim::bench` 模块测试（4 个）：seed 双 RNG 可复现 / summarize 统计 / percentile 分位 / 真实 cardDB 默认参数选卡集成验证
 
-## 未来缩减参考（规则固化后讨论）
+## 未来缩减参考（按 2026-08-28 现状重评估）
 
-**前提**：拉面杯目前仍在重构期，公式随时可能调整；规则固化后可重新评估公式测试的密度。
+**当前规模**：318 个测试，相比 2026-08-20 的 121 个增加 197 个，增量主要来自 PR #19-#25 多次重构 + 新模块（`features` / `rng_consistency` / `sampler` / `local_ramen_trainer` REC 系列等）扩展。
 
-**公式测试的价值三层次**：
+**测试价值三层次**（沿用 2026-08-20 评估）：
 1. **回归保护** — 重构期防止破坏；规则固化后价值下降（停止改动后无破坏）
 2. **文档化** — 把预期行为固化在代码里；规则固化后可由正式文档替代
 3. **调试辅助** — 快速定位数值问题；规则固化后价值保留
 
-**建议的缩减方向**（"保留 happy path + 关键边界，删除纯中间态"）：
+**新增风险与挑战**：
+
+- **PR #25 改 5 维上限后 3 个 baseline 过期**：`test_yearly_observability_full_game_and_csv` / `test_ramen_three_stage_action_unchanged` / `test_combined_gate_off_full_game` 三处 hardcode 分数/五维/skill_pt/scenario_pt/score 五维 的快照测试**全部 baseline 作废**，用户确认暂不重抓（user 拍板：**不在本 PR 范围**）。长期方向：把硬守门快照改为基于 attribute 断言（约束在合理范围 + 跨年增量约束），不再依赖固定数值。
+- **race_turn 选 ramen 异常（用户挂起）**：相关守门测试（`test_combined_on_skips_special_search` 放宽为"缓存命中大多数走命中"）说明搜索路径仍有门禁漏洞，测试是**症状缓解**而非根治；先解决根因再评估相关测试。
+- **推荐 preset 仍在迭代**：`trainer/local_ramen_trainer.rs` 的 `recommended_ramen_*` 系列是当前调参基线（cap_discount / region_weak_cover_weight / eat_requires_covered_train 等参数），这些测试对每次 preset 调整都需同步更新——**当前不可压缩**。
+- **新模块测试密度合理但需要持续 review**：`features`（9 个）/ `rng_consistency`（4 个）/ `sampler`（13 个）/ `output/turn_flow`（4 个）/ `output/view`（4 个）等都是按子功能 1:1 测试，新增即测试的覆盖方式合理。
+
+**可缩减方向**（"保留 happy path + 关键边界，删除纯中间态"）：
 
 | 系列 | 当前 | 可压缩到 | 缩减点 |
 |------|------|---------|--------|
-| `test_calc_scenario_deyilv_*` | 5 | 3 | normal_with_rmj_success + normal_with_rmj_fail 合并；super_ramen 单独保留 |
+| `test_calc_scenario_deyilv_*` | 5 | 3 | normal_with_rmj_success + normal_with_rmj_fail 合并；super_ramen + super_ramen_rmj_fail 合并 |
 | `test_apply_training_value_*` | 4 | 2 | status + lower_cap 合并；pt + upper_limit 合并 |
 | `test_calc_effect_*` | 6 | 3 | pt_only + eating 合并；rmj_success 单独；super_ramen + super_ramen_with_split 合并 |
-| `test_list_special_targets_*` | 6 | 3-4 | 保留 full_stock + min_needed + impossible + sorted；no_special_feeling + recipe_with_zero_dim 可视为 full_stock 变体 |
+| `test_list_special_targets_*` | 6 | 3-4 | 保留 full_stock + min_needed + impossible + sorted；no_special_feeling + recipe_with_zero_dim 视为 full_stock 变体 |
 | `test_fill_gauge_*` | 5 | 3 | train_normal + non_train_normal 合并；各自 xiahesu 路径合并；partial 单独保留 |
+| `test_apply_friend_bonus_*`（新增评估） | 7 | 3-4 | 保留 status_pt + vital 集成；no_bonus / other_fields_unchanged / backward_compatible 合并为"无加成时不动"单测 |
+| `test_free_race_gate_*` 系列（新增评估） | 7 | 3 | oguri_two_intervals / quiet_after_done / without_race_candidate / giveup_recorded / skips_nonqualified_turn 合并为多场景单测 |
 
-**预估可缩减 15-20 个**（121 → 约 100-105）。
+**预估可缩减 25-35 个**（318 → 约 285-290）。
 
 **应保留**：
-- 端到端（3 个）：整体回归必备
-- 决策路径（5 个）：三阶段/合并决策是核心设计
-- RMJ/事件（10+ 个）：关键业务流程
+
+- 端到端（4 个）：`test_ramen_game_full_loop` / `test_ramen_silent_loop` / `test_manual_trainer_full_game` / `test_manual_trainer_hint_special_path` — 整体回归必备
+- 决策路径（5+ 个）：`test_three_stage_decision_flow` / `test_combined_decision_*` / `test_three_stage_path_unaffected_by_combined_flag` — 三阶段/合并决策是核心设计
+- RMJ / 事件（10+ 个）：`test_rmj_*` / `test_generate_events_*` / `test_add_mandatory_events_*` / `test_scenario_pt_reset_after_rmj` — 关键业务流程
 - `hint_special_*`（5 个）：每个 case 不同，全保留
+- PR #25 三剧本上限守门（3 个）：`test_newgame_status_limit_is_scenario_base_plus_inherit` / `test_scenario_status_limit_base_contract` / `test_status_final_score_saturates_out_of_range` — 跨剧本契约
+- MCTS rollout / fallback 守门：`test_stages_none_matches_recommended`（REC fallback 守门）/ `test_combined_gate_off_full_game`（门控全关）/ `test_combined_on_skips_special_search`（合并缓存命中）— MCTS 路径契约
+- `microbench_top_fns`（1 个）：性能基线锚点
 - 每个公式函数至少 1 个 happy path
 
-**风险**：游戏更新（数据库调整、剧情加强）时边界 case 测试可能重新需要；公式逻辑本身不会变，风险可控。
+**风险评估**：
 
-**讨论结论（2026-08-20）**：当前不执行——重构期公式随时可能改动，现在缩减可能需要后续重新加；待规则固化后重新评估。
+- **游戏数据库调整**（cards/uma/events.json 数值微调）：边界 case 测试可能重新需要，公式逻辑本身不变——**风险可控**
+- **preset 调参**：每次 cap_discount / region_weak_cover_weight / vital_rest 等参数改动都要同步更新 `recommended_ramen_*` 系列测试——**当前阶段不可压缩**
+- **PR #25 类型修复（status_final_score 越界饱和）**：新约束在契约测试里守门，下次类似修复时需要更新——**低风险**
+
+**结论（2026-08-28）**：当前**不执行缩减**，理由变更：
+
+1. **3 个 baseline 过期未解决**（PR #25 改 5 维上限后 hardcode 测试）——是更优先的决策（重抓 baseline 还是改 attribute 断言），需先解决再考虑缩减
+2. **race_turn 选 ramen 异常未解**（用户挂起）——相关测试是症状缓解，根因未明前不应压缩
+4. **推荐 preset 仍在调优**（cap_discount / region_weak_cover_weight 等参数在多轮优化中）——测试是当前调参基线，**不可压缩**
+5. **当前规则层已基本稳定**（PR #25 是模拟数值修复而非规则改动），但 trainer 机制层（preset / 门禁 / fallback）仍在迭代
+
+**建议复评估时机**：
+
+- preset 冻结后（cap_discount / region_weak_cover_weight / eat_requires_covered_train 等参数全部稳定无后续调优计划）
+- race_turn 异常解决后
+- 3 个 baseline 过期问题解决后（无论重抓还是改 attribute 断言）
+- 至少再积累 1-2 轮重构无大幅模拟数值改动（确认规则层真稳定）
