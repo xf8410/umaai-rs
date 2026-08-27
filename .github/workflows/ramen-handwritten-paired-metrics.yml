@@ -1,0 +1,89 @@
+name: Ramen handwritten paired metrics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [workbench/ramen-mcts-iteration]
+    paths:
+      - .github/workflows/ramen-handwritten-paired-metrics.yml
+      - crates/umasim/src/bin/ramen_metric_compare.rs
+      - crates/umasim/src/trainer/local_ramen_trainer.rs
+      - crates/umasim/src/trainer/ramen_handwritten_trainer.rs
+
+permissions:
+  contents: read
+
+jobs:
+  paired-metrics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      RUNS: '300'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: workbench/ramen-mcts-iteration
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - name: Verify candidate formatting
+        run: cargo +nightly fmt --all -- --check
+      - name: Build and run candidate metrics
+        run: |
+          cargo run -p umasim --bin ramen_metric_compare --release --no-default-features \
+            --env SIDE=candidate --env OUT=../candidate-metrics.txt
+        # The binary reads SIDE/OUT from the process environment; set them explicitly below.
+      - name: Re-run candidate with environment
+        env:
+          SIDE: candidate
+          OUT: candidate-metrics.txt
+        run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
+      - name: Prepare exact upstream baseline checkout
+        run: |
+          git fetch --no-tags https://github.com/xulai1001/umaai-rs.git \
+            ramen_workbench:refs/remotes/upstream/ramen_workbench
+          git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
+          cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
+      - name: Build and run exact baseline metrics
+        working-directory: /tmp/ramen-baseline
+        env:
+          SIDE: baseline
+          OUT: ${{ github.workspace }}/baseline-metrics.txt
+        run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
+      - name: Require all three metrics to improve
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              out = {}
+              for line in Path(path).read_text().splitlines():
+                  key, value = line.split('=', 1)
+                  out[key] = float(value)
+              return out
+
+          base = read('baseline-metrics.txt')
+          cand = read('candidate-metrics.txt')
+          keys = ['score_mean', 'attribute_score_mean', 'skill_pt_mean']
+          print('baseline:', {k: base[k] for k in keys})
+          print('candidate:', {k: cand[k] for k in keys})
+          failed = [k for k in keys if not cand[k] > base[k]]
+          if failed:
+              raise SystemExit('candidate did not strictly improve: ' + ', '.join(failed))
+          print('PASS: score, attribute score, and skill PT all strictly improved')
+          Path('paired-metrics-report.md').write_text(
+              '# Ramen handwritten paired metrics\n\n'
+              + ''.join(f'- {k}: {base[k]:.3f} -> {cand[k]:.3f} ({cand[k]-base[k]:+.3f})\n' for k in keys),
+              encoding='utf-8',
+          )
+          PY
+          cat paired-metrics-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ramen-handwritten-paired-metrics-${{ github.run_id }}
+          path: |
+            baseline-metrics.txt
+            candidate-metrics.txt
+            paired-metrics-report.md
+          retention-days: 30
