@@ -8,6 +8,8 @@ on:
       - .github/workflows/ramen-handwritten-paired-metrics.yml
       - crates/umasim/src/bin/ramen_metric_compare.rs
       - crates/umasim/src/trainer/local_ramen_trainer.rs
+      - crates/umasim/src/trainer/local_ramen_parity.rs
+      - crates/umasim/src/trainer/mod.rs
 
 permissions:
   contents: write
@@ -81,7 +83,7 @@ jobs:
               passed = delta > 0
               ok = ok and passed
               verdict = '提升' if passed else '未提升'
-              lines.append(f'|{label}|{num(base, key):.3f}|{num(cand, key):.3f}|{delta:+.3f}|{verdict}|')
+              lines.append(f'|{label}|{num(base, key):.3f}|{cand[key]:.3f}|{delta:+.3f}|{verdict}|')
           lines.append('')
           conclusion = '三项全部严格提升，通过' if ok else '存在未提升指标，失败'
           lines.append(f'**整体结论：{conclusion}**')
@@ -97,7 +99,7 @@ jobs:
           cp paired-metrics-report.md benchmark-results/paired-metrics-report-latest.md
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add benchmark-results/paired-metrics-report-latest.md
+          git add -f benchmark-results/paired-metrics-report-latest.md
           git diff --cached --quiet || git commit -m "bench: publish paired metrics report run ${{ github.run_id }}"
           git push origin HEAD:workbench/ramen-mcts-iteration
       - uses: actions/upload-artifact@v4
