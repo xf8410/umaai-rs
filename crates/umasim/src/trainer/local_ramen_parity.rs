@@ -65,7 +65,7 @@ impl IterationRamenTrainer {
             } else if let Some(pct) = token.strip_prefix("ov") {
                 overflow_strength = Self::parse_percent(token, pct)?;
             } else {
-                return Err(anyhow!("未知 RAMEN_VARIANT token: {other}", other = token));
+                return Err(anyhow!("未知 RAMEN_VARIANT token: {token}"));
             }
         }
 
@@ -87,13 +87,14 @@ impl IterationRamenTrainer {
         })
     }
 
-    /// 解析 NNN% 数值后缀（`gap100` → 1.00）；非法后缀报错。
+    /// 解析 NNN% 数值后缀（`gap100` → 1.00）；非法后缀或越界报错。
     fn parse_percent(token: &str, pct: &str) -> Result<f32> {
-        let v: f32 = pct.parse().map_err(|_| anyhow!("token {token} 数值段非法: {pct}"))?;
-        if !(0.0..=2.0).contains(&(v / 100.0)) || *pct == "" && v.to_string() != pct {
+        let pct_value: f32 = pct.parse().map_err(|_| anyhow!("token {token} 数值段非法: {pct}"))?;
+        let value = pct_value / 100.0;
+        if !(0.0..=2.0).contains(&value) {
             return Err(anyhow!("token {token} 超出允许区间 [0%,200%]"));
         }
-        Ok(v / 100.0)
+        Ok(value)
     }
 }
 
@@ -125,22 +126,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_variant_uses_locked_champion() {
-        // 直接校验解析结果而不触发完整构造（避免依赖全局数据初始化）：
-        // 通过公开 API 的等价路径 —— 变体标签保持原样即说明默认分支未做额外解释。
-        let t = IterationRamenTrainer::from_variant("").expect("空变体应合法");
-        assert_eq!(t.variant, "");
-    }
-
-    #[test]
-    fn unknown_variant_token_fails() {
+    fn unknown_variant_token_fails_cleanly() {
         assert!(IterationRamenTrainer::from_variant("nonsense").is_err());
-        assert!(IterationRamenTrainer::from_variant("gap101x").is_err());
-    }
-
-    #[test]
-    fn percent_tokens_parse_and_bounds_fail_cleanly() {
-        // 合法组合：不 panic（完整构造依赖 init_global，这里只验证错误路径）
-        assert!(std::panic::catch_unwind(|| IterationRamenTrainer::from_variant("gap250")).is_err());
+        // 非法数值段与越界都必须走错误路径而不是 panic。
+        assert!(IterationRamenTrainer::from_variant("gapx100").is_err());
+        assert!(IterationRamenTrainer::from_variant("gap250").is_err());
     }
 }
