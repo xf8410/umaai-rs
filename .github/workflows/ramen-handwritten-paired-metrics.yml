@@ -7,6 +7,14 @@ on:
         description: 'RAMEN_VARIANT token（空=锁定冠军版）'
         required: false
         default: ''
+      deck_counts:
+        description: '五位数字卡组（速耐力根智，空=默认 21002）'
+        required: false
+        default: ''
+      deck_label:
+        description: '卡组显示名（可留空）'
+        required: false
+        default: ''
   push:
     branches: [workbench/ramen-mcts-iteration]
     paths:
@@ -21,26 +29,36 @@ permissions:
 
 jobs:
   paired-metrics:
-    name: paired-metrics (2速1耐2智 / ${{ matrix.variant }})
+    name: paired-metrics (${{ matrix.deck_label }} / ${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
-        variant: ['win150', 'rwc30', 'sac180']
+        include:
+          # 比赛用卡组：锁定冠军版直接验证
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: plain
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: win150
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       RUNS: '300'
-      DECK_LABEL: '2速1耐2智'
-      RAMEN_VARIANT: ${{ matrix.variant }}
+      DECK_COUNTS: ${{ matrix.deck_counts }}
+      DECK_LABEL: ${{ matrix.deck_label }}
+      RAMEN_VARIANT: ${{ matrix.variant == 'plain' && '' || matrix.variant }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run candidate metrics (${{ matrix.variant }})
+      - name: Run candidate metrics (${{ matrix.deck_slug }} / ${{ matrix.variant }})
         env:
-          SIDE: candidate-${{ matrix.variant }}
+          SIDE: candidate-${{ matrix.deck_slug }}-${{ matrix.variant }}
           OUT: candidate-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Prepare exact upstream baseline checkout
@@ -49,10 +67,10 @@ jobs:
             ramen_workbench:refs/remotes/upstream/ramen_workbench
           git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
           cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
-      - name: Run exact baseline metrics
+      - name: Run exact baseline metrics (${{ matrix.deck_label }})
         working-directory: /tmp/ramen-baseline
         env:
-          SIDE: baseline
+          SIDE: baseline-${{ matrix.deck_slug }}
           OUT: ${{ github.workspace }}/baseline-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Build report and record gate decision
@@ -74,6 +92,7 @@ jobs:
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
           deck = os.environ['DECK_LABEL']
+          counts = os.environ['DECK_COUNTS']
           variant = os.environ['RAMEN_VARIANT'] or '(locked-champion)'
           keys = [
               ('score_mean', '总分'),
@@ -81,8 +100,8 @@ jobs:
               ('skill_pt_mean', '技能PT'),
           ]
           lines = ['# Ramen handwritten paired metrics', '',
-                   f"变体：{variant}，配卡：{deck}，基线：上游 ramen_workbench @ a6e1f48，"
-                   f"配对局数 {int(num(base, 'runs'))}",
+                   f"变体：{variant}，配卡：{deck}（counts={counts}），"
+                   f"基线：上游 ramen_workbench @ a6e1f48，配对局数 {int(num(base, 'runs'))}",
                    '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
           ok = True
           for key, label in keys:
@@ -104,14 +123,14 @@ jobs:
       - name: Publish report to workbench branch
         if: always() && hashFiles('paired-metrics-report.md') != ''
         run: |
-          REPORT="benchmark-results/paired-metrics-${{ matrix.variant }}.md"
+          REPORT="benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
           mkdir -p benchmark-results
           cp paired-metrics-report.md "$REPORT"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           for attempt in 1 2 3 4 5; do
             git add -f "$REPORT"
-            git diff --cached --quiet || git commit -m "bench: publish ${{ matrix.variant }} report run ${{ github.run_id }}"
+            git diff --cached --quiet || git commit -m "bench: publish ${{ matrix.deck_slug }}/${{ matrix.variant }} report run ${{ github.run_id }}"
             if git push origin HEAD:workbench/ramen-mcts-iteration; then
               echo "pushed on attempt $attempt"; break
             fi
@@ -123,7 +142,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always() && hashFiles('paired-metrics-report.md') != ''
         with:
-          name: ramen-paired-metrics-${{ matrix.variant }}-${{ github.run_id }}
+          name: ramen-paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}-${{ github.run_id }}
           path: |
             baseline-metrics.txt
             candidate-metrics.txt
@@ -132,6 +151,6 @@ jobs:
       - name: Enforce strict improvement gate
         run: |
           if [ "$(cat .gate-result)" != "pass" ]; then
-            echo "Gate failed: 变体 ${{ matrix.variant }} 未全部提升，报告见 benchmark-results/paired-metrics-${{ matrix.variant }}.md"
+            echo "Gate failed: ${{ matrix.deck_slug }}/${{ matrix.variant }} 未全部提升，报告见 benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
             exit 1
           fi
