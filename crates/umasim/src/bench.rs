@@ -522,7 +522,7 @@ mod tests {
     use super::*;
     use crate::{
         gamedata::{ramen::RAMENDATA, init_global},
-        trainer::{LoggingTrainer, RamenHandwrittenTrainer},
+        trainer::{LoggingTrainer, RecommendedRamenTrainer},
         utils::{Checks, init_test_logger}
     };
 
@@ -681,8 +681,11 @@ average = [1, 0, 1, 1, 2]
     };
     /// 改动前 `test_stages_none_matches_handwritten`（seed=42, run_idx=0, 本卡组）抓到的分数与五维。
     /// 2026-08-25 更新：不在判定与得意率解耦 + 地区分身缺席优先，模拟数值变化，基线作废重抓。
-    const BASELINE_SCORE: i32 = 52739;
-    const BASELINE_FIVE: [i32; 5] = [2958, 1639, 2200, 845, 855];
+    /// 2026-08-27 更新：bench 与基线测试切到 RecommendedRamenTrainer（手写策略正式推荐版），
+    /// 吃面-训练联动 / 体力门限 / 友人节奏 / 动态属性平衡等全机制接管，模拟数值进一步变化。
+    /// 脚本改 seed=42 重抓：score=63532，five=[3258,2328,2200,1101,829]。
+    const BASELINE_SCORE: i32 = 63532;
+    const BASELINE_FIVE: [i32; 5] = [3258, 2328, 2200, 1101, 829];
 
     /// 把三个地区 id 格式化成与决策日志 `action_desc` 相同的 `地区[a,b,c]`。
     fn region_desc(regions: [usize; 3]) -> String {
@@ -702,7 +705,7 @@ average = [1, 0, 1, 1, 2]
         let _ = init_test_logger("error");
         let _ = init_global();
 
-        let trainer = LoggingTrainer::new(RamenHandwrittenTrainer::new(), 0);
+        let trainer = LoggingTrainer::new(RecommendedRamenTrainer::new(), 0);
         let outcome = run_seeded(TEST_UMA_ID, &TEST_DECK, &TEST_INHERIT, 42, 0, &trainer)?;
         let log = trainer.take_records();
         let mut c = Checks::new();

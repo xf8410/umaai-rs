@@ -12,7 +12,7 @@
 
 # ---------- 常用区：[config_override] 段 ----------
 [config_override]
-uma = 101901
+uma = 100101
 cards = [303124, 303114, 303134, 303094, 303064, 303054]
 blue_count = [15, 0, 0, 0, 3]
 log_level = "info"
@@ -21,7 +21,7 @@ log_level = "info"
 num_threads = 24
 
 # 种马额外属性 [速度, 耐力, 力量, 根性, 智力, 技能点]
-extra_count = [0, 10, 30, 10, 30, 40]
+extra_count = [0, 10, 30, 30, 10, 40]
 
 # 温泉选择是否允许蒙特卡洛自由发挥（安卓马建议 false 减少世界线；须写在本段内才生效）
 mcts_selected_onsen = true

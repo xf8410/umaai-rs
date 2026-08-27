@@ -1398,14 +1398,17 @@ mod tests {
         let a = ramen_search(42)?;
         let b = ramen_search(42)?;
         // 2026-08-25 更新：不在判定与得意率解耦 + 地区分身缺席优先，rollout 数值变化，基准重抓
+        // 2026-08-27 更新：searchable.rs RolloutTrainer 切到 RecommendedRamenTrainer（含吃面
+        // 联动/体力门限/友人节奏/动态属性平衡等机制），搜索基线重新定标。root 阶段下 train
+        // 候选各 action 的 rollout 均值随之整体上移 ~10k。
         let expected: [(u32, f64); 7] = [
-            (16, 52080.687500),
-            (16, 51970.937500),
-            (16, 52575.125000),
-            (16, 52524.562500),
-            (16, 51571.937500),
-            (16, 51569.250000),
-            (16, 51631.687500)
+            (16, 62919.062500),
+            (16, 63398.750000),
+            (16, 63032.000000),
+            (16, 62974.062500),
+            (16, 62740.750000),
+            (16, 63325.625000),
+            (16, 63402.500000)
         ];
         for (i, ((x, y), (en, em))) in a.iter().zip(b.iter()).zip(expected).enumerate() {
             println!(
@@ -1425,7 +1428,7 @@ mod tests {
     /// P1.1 测试 3：合并动作整局冒烟，全程跳过 SpecialSelect
     #[test]
     fn test_ramen_combined_action_full_game_smoke() -> Result<()> {
-        use crate::trainer::RamenHandwrittenTrainer;
+        use crate::trainer::RecommendedRamenTrainer;
 
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(workspace_root)?;
@@ -1441,7 +1444,7 @@ mod tests {
         let mut game = RamenGame::newgame(102601, &deck, inherit)?;
         game.set_rule_master(rule_master);
 
-        let trainer = RamenHandwrittenTrainer::new();
+        let trainer = RecommendedRamenTrainer::new();
         let mut ramen_select_n = 0usize;
         let mut special_select_n = 0usize;
         let mut combined_n = 0usize;
