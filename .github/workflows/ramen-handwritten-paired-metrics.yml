@@ -34,28 +34,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # sacrificial-cap 峰值仍在上升段：老卡组 140→220 单调加速，继续加码探顶
+          # 老卡组：sac260 增量收窄（+5.2），探 280 确认平台起点
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: sac240
-            variant_env: sac240
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: sac260
-            variant_env: sac260
-          # 比赛卡组：把 sac 轴抬到与老卡组同步验证的更高点并保持 win 叠加
+            variant: sac280
+            variant_env: sac280
+          # 比赛卡组：sac220→240 有 PT 悬崖（-0.64），细网格找悬崖前的最优格
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac220-win200
-            variant_env: sac220-win200
+            variant: sac230-win200
+            variant_env: sac230-win200
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac240-win200
-            variant_env: sac240-win200
+            variant: sac235-win200
+            variant_env: sac235-win200
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
