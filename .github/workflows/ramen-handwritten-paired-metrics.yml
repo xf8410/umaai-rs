@@ -37,11 +37,61 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 暂态缓冲矩阵：仅此提交清空，随后三笔代码提交全部零成本滑过，
-        # 最后由真正的扫描矩阵提交一次性点火（对齐 ramen-handwritten 系列 v-next）。
-        include: []
+        include:
+          # ===== 深水矿脉复扫批：v44 前定值的参数在当前锁定栈上的联合再检 @300 =====
+          # 每卡组 4 个正交探针：cook55 / Y3门禁放松 / 友人饥饿400 / 友人主动250。
+          # 过严格闸门的进入组合复验，最终 r800 定档后并入固化默认值。
+          # 底座：老卡组 = hint9-res60；比赛卡组 = sac180-win200-hint9-res60。
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: hint9-res60-cook55
+            variant_env: hint9-res60-cook55
+            runs_count: '300'
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: hint9-res60-y3loose
+            variant_env: hint9-res60-y3pre15-y3sf25-y3hard10
+            runs_count: '300'
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: hint9-res60-stv400
+            variant_env: hint9-res60-stv400
+            runs_count: '300'
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: hint9-res60-prw250
+            variant_env: hint9-res60-prw250
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-hr-cook55
+            variant_env: sac180-win200-hint9-res60-cook55
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-hr-y3loose
+            variant_env: sac180-win200-hint9-res60-y3pre15-y3sf25-y3hard10
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-hr-stv400
+            variant_env: sac180-win200-hint9-res60-stv400
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-hr-prw250
+            variant_env: sac180-win200-hint9-res60-prw250
+            runs_count: '300'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 120
     env:
       RUNS: ${{ matrix.runs_count }}
       DECK_COUNTS: ${{ matrix.deck_counts }}
@@ -49,34 +99,28 @@ jobs:
       RAMEN_VARIANT: ${{ matrix.variant_env }}
     steps:
       - uses: actions/checkout@v4
-        if: matrix.variant != 'noop'
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-        if: matrix.variant != 'noop'
       - name: Run candidate metrics (${{ matrix.deck_slug }} / ${{ matrix.variant }})
-        if: matrix.variant != 'noop'
         env:
           SIDE: candidate-${{ matrix.deck_slug }}-${{ matrix.variant }}
           OUT: candidate-metrics.txt
-        run: echo "buffer run"
+        run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Prepare exact upstream baseline checkout (read-only fetch, no upstream CI)
-        if: matrix.variant != 'noop'
         run: |
           git fetch --no-tags https://github.com/xulai1001/umaai-rs.git \
             ramen_workbench:refs/remotes/upstream/ramen_workbench
           git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
           cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
       - name: Run exact baseline metrics (${{ matrix.deck_label }})
-        if: matrix.variant != 'noop'
         working-directory: /tmp/ramen-baseline
         env:
           SIDE: baseline-${{ matrix.deck_slug }}
           OUT: ${{ github.workspace }}/baseline-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Build report and record gate decision
-        if: matrix.variant != 'noop'
         run: |
           python3 - <<'PY'
           import os
@@ -141,7 +185,7 @@ jobs:
           PY
           cat paired-metrics-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Publish report to workbench branch
-        if: always() && hashFiles('paired-metrics-report.md') != '' && matrix.variant != 'noop'
+        if: always() && hashFiles('paired-metrics-report.md') != ''
         run: |
           REPORT="benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
           mkdir -p benchmark-results
@@ -169,7 +213,6 @@ jobs:
             paired-metrics-report.md
           retention-days: 30
       - name: Enforce strict improvement gate
-        if: matrix.variant != 'noop'
         run: |
           if [ "$(cat .gate-result)" != "pass" ]; then
             echo "Gate failed: ${{ matrix.deck_slug }}/${{ matrix.variant }} 未全部提升，报告见 benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
