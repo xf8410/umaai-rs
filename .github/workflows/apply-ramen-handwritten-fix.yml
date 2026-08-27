@@ -2,6 +2,9 @@ name: Apply ramen handwritten constraint fix
 
 on:
   workflow_dispatch:
+  push:
+    branches: [workbench/ramen-mcts-iteration]
+    paths: [.github/workflows/apply-ramen-handwritten-fix.yml]
 
 permissions:
   contents: write
