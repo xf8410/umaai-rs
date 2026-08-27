@@ -38,18 +38,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 加固复验（RUNS=800）：固化后的最终配方各跑一次
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: champion-r800
-            variant_env: ''
-            runs_count: '800'
+          # sac230 在 800 局下 PT 翻负（-0.918），补齐候补配方 sac180-win200 的 800 局证据，
+          # 与既有 sac230-win200-r800 报告并列供 A/B 决策
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac230-win200-r800
-            variant_env: sac230-win200
+            variant: sac180-win200-r800
+            variant_env: sac180-win200
             runs_count: '800'
     runs-on: ubuntu-latest
     timeout-minutes: 240
