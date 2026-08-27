@@ -56,9 +56,12 @@ jobs:
           def read(path):
               result = {}
               for line in Path(path).read_text().splitlines():
-                  key, value = line.split('=', 1)
-                  result[key] = float(value)
+                  key, _, value = line.partition('=')
+                  result[key] = value.strip()
               return result
+
+          def num(row, key):
+              return float(row[key])
 
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
@@ -70,15 +73,15 @@ jobs:
           ]
           lines = ['# Ramen handwritten paired metrics', '',
                    f'配卡：{deck}，基线：上游 ramen_workbench @ a6e1f48，'
-                   f"配对局数 {int(base['runs'])}",
+                   f"配对局数 {int(num(base, 'runs'))}",
                    '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
           ok = True
           for key, label in keys:
-              delta = cand[key] - base[key]
+              delta = num(cand, key) - num(base, key)
               passed = delta > 0
               ok = ok and passed
               verdict = '提升' if passed else '未提升'
-              lines.append(f'|{label}|{base[key]:.3f}|{cand[key]:.3f}|{delta:+.3f}|{verdict}|')
+              lines.append(f'|{label}|{num(base, key):.3f}|{num(cand, key):.3f}|{delta:+.3f}|{verdict}|')
           lines.append('')
           conclusion = '三项全部严格提升，通过' if ok else '存在未提升指标，失败'
           lines.append(f'**整体结论：{conclusion}**')
