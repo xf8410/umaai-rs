@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ['gap100', 'ov075', 'gap100-ov075']
+        variant: ['win150', 'rwc30', 'sac180']
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
