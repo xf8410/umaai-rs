@@ -34,23 +34,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 比赛卡组 2速1力1根1智：本分支优化主战场
-          # champion＝gap75/ov100 锁定默认（上一轮 variant_env 显式为空，修复 plain 字面量泄漏）
+          # sac 峰值定位（老卡组）：candidate 默认已含冠军 gap75/ov100
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: sac200
+            variant_env: sac200
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: sac220
+            variant_env: sac220
+          # 最大杠杆移植 + 双增益叠加（比赛卡组）
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: champion
-            variant_env: ''
+            variant: sac180
+            variant_env: sac180
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: pt32
-            variant_env: pt32
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: win200
-            variant_env: win200
+            variant: sac180-win200
+            variant_env: sac180-win200
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
