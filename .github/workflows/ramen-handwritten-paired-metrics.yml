@@ -8,7 +8,6 @@ on:
       - .github/workflows/ramen-handwritten-paired-metrics.yml
       - crates/umasim/src/bin/ramen_metric_compare.rs
       - crates/umasim/src/trainer/local_ramen_trainer.rs
-      - crates/umasim/src/trainer/ramen_handwritten_trainer.rs
 
 permissions:
   contents: read
@@ -46,32 +45,32 @@ jobs:
           SIDE: baseline
           OUT: ${{ github.workspace }}/baseline-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
-      - name: Require all three metrics to improve
+      - name: Require score, attribute score, and skill PT all to improve
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           def read(path):
-              out = {}
+              result = {}
               for line in Path(path).read_text().splitlines():
                   key, value = line.split('=', 1)
-                  out[key] = float(value)
-              return out
+                  result[key] = float(value)
+              return result
 
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
           keys = ['score_mean', 'attribute_score_mean', 'skill_pt_mean']
-          print('baseline:', {k: base[k] for k in keys})
-          print('candidate:', {k: cand[k] for k in keys})
-          failed = [k for k in keys if not cand[k] > base[k]]
+          print('baseline:', {key: base[key] for key in keys})
+          print('candidate:', {key: cand[key] for key in keys})
+          failed = [key for key in keys if not cand[key] > base[key]]
           if failed:
               raise SystemExit('candidate did not strictly improve: ' + ', '.join(failed))
-          print('PASS: score, attribute score, and skill PT all strictly improved')
-          Path('paired-metrics-report.md').write_text(
-              '# Ramen handwritten paired metrics\n\n'
-              + ''.join(f'- {k}: {base[k]:.3f} -> {cand[k]:.3f} ({cand[k]-base[k]:+.3f})\n' for k in keys),
-              encoding='utf-8',
+          report = '# Ramen handwritten paired metrics\n\n' + ''.join(
+              f'- {key}: {base[key]:.3f} -> {cand[key]:.3f} ({cand[key] - base[key]:+.3f})\n'
+              for key in keys
           )
+          Path('paired-metrics-report.md').write_text(report, encoding='utf-8')
+          print('PASS: score, attribute score, and skill PT all strictly improved')
           PY
           cat paired-metrics-report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
