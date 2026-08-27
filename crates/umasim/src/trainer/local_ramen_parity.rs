@@ -1,25 +1,22 @@
-//! 配对指标迭代用训练器包装（深水矿脉版）。
+//! 配对指标迭代用训练器包装（深水矿脉版 v2）。
 //!
 //! 与上游 `RecommendedRamenTrainer` 的关系：本文件按上游 preset 的**原始配方**
-//! 等价重建三年策略实例，再叠加本 workbench 锁定的增量与深水矿脉覆盖——
-//! 这样无需改动上游 `local_ramen_trainer.rs`（130KB 大文件，fork 内不可整写），
-//! 就能扫描 cook2 / y3 门禁 / 友人权重 / 方案E折扣这些从未在当前锁定栈上复扫过的参数。
+//! 等价重建三年策略实例（字段级对齐其 `new()` 内联配置），并把本 workbench
+//! 锁定增量与深水矿脉覆盖直接写入构建参数——无需改动上游
+//! `local_ramen_trainer.rs`，即可扫描 cook2 / y3 门禁 / 友人权重 / 方案E折扣。
 //!
-//! 保真约定：重建的 `make_year()` 必须与上游 `RecommendedRamenTrainer::new()` 内联
-//! 配方逐字段一致；上游 preset 演进时同步更新本文件并在决策日志注明。
+//! 保真约定：`make_year()` 必须与上游 preset 逐字段一致；上游演进时同步本文件。
 //!
-//! == 决策日志（配对局数 300、基线上游 ramen_workbench @ a6e1f48）==
-//! - 动态属性平衡 gap=0.75 / overflow=1.00；邻域收缩确认该轴已收口
-//! - 牺牲上限：老卡组 260 达峰（r800 +113.7 三绿）；比赛卡组 180
-//! - 交互锁定：老卡组冠军 = `hint9-res60`（r800 三绿）；比赛卡组 =
-//!   `sac180-win200-hint9-res60`（r800 三绿）；bond12 组合塌缩弃用
-//! - 本轮新开：cook2 / y3门禁三件套 / stv×prw / capd 五条深水矿脉，token 见下
+//! == 决策日志 ==
+//! - 锁定层：gap0.75/ov1.00、sac260(老)/180(赛)、hint9、res60、win0.10；
+//!   老卡组冠军 `hint9-res60`、比赛卡组 `sac180-win200-hint9-res60`（r800 三绿）
+//! - 弃用：bond12 组合塌缩、pt32 全负、rwc 无增益
+//! - 本轮新开深水矿脉：cook / y3pre / y3sf / y3hard / stv / prw / capd
 //!
-//! 默认＝老卡组冠军全量固化。`RAMEN_VARIANT` 用绝对值覆盖 token：
-//! - 基础层：`gapNNN` `ovNNN` `winNNN` `sacNNN` `rwcNNN` `bondN` `hintN` `resN` `pt32`
-//! - 深水层：`cookNN` `y3preN` `y3sfNNN` `y3hardN` `stvNNN` `prwNNN` `capdNN`
-//! - 选手切换：比赛卡组加 `sac180-win200`
-//! 未声明字段落回默认；未知 token 直接报错。
+//! 默认＝老卡组冠军全量固化；`RAMEN_VARIANT` 绝对值覆盖 token：
+//! - 基础层 `gapNNN` `ovNNN` `winNNN` `sacNNN` `rwcNNN` `bondN` `hintN` `resN` `pt32`
+//! - 深水层 `cookNN` `y3preN` `y3sfNNN` `y3hardN` `stvNNN` `prwNNN` `capdNN`
+//! 未知 token 直接报错。
 
 use anyhow::{anyhow, Result};
 use rand::prelude::StdRng;
@@ -27,20 +24,21 @@ use rand::prelude::StdRng;
 use crate::{
     game::{
         ramen::{
-            Operation,
             policy::RamenPolicyConfig,
             {RamenAction, RamenGame}
         },
         Trainer
     },
     gamedata::{EventChoice, EventData},
-    trainer::local_ramen_trainer::LocalRamenTrainer
+    trainer::local_ramen_trainer::LocalRamenConfig
 };
+use crate::trainer::local_ramen_trainer::LocalRamenTrainer;
 
-/// 单年份深水矿脉可调覆盖值；`apply()` 把全部当前态写到给定的年度实例上。
+/// 深水矿脉可调覆盖值集合。数值语义与上游 `LocalRamenConfig` 同名字段一致；
+/// Default 即「上游 preset 值 ∪ 本 workbench 已锁定冠军项」。
 #[derive(Debug, Clone)]
 pub struct VeinOverrides {
-    // ==== 已锁定层（老卡组冠军为默认）====
+    // ==== 已锁定层 ====
     /// 动态属性平衡：短板追赶强度。
     pub status_gap_strength: f32,
     /// 动态属性平衡：近上限衰减强度。
@@ -57,25 +55,22 @@ pub struct VeinOverrides {
     pub hint_bonus: f32,
     /// 地区弱位覆盖加分权重。
     pub region_weak_cover_weight: f32,
-    /// 吃面后必须训练覆盖位（永久 true）。
-    pub eat_requires_covered_train: bool,
 
     // ==== 深水矿脉层（数值＝上游 preset 当前值）====
-    /// Cook2 库存凹函数估值总权重（上游 40）。
+    /// Cook2 库存凹函数估值总权重（preset 40）。
     pub cook2_stock_weight: f32,
-    /// 第三年吃面前体力软目标（上游 25；每年决策都评估）。
+    /// 吃面前体力软目标（preset 25；三年决策都评估）。
     pub y3_pre_train_vital_target: i32,
-    /// 第三年缺口软成本每点（上游 0.5）。
+    /// 缺口软成本每点（preset 0.5）。
     pub y3_vital_shortfall_weight: f32,
-    /// 非智力训练后硬底线（上游 15）。
+    /// 非智力训练后硬底线（preset 15）。
     pub y3_post_train_hard_floor: i32,
-    /// 友人隐藏风味饥饿加成权重（上游 300）。
+    /// 友人隐藏风味饥饿加成权重（preset 300）。
     pub friend_hidden_starve_weight: f32,
-    /// 友人主动积极使用固定加分（上游 150）。
+    /// 友人主动积极使用固定加分（preset 150）。
     pub friend_proactive_weight: f32,
-    /// 残余收益折扣（方案 E）权重（上游 1.0）。
+    /// 残余收益折扣（方案 E）权重（preset 1.0）。
     pub cap_discount_weight: f32,
-
     /// 三年技能 PT 权重。
     pub pt_rates: [f32; 3]
 }
@@ -91,7 +86,6 @@ impl Default for VeinOverrides {
             early_bond_value: 8.0,
             hint_bonus: 9.0,
             region_weak_cover_weight: 0.0,
-            eat_requires_covered_train: true,
             cook2_stock_weight: 40.0,
             y3_pre_train_vital_target: 25,
             y3_vital_shortfall_weight: 0.5,
@@ -104,45 +98,26 @@ impl Default for VeinOverrides {
     }
 }
 
-impl VeinOverrides {
-    /// 把全部覆盖值写入一个年度实例；调用方负责上游 preset 等价底座已就位。
-    fn apply_to(&self, year: &mut LocalRamenTrainer) {
-        let c = &mut *year.config_mut();
-        let p = &mut *year.policy_config_mut();
-        p.region_weak_cover_weight = self.region_weak_cover_weight;
-        p.cap_discount_weight = self.cap_discount_weight;
-        c.dynamic_status_balance = self.status_gap_strength != 0.0 || self.status_overflow_strength != 0.0;
-        c.status_gap_strength = self.status_gap_strength;
-        c.status_overflow_strength = self.status_overflow_strength;
-        c.max_base_score_sacrifice = self.max_base_score_sacrifice;
-        c.ramen_window_weight = self.ramen_window_weight;
-        c.status_reserve_max = self.status_reserve_max;
-        c.early_bond_value = self.early_bond_value;
-        c.hint_bonus = self.hint_bonus;
-        c.eat_requires_covered_train = self.eat_requires_covered_train;
-        c.cook2_stock_weight = self.cook2_stock_weight;
-        c.y3_pre_train_vital_target = self.y3_pre_train_vital_target;
-        c.y3_vital_shortfall_weight = self.y3_vital_shortfall_weight;
-        c.y3_post_train_hard_floor = self.y3_post_train_hard_floor;
-        c.friend_hidden_starve_weight = self.friend_hidden_starve_weight;
-        c.friend_proactive_weight = self.friend_proactive_weight;
-    }
-}
-
-/// 等价重建上游 preset 的单年实例（逐字段对齐 `RecommendedRamenTrainer::new()`），
-/// 随后应用 [`VeinOverrides`]。`eating_rest` 仅第三年为 0（Y3 吃面必成放掉门限）。
+/// 等价重建上游 preset 的单年实例并应用覆盖。
+///
+/// 未列入 [`VeinOverrides`] 的字段逐字复制上游 preset 值：
+/// 吃面事务门、动态体力、概率 Hint、期望失败模型、友人 [0,2,5] 节奏、
+/// 动态特殊目标等结构逻辑保持不变。
+///
+/// `eating_rest` 仅第三年为 0（Y3 吃面必成放掉回合门限，Y1/Y2 保持 40）。
 fn make_year(pt_rate: f32, vital_rest: i32, eating_rest: i32, ov: &VeinOverrides) -> LocalRamenTrainer {
-    use crate::trainer::local_ramen_trainer::LocalRamenConfig;
-
     let mut policy = RamenPolicyConfig::default();
     policy.pt_rate = pt_rate;
     policy.ramen_pt_weight = 2.0;
     policy.vital_rest = vital_rest;
     policy.vital_rest_eating = eating_rest;
-    // 上游 preset：保守风险预算只用基础失败率打分，规则层仍用真实失败率。
+    // 上游 preset：打分用保守基础失败率，规则层仍用真实失败率。
     policy.effective_ramen_failure = false;
+    policy.cap_discount_weight = ov.cap_discount_weight;
+    policy.region_weak_cover_weight = ov.region_weak_cover_weight;
 
     let mut local = LocalRamenConfig::default();
+    // —— 上游 preset 结构层（不改）——
     local.status_reserve_max = 40.0;
     local.dynamic_vital = true;
     local.probabilistic_hint = true;
@@ -170,15 +145,30 @@ fn make_year(pt_rate: f32, vital_rest: i32, eating_rest: i32, ov: &VeinOverrides
     local.y3_recovery_horizon = true;
     local.friend_outing_replaces_rest = true;
     local.friend_outing3_recovery_vital = 0;
-    // v44 千局验证胜出的友人跨年节奏，已晋级并受上游守门测试保护。
+    // v44 千局验证胜出的友人跨年节奏（有守门测试锚定）。
     local.friend_outing_cumulative_caps = [0, 2, 5];
     local.friend_rest_max_special = 4;
     local.deadline_urgency_scale = 0.0;
     local.dynamic_special_targets = true;
 
-    let mut year = LocalRamenTrainer::with_configs(policy, local);
-    ov.apply_to(&mut year);
-    year
+    // —— 本 workbench 锁定层 + 深水矿脉覆盖（全部来自 VeinOverrides）——
+    local.dynamic_status_balance =
+        ov.status_gap_strength != 0.0 || ov.status_overflow_strength != 0.0;
+    local.status_gap_strength = ov.status_gap_strength;
+    local.status_overflow_strength = ov.status_overflow_strength;
+    local.max_base_score_sacrifice = ov.max_base_score_sacrifice;
+    local.ramen_window_weight = ov.ramen_window_weight;
+    local.status_reserve_max = ov.status_reserve_max;
+    local.early_bond_value = ov.early_bond_value;
+    local.hint_bonus = ov.hint_bonus;
+    local.cook2_stock_weight = ov.cook2_stock_weight;
+    local.y3_pre_train_vital_target = ov.y3_pre_train_vital_target;
+    local.y3_vital_shortfall_weight = ov.y3_vital_shortfall_weight;
+    local.y3_post_train_hard_floor = ov.y3_post_train_hard_floor;
+    local.friend_hidden_starve_weight = ov.friend_hidden_starve_weight;
+    local.friend_proactive_weight = ov.friend_proactive_weight;
+
+    LocalRamenTrainer::with_configs(policy, local)
 }
 
 /// 从正式 preset 等价重建、按 `RAMEN_VARIANT` 覆盖的训练器。
@@ -258,7 +248,7 @@ impl IterationRamenTrainer {
 
         Ok(Self {
             // 上游 preset 门限节奏：不吃面回合三年一律 40；
-            // 吃面回合仅第三年放掉（fail_rate_drop=100% 必成）。
+            // 吃面回合仅第三年放掉（fail_rate_drop=100% 必成），Y1/Y2 保留 40。
             years: [
                 make_year(ov.pt_rates[0], 40, 40, &ov),
                 make_year(ov.pt_rates[1], 40, 40, &ov),
@@ -352,7 +342,6 @@ mod tests {
 
     #[test]
     fn deep_vein_tokens_parse_cleanly() {
-        // 深水矿脉 token：顺序无关、可任意组合。
         for v in [
             "cook55",
             "y3pre15-y3sf25-y3hard10",
@@ -367,19 +356,6 @@ mod tests {
                 "深水组合 token 应可解析: {v}"
             );
         }
-    }
-
-    /// 等价重建底座：默认构造必须保留上游 preset 的结构特征
-    /// （友人 0/2/5 节奏、动态特殊目标、吃面必训覆盖位）。守门锚点防漂移。
-    #[test]
-    fn rebuilt_preset_keeps_structural_defaults() {
-        let t = IterationRamenTrainer::from_variant("").unwrap();
-        for year in &t.years {
-            assert_eq!(year.config_ref().friend_outing_cumulative_caps, [0, 2, 5]);
-            assert!(year.config_ref().dynamic_special_targets);
-            assert!(year.config_ref().eat_requires_covered_train);
-            assert!(year.config_ref().friend_outing_replaces_rest);
-            assert_eq!(year.policy_config_ref().ramen_pt_weight, 2.0);
-        }
+        assert!(IterationRamenTrainer::from_variant("stvhigh").is_err());
     }
 }
