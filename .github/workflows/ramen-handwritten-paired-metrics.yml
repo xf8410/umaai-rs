@@ -38,37 +38,25 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ===== 组合复验批：单参数过闸后的组合，@300 局再筛一轮 =====
-          # 老卡组：bond12/hint9/res60 单项全绿（run 33070360212 三报告），
-          #   测两两与三合一的交互项；
-          # 比赛卡组：bond12 在此卡组为负（已排除），hint9+res60 组合待验。
-          # 比赛基线配方按严格闸门纪律定为 sac180-win200（凹分尾部亦占优）。
+          # ===== 终验批：交互组合赢家升格 800 局 =====
+          # 老卡组胜者＝hint9-res60（+156.8/+115.8/+17.5 且 PT 达标率不倒退），
+          #   弃用三合一/bond12 组合：PT 只剩 +2.3、达标率 -0.020 负交互；
+          # 比赛卡组胜者＝sac180-win200-hint9-res60（+124.9/+106.2/+10.2）。
+          # 过线即写入固化默认值。
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: bond12-hint9
-            variant_env: bond12-hint9
-            runs_count: '300'
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: hint9-res60
+            variant: hint9-res60-r800
             variant_env: hint9-res60
-            runs_count: '300'
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: bond12-hint9-res60
-            variant_env: bond12-hint9-res60
-            runs_count: '300'
+            runs_count: '800'
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac180-win200-hint9-res60
+            variant: sac180-win200-hint9-res60-r800
             variant_env: sac180-win200-hint9-res60
-            runs_count: '300'
+            runs_count: '800'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
       RUNS: ${{ matrix.runs_count }}
       DECK_COUNTS: ${{ matrix.deck_counts }}
