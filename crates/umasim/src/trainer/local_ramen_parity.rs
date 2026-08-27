@@ -1,23 +1,27 @@
 //! 配对指标迭代用训练器包装。
 //!
-//! 锁定记录（run 33050390060，配卡 2速1耐2智，基线 @ a6e1f48，300 局配对）：
-//! 动态属性平衡 gap=0.75 / overflow=1.00 三项全绿已固化为默认。
-//! 邻域收缩确认（run 33051023023）：gap=1.0 两组合均 PT 转负，
-//! ov075 总量更低，(0.75, 1.0) 为该机制局部峰值——此轴关闭。
+//! 锁定决策日志（配对局数 300、基线上游 ramen_workbench @ a6e1f48）：
+//! - 动态属性平衡 gap=0.75 / overflow=1.00（run 33050390060，三绿）
+//! - 邻域收缩确认（run 33051023023）：(0.75, 1.0) 为该机制局部峰值，轴关闭
+//! - 牺牲上限梯度（run 33053124071 → 33065858798 → 33067050082）：
+//!   140→180→200→220→240 单调上升，**260 达峰**（总分 +146.9 / 属性 +109.0 /
+//!   PT +16.230），280 回落至 +144.6——峰值确认，已固化为下述默认值
+//! - PT 权重 32 均匀档在 2速1耐2智 与 2速1力1根1智 双卡组均全负，永久关闭
 //!
-//! 多卡组口径（run 33052347955 起支持 DECK_COUNTS 切换卡组）：
-//! 弱位 boost 从显式关闭（-1.0）改为传 0.0＝启用上游查找表
-//! （智卡≤1→5.0 / =2→0.0 / ≥3→2.0）。对已验证的 2速1耐2智两者同为 0，
-//! 结果不变；对其他卡组则与上游 preset 行为严格一致。
+//! 卡组专用配方（在默认之上用 token 叠加）：
+//! - `2速1耐2智`（counts=21002）＝本文件默认即可，无需 token
+//! - `2速1力1根1智`（counts=20111）＝`sac230-win200`
+//!   （run 33067050082：总分 +123.257 / 属性 +109.550 / PT +1.970；
+//!    235 起 PT 过悬崖 −0.033，故此为严格三项正的最优格）
 //!
-//! 默认＝上游 preset ＋ 已验证增益。环境变量 `RAMEN_VARIANT` 用
-//! 带数值后缀的 token 做**绝对值覆盖**，可自由组合：
+//! 默认＝上游 preset ＋ 上述已验证增益（sac260 已并入）。环境变量
+//! `RAMEN_VARIANT` 用带数值后缀的 token 做**绝对值覆盖**，可自由组合：
 //! - `gapNNN`   短板追赶强度 NNN%（默认 75）
 //! - `ovNNN`    近上限衰减强度 NNN%（默认 100）
 //! - `winNNN`   吃面训练窗口权重 NNN/1000（默认 100，即 0.10）
-//! - `sacNNN`   长期结构牺牲上限 NNN（默认 140）
+//! - `sacNNN`   长期结构牺牲上限 NNN（默认 260，原上游 preset 为 140）
 //! - `rwcNNN`   地区弱位覆盖加分 NNN（默认 0）
-//! - `pt32`     分年技能 PT 权重 32/32/32（2速1耐2智上已知负收益，仅保留复验）
+//! - `pt32`     分年技能 PT 权重 32/32/32（已知双卡组负收益，仅保留复验）
 //! 未声明字段落回默认；未知 token 直接报错，防止实验漂移。
 
 use anyhow::{anyhow, Result};
@@ -49,13 +53,15 @@ impl IterationRamenTrainer {
         }
     }
 
-    /// 按 token 串构造；空串即锁定冠军版。
+    /// 按 token 串构造；空串即默认（gap75-ov100-sac260）冠军版。
     pub fn from_variant(variant: &str) -> Result<Self> {
-        // 默认＝上游 preset ＋ 已验证动态属性平衡坐标（见模块注释）。
+        // 默认＝上游 preset ＋ 已验证增益（见模块注释决策日志）。
         let mut pt_rates = [16.0, 64.0, 64.0];
         let mut gap_strength = 0.75;
         let mut overflow_strength = 1.00;
-        let mut max_sacrifice = 140.0;
+        // 牺牲上限：sac 阶梯 260 处达峰（run 33065858798 / 33067050082），
+        // 上游 preset 的 140 明显保守。
+        let mut max_sacrifice = 260.0;
         let mut window_weight = 0.10;
         let reserve_max = 40.0;
         let early_bond = 8.0;
@@ -150,5 +156,19 @@ mod tests {
         // 非法数值段与越界都必须走错误路径而不是 panic。
         assert!(IterationRamenTrainer::from_variant("gapx100").is_err());
         assert!(IterationRamenTrainer::from_variant("gap250").is_err());
+    }
+
+    #[test]
+    fn locked_recipes_parse_cleanly() {
+        // 两个卡组的最终配方必须都能干净解析（绝对值覆盖，顺序无关）。
+        assert!(IterationRamenTrainer::from_variant("").is_ok());
+        assert!(IterationRamenTrainer::from_variant("sac260").is_ok());
+        assert!(IterationRamenTrainer::from_variant("sac230-win200").is_ok());
+        assert_eq!(
+            IterationRamenTrainer::from_variant("sac230-win200")
+                .unwrap()
+                .variant,
+            "sac230-win200"
+        );
     }
 }
