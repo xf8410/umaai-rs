@@ -242,6 +242,21 @@ pub struct LocalRamenConfig {
     /// 不允许随后休息而浪费仅本回合生效的拉面加成。
     pub eat_requires_training: bool,
 
+    /// 吃面后必须训练**该面 at_trains 覆盖位**（C 方案简化约束）
+    ///
+    /// 玩家 87% 吃面训练落在 at_trains 内 vs 自动 52%（seed=61444 决策日志解析），
+    /// 差距根因之一是自动选面（`decide_ramen`）不前瞻"吃完练哪个位"，吃了面却练
+    /// 不覆盖的位导致 youqing/xunlian/失败率下降加成浪费。
+    ///
+    /// 本开关在 `decide_ramen` 吃面候选打分时**预演**该面落地后的 `decide_train`
+    /// （clone 当前状态 + 设 `current_ramen=Some(region_id)` 后跑完整训练打分），
+    /// 若最优动作不是该面 at_trains 覆盖的训练位，则否决该吃面候选（`NEG_INFINITY`）。
+    /// 体力低导致预演最优动作是休息时，`eat_requires_training` 已先否决吃面——
+    /// 两个开关配合实现"吃面后必训练且训练位必须被面覆盖"。
+    ///
+    /// `false` 关闭（退化为仅 `eat_requires_training` 的事务门）；推荐 preset 开启。
+    pub eat_requires_covered_train: bool,
+
     /// 每年吃面前希望具备的训练前体力，单位为体力点。
     ///
     /// 它回答“现在是否应该先恢复”。低于目标不会直接禁止吃面，而会按短缺量收费，
@@ -343,6 +358,7 @@ impl Default for LocalRamenConfig {
             safety_bridge_stock_cost: 0.0,
             cook2_stock_weight: 0.0,
             eat_requires_training: false,
+            eat_requires_covered_train: false,
             y3_pre_train_vital_target: 0,
             y3_post_train_vital_target: 0,
             y3_vital_shortfall_weight: 0.0,
@@ -954,14 +970,19 @@ impl LocalRamenTrainer {
                 }
             }
             // 弱位训练偏好（吃面后训练阶段）：仅在吃面回合（current_ramen.is_some()）
-            // 且训练位被当前吃面 at_trains 覆盖且该位是卡少位（card_type_count ≤ 1）时，
+            // 且训练位被当前吃面 at_trains 覆盖且该位是**未满**的卡少位（card_type_count ≤ 1）时，
             // 按 youqing/xunlian × effective_boost × (2-card_count) 加分。effective_boost 来自
             // `Self::effective_weak_boost`：默认按智卡数查表，实验 override 用配置字段。
+            //
+            // 未满条件：已满位只剩 PT 收益（属性差分=0），弱位加成本意为"培养副属性"，
+            // 对已满位无意义且会错误抬升其训练分（把该位从"无属性价值"变成"虚高最优"）。
             let weak_boost = Self::effective_weak_boost(g, self.config.ramen_weak_train_boost);
             if weak_boost > 0.0 {
                 let tr = tt as usize;
-                if let Some(rid) = g.ramen.current_ramen {
-                    if g.card_type_count[tr] <= 1 {
+                if g.card_type_count[tr] <= 1
+                    && g.uma.five_status[tr] < g.uma.five_status_limit[tr]
+                {
+                    if let Some(rid) = g.ramen.current_ramen {
                         if let Some(region) = RAMENDATA
                             .get()
                             .and_then(|d| d.ramen_region_effect.get(rid))
@@ -1076,6 +1097,42 @@ impl LocalRamenTrainer {
             .ok_or_else(|| anyhow::anyhow!("吃面前训练决策索引越界: {idx}/{}", actions.len()))
     }
 
+    /// "吃面后必训练 at_trains 覆盖位" 门控：该面落地后，最优训练位是否落在面的 at_trains 内
+    ///
+    /// 实现：clone 当前状态，设 `current_ramen = Some(region_id)`（等价吃面已落地，coupling /
+    /// 弱位偏好等吃面后加分正常参与），跑完整 `decide_train`——若最优动作不是 `Train(_)`
+    /// （体力崩 → 休息等，`eat_requires_training` 已挡在 RamenSelect 前，此处防御）或训练位
+    /// 不在该面 `at_trains` 内，返回 `false`（调用方将该吃面候选降为 `NEG_INFINITY`）。
+    ///
+    /// 注意：与 `post_ramen_vital_transition` 的预演同一模式（`current_ramen` + `clear_pending`），
+    /// 不落地随机分身（分身属策略流，预演不消费真实随机）。
+    fn eat_covered_train_passes(&self, g: &RamenGame, region_id: usize) -> Result<bool> {
+        let region = RAMENDATA
+            .get()
+            .and_then(|d| d.ramen_region_effect.get(region_id))
+            .ok_or_else(|| anyhow::anyhow!("地区效果缺失: {region_id}"))?;
+        let mut preview = g.clone();
+        preview.stage = RamenStage::Train;
+        preview.ramen.current_ramen = Some(region_id);
+        preview.ramen.clear_pending();
+        let actions = preview.list_actions()?;
+        let (idx, _) = self.decide_train(&preview, &actions)?;
+        match actions.get(idx).map(|a| a.operation) {
+            Some(Operation::Train(tt)) => {
+                let covered = region.at_trains.contains(&(tt as i32));
+                if !covered {
+                    crate::diag!(
+                        "吃面/{} 落地后最优动作是训练位 {tt:?}，不在该面 at_trains {:?}——否决该面",
+                        region.name,
+                        region.at_trains
+                    );
+                }
+                Ok(covered)
+            }
+            _ => Ok(false)
+        }
+    }
+
     /// 预演第三年某碗面落地后的最佳训练，返回 `(训练类型, 训练前体力, 训练后体力)`。
     ///
     /// 训练前体力回答“本回合是否应先恢复”，训练后体力回答“下一回合是否会崩盘”。
@@ -1143,16 +1200,18 @@ impl LocalRamenTrainer {
             let raw = v.status_pt[..5].iter().sum::<i32>() as f32 + v.status_pt[5] as f32 * 2.0;
             let people = g.distribution().get(tr).map(|x| x.len()).unwrap_or(0) as f32;
             let shining = g.shining_count(tr) as f32;
-            // 弱位放大：at_trains 覆盖的卡少位（card_type_count ≤ 1）raw 按 boost 放大，
+            // 弱位放大：at_trains 覆盖的**未满**卡少位（card_type_count ≤ 1）raw 按 boost 放大，
             // 让"吃面前"选面阶段倾向覆盖弱势属性的面（吃面前瞻，因果断在选面时成立）。
             // 智卡数分组（默认查找表）：1→5.0 / 2→0.0 / 3→2.0。`ramen_weak_train_boost > 0`
             // 时强制 override（实验用），≤0 则走查找表（推荐 preset）。
+            // 未满条件与 `decide_train` 弱位 boost 一致：已满位无属性培养价值，放大只会虚高。
             let weak_boost = Self::effective_weak_boost(g, self.config.ramen_weak_train_boost);
-            let weak_mult = if weak_boost > 0.0 && g.card_type_count[tr] <= 1 {
-                weak_boost
-            } else {
-                1.0
-            };
+            let weak_mult =
+                if weak_boost > 0.0 && g.card_type_count[tr] <= 1 && g.uma.five_status[tr] < g.uma.five_status_limit[tr] {
+                    weak_boost
+                } else {
+                    1.0
+                };
             best = best.max(raw * weak_mult + people * 8.0 + shining * 35.0);
         }
         let effect = (region.xunlian + region.youqing + region.pt_bonus) as f32 + region.hint_count as f32 * 10.0;
@@ -1408,6 +1467,16 @@ impl LocalRamenTrainer {
         };
         for (act, o) in a.iter().zip(out.iter_mut()) {
             if let Some(region_id) = act.ramen {
+                // 吃面后必训练 at_trains 覆盖位（C 方案简化约束）：预演该面落地后的最优训练位，
+                // 若不在 at_trains 内则否决（吃面加成浪费——玩家 87% 覆盖 vs 自动 52%）。
+                if self.config.eat_requires_covered_train
+                    && !self.eat_covered_train_passes(g, region_id)?
+                {
+                    o.score = f32::NEG_INFINITY;
+                    o.reason = "禁止吃面：吃完后最优训练位不在该面 at_trains 内".to_string();
+                    o.add("eat_covered_train_gate", f32::NEG_INFINITY);
+                    continue;
+                }
                 if let Some((train, pre_vital, post_vital)) = self.post_ramen_vital_transition(g, region_id)? {
                     if train != 4
                         && self.config.y3_post_train_hard_floor > 0
@@ -1535,6 +1604,8 @@ impl RecommendedRamenTrainer {
         early_bond_value: f32,
         hint_bonus: f32,
         weakboost: f32,
+        region_weak_cover_weight: f32,
+        eat_requires_covered_train: bool,
     ) -> Self {
         let mut trainer = Self::new();
         for (year, pt_rate) in trainer.years.iter_mut().zip(pt_rates) {
@@ -1548,6 +1619,8 @@ impl RecommendedRamenTrainer {
             year.config.early_bond_value = early_bond_value;
             year.config.hint_bonus = hint_bonus;
             year.config.ramen_weak_train_boost = weakboost;
+            year.policy.config.region_weak_cover_weight = region_weak_cover_weight;
+            year.config.eat_requires_covered_train = eat_requires_covered_train;
         }
         trainer
     }
@@ -1597,6 +1670,9 @@ impl RecommendedRamenTrainer {
             local.effective_ramen_failure = false;
             local.cook2_stock_weight = 40.0;
             local.eat_requires_training = true;
+            // 吃面后必训练 at_trains 覆盖位（C 方案简化约束）：选面时预演"吃完练哪个位"，
+            // 确保吃面加成不被浪费（玩家 87% 覆盖 vs 自动 52%，见 issues.md 对应条目）。
+            local.eat_requires_covered_train = true;
             // 第三年回合级体力门禁（workbench_improve_1 §2）：吃面前软目标 25、
             // 训练后硬底线 15（非智）、缺口软成本 0.5/点——防吃面打空体力后
             // 下回合被迫休息/失败；turn≥70 由有马 +40 / 超级拉面 +20 接管。
@@ -1975,6 +2051,84 @@ mod tests {
         }
         if starve1 > 0.5 {
             panic!("夏合宿前缺口将被自然补足，饥饿加成应归零，实际 {starve1}");
+        }
+        Ok(())
+    }
+
+    /// 吃面后必训练 at_trains 覆盖位（C 方案简化约束）：
+    /// 1. 该面落地后最优训练位在 at_trains 内 → `eat_covered_train_passes` 通过 → 吃面候选保留
+    /// 2. 最优训练位不在该面 at_trains 内 → 门控拒绝（吃面加成将浪费）
+    /// 3. 门控关闭（preset 默认开）且构造同一局面时，吃面候选不会被否决
+    #[test]
+    #[allow(clippy::panic)]
+    fn eat_covered_train_gate_blocks_mismatched_ramen() -> Result<()> {
+        use crate::{
+            game::{
+                InheritInfo,
+                ramen::{Operation, RamenAction, RamenGame, RamenStage, action::list_ramen_select_actions}
+            },
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        // stamina-风格卡组? 用推荐默认卡组（speed 向）——构造"最优训练位=速/耐"但吃"智面"（id 9 at_trains=[4]）
+        // 让 at_trains 覆盖位明显不优 → 门控应拒绝智面
+        let mut local = LocalRamenConfig::default();
+        local.eat_requires_covered_train = true;
+        local.ramen_window_weight = 0.10;
+        let policy = RamenPolicyConfig::default();
+        let on = LocalRamenTrainer::with_configs(policy.clone(), local);
+        let mut local_off = LocalRamenConfig::default();
+        local_off.eat_requires_covered_train = false;
+        local_off.ramen_window_weight = 0.10;
+        let off = LocalRamenTrainer::with_configs(policy, local_off);
+
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        // year2 中期，体力充足：pre_action 应倾向训练
+        // turn 12：无自选比赛（race_grades[12]=0），训练为唯一最佳动作，避免比赛干扰门控断言
+        game.base.turn = 12;
+        game.uma.vital = 100;
+        game.ramen.special_feeling = 2;
+        game.ramen.feeling_stock = [2, 2, 2]; // 库存充足，确保候选面可做
+        game.ramen.selected_regions = [0, 1, 4]; // 第1年地区：0 速面 / 1 耐面 / 4 智面
+
+        // 局面 A：速低有空间 + 智满 → 最优训练必非智 → 智面 (id 4) 应被门控拒绝
+        game.uma.five_status = [600, 1000, 1000, 1000, 2400];
+        let pass_rid4 = on.eat_covered_train_passes(&game, 4)?;
+        println!("局面A(智满): 智面通过={pass_rid4}");
+        if pass_rid4 {
+            panic!("智已满且最优训练非智时，智面 (id 4) 应被 eat_covered_train_passes 拒绝");
+        }
+
+        // 局面 B：其他位全满 + 智低 → 最优训练必是智 → 智面 (id 4) 应通过、速面 (id 0) 拒绝
+        // 打印落地面后的候选分布确认最优位
+        game.uma.five_status = [3100, 2400, 2200, 2200, 600];
+        {
+            let mut preview = game.clone();
+            preview.stage = RamenStage::Train;
+            preview.ramen.current_ramen = Some(4);
+            preview.ramen.clear_pending();
+            let acts = preview.list_actions()?;
+            let (idx, outs) = on.decide_train(&preview, &acts)?;
+            println!("局面B 智面落地最优: {:?} score={:.1}", acts[idx].operation, outs[idx].score);
+        }
+        let pass_rid4_b = on.eat_covered_train_passes(&game, 4)?;
+        let pass_rid0_b = on.eat_covered_train_passes(&game, 0)?;
+        println!("局面B(智低): 智面通过={pass_rid4_b} 速面通过={pass_rid0_b}");
+        if !pass_rid4_b {
+            panic!("其他位全满、只剩智位有空间时，覆盖智位的面 (id 4) 应通过门控");
+        }
+        if pass_rid0_b {
+            panic!("其他位全满、最优训练为智时，不覆盖智位的面 (id 0 速) 应被门控拒绝");
         }
         Ok(())
     }

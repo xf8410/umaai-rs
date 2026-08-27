@@ -140,6 +140,16 @@ pub struct RamenPolicyConfig {
     /// 配对 300 局）：`1.5` 让 speed build Y3 从"速单点"（id 10）转为"速耐力覆盖"
     /// （id 18，bias_sum 更大、无 waste），总加权 +55（speed +387，其余不变）。
     pub region_youqing_weight: f32,
+    /// 地区覆盖"卡少位（副属性）"的加分（每覆盖 1 个卡少位）
+    ///
+    /// 弱位训练偏好（`ramen_weak_train_boost`）让"吃面后练卡少位"收益更高，
+    /// 但地区选择若只按 `bias_sum`（卡多处加权）选"覆盖主属性"的地区，吃面后
+    /// 弱位覆盖的面根本不在候选里——两个环节割裂。本项给覆盖卡少位
+    /// （`card_type_count[t] == 1`，即"带卡少但不是没有"）的地区加分，让年度
+    /// 选区同步偏向副属性，使弱位偏好有兑现空间。
+    ///
+    /// `0.0` 关闭；量级与 `region_youqing_weight` 同族（扫描定，初始 20-40）。
+    pub region_weak_cover_weight: f32,
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
@@ -179,6 +189,7 @@ impl Default for RamenPolicyConfig {
             region_pt_weight: 30.0,
             region_hint_weight: 15.0,
             region_youqing_weight: 1.5,
+            region_weak_cover_weight: 0.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
@@ -771,11 +782,18 @@ impl RamenPolicy {
         // 该地区覆盖的训练位在卡组里的分量；无卡位贡献 0
         let mut bias_sum = 0.0f32;
         let mut n_waste = 0u32;
+        // 弱位覆盖数：at_trains 里"带卡少但不是没有"（card_type_count == 1）的位
+        // —— 与弱位训练偏好（ramen_weak_train_boost）对应：这些位吃面后训练收益被放大，
+        //   地区选择若不覆盖它们，弱位偏好就没有兑现空间。
+        let mut n_weak_cover = 0u32;
         for &t in &region.at_trains {
             let t = t as usize;
             if t < 5 {
                 if bias[t] > 0.0 {
                     bias_sum += bias[t];
+                    if game.card_type_count[t] == 1 {
+                        n_weak_cover += 1;
+                    }
                 } else {
                     n_waste += 1;
                 }
@@ -789,6 +807,7 @@ impl RamenPolicy {
                 + region.youqing as f32 * self.config.region_youqing_weight)
             + region.pt_bonus as f32 * self.config.region_pt_weight
             + region.hint_count as f32 * self.config.region_hint_weight
+            + n_weak_cover as f32 * self.config.region_weak_cover_weight
             - n_waste as f32 * 10.0) // 每个无卡位 -10
     }
 
