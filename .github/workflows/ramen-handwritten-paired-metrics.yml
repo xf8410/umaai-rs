@@ -30,11 +30,6 @@ jobs:
       - name: Verify candidate formatting
         run: cargo +nightly fmt --all -- --check
       - name: Build and run candidate metrics
-        run: |
-          cargo run -p umasim --bin ramen_metric_compare --release --no-default-features \
-            --env SIDE=candidate --env OUT=../candidate-metrics.txt
-        # The binary reads SIDE/OUT from the process environment; set them explicitly below.
-      - name: Re-run candidate with environment
         env:
           SIDE: candidate
           OUT: candidate-metrics.txt
