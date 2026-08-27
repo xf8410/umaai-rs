@@ -37,11 +37,48 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 暂态空矩阵：给随后的 trainer token 扩展提交当零成本缓冲，
-        # 扫描作业在下一个工作流提交里一次性点火。
-        include: []
+        include:
+          # ===== 正交初筛批：4 组从未扫过的参数 × 双卡组 @300 局 =====
+          # 老卡组基线＝固化冠军（sac260 默认），比赛卡组基线＝sac180-win200
+          # bond12：前期羁绊 8→12；hint9：hint 加成 6→9；res60：保留体力 40→60
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: champion-bond12
+            variant_env: bond12
+            runs_count: '300'
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: champion-hint9
+            variant_env: hint9
+            runs_count: '300'
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智
+            deck_counts: '21002'
+            variant: champion-res60
+            variant_env: res60
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-win200-bond12
+            variant_env: sac180-win200-bond12
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-win200-hint9
+            variant_env: sac180-win200-hint9
+            runs_count: '300'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智
+            deck_counts: '20111'
+            variant: sac180-win200-res60
+            variant_env: sac180-win200-res60
+            runs_count: '300'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 120
     env:
       RUNS: ${{ matrix.runs_count }}
       DECK_COUNTS: ${{ matrix.deck_counts }}
