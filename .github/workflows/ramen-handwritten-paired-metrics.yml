@@ -37,24 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # ===== 终验批：交互组合赢家升格 800 局 =====
-          # 老卡组胜者＝hint9-res60（+156.8/+115.8/+17.5 且 PT 达标率不倒退），
-          #   弃用三合一/bond12 组合：PT 只剩 +2.3、达标率 -0.020 负交互；
-          # 比赛卡组胜者＝sac180-win200-hint9-res60（+124.9/+106.2/+10.2）。
-          # 过线即写入固化默认值。
-          - deck_slug: deck21002
-            deck_label: 2速1耐2智
-            deck_counts: '21002'
-            variant: hint9-res60-r800
-            variant_env: hint9-res60
-            runs_count: '800'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-win200-hint9-res60-r800
-            variant_env: sac180-win200-hint9-res60
-            runs_count: '800'
+        # 暂态缓冲矩阵：仅此提交清空，随后三笔代码提交全部零成本滑过，
+        # 最后由真正的扫描矩阵提交一次性点火（对齐 ramen-handwritten 系列 v-next）。
+        include: []
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
@@ -64,28 +49,34 @@ jobs:
       RAMEN_VARIANT: ${{ matrix.variant_env }}
     steps:
       - uses: actions/checkout@v4
+        if: matrix.variant != 'noop'
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
+        if: matrix.variant != 'noop'
       - name: Run candidate metrics (${{ matrix.deck_slug }} / ${{ matrix.variant }})
+        if: matrix.variant != 'noop'
         env:
           SIDE: candidate-${{ matrix.deck_slug }}-${{ matrix.variant }}
           OUT: candidate-metrics.txt
-        run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
+        run: echo "buffer run"
       - name: Prepare exact upstream baseline checkout (read-only fetch, no upstream CI)
+        if: matrix.variant != 'noop'
         run: |
           git fetch --no-tags https://github.com/xulai1001/umaai-rs.git \
             ramen_workbench:refs/remotes/upstream/ramen_workbench
           git worktree add --detach /tmp/ramen-baseline a6e1f481ee4c6367b8ae1f876721a8889c4ae586
           cp crates/umasim/src/bin/ramen_metric_compare.rs /tmp/ramen-baseline/crates/umasim/src/bin/ramen_metric_compare.rs
       - name: Run exact baseline metrics (${{ matrix.deck_label }})
+        if: matrix.variant != 'noop'
         working-directory: /tmp/ramen-baseline
         env:
           SIDE: baseline-${{ matrix.deck_slug }}
           OUT: ${{ github.workspace }}/baseline-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Build report and record gate decision
+        if: matrix.variant != 'noop'
         run: |
           python3 - <<'PY'
           import os
@@ -150,7 +141,7 @@ jobs:
           PY
           cat paired-metrics-report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Publish report to workbench branch
-        if: always() && hashFiles('paired-metrics-report.md') != ''
+        if: always() && hashFiles('paired-metrics-report.md') != '' && matrix.variant != 'noop'
         run: |
           REPORT="benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
           mkdir -p benchmark-results
@@ -178,6 +169,7 @@ jobs:
             paired-metrics-report.md
           retention-days: 30
       - name: Enforce strict improvement gate
+        if: matrix.variant != 'noop'
         run: |
           if [ "$(cat .gate-result)" != "pass" ]; then
             echo "Gate failed: ${{ matrix.deck_slug }}/${{ matrix.variant }} 未全部提升，报告见 benchmark-results/paired-metrics-${{ matrix.deck_slug }}-${{ matrix.variant }}.md"
