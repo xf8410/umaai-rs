@@ -37,20 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # 凹分口径：比赛卡组两候补各 800 局，输出含 max/P50/P90 与 PT 达标率
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac230-win200-hunt
-            variant_env: sac230-win200
-            runs_count: '800'
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac180-win200-hunt
-            variant_env: sac180-win200
-            runs_count: '800'
+        # 暂态空矩阵：给随后的 trainer token 扩展提交当零成本缓冲，
+        # 扫描作业在下一个工作流提交里一次性点火。
+        include: []
     runs-on: ubuntu-latest
     timeout-minutes: 240
     env:
