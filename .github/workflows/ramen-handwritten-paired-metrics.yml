@@ -2,6 +2,11 @@ name: Ramen handwritten paired metrics
 
 on:
   workflow_dispatch:
+    inputs:
+      variant:
+        description: 'RAMEN_VARIANT token（空=纯恢复版）'
+        required: false
+        default: ''
   push:
     branches: [workbench/ramen-mcts-iteration]
     paths:
@@ -16,25 +21,26 @@ permissions:
 
 jobs:
   paired-metrics:
-    name: paired-metrics (${{ matrix.deck }})
+    name: paired-metrics (2速1耐2智 / ${{ matrix.variant }})
     strategy:
       fail-fast: false
       matrix:
-        deck: ['2速1耐2智']
+        variant: ['pt32', 'gap75-ov100', 'pt32-gap75-ov100']
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
       RUNS: '300'
-      DECK_LABEL: ${{ matrix.deck }}
+      DECK_LABEL: '2速1耐2智'
+      RAMEN_VARIANT: ${{ matrix.variant }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: workbench/ramen-mcts-iteration
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Run candidate metrics
+      - name: Run candidate metrics (${{ matrix.variant }})
         env:
-          SIDE: candidate
+          SIDE: candidate-${{ matrix.variant }}
           OUT: candidate-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
       - name: Prepare exact upstream baseline checkout
@@ -68,13 +74,14 @@ jobs:
           base = read('baseline-metrics.txt')
           cand = read('candidate-metrics.txt')
           deck = os.environ['DECK_LABEL']
+          variant = os.environ['RAMEN_VARIANT'] or '(parity)'
           keys = [
               ('score_mean', '总分'),
               ('attribute_score_mean', '属性评分'),
               ('skill_pt_mean', '技能PT'),
           ]
           lines = ['# Ramen handwritten paired metrics', '',
-                   f'配卡：{deck}，基线：上游 ramen_workbench @ a6e1f48，'
+                   f"变体：{variant}，配卡：{deck}，基线：上游 ramen_workbench @ a6e1f48，"
                    f"配对局数 {int(num(base, 'runs'))}",
                    '', '|指标|基线均值|候选均值|变化|结论|', '|---|---:|---:|---:|---|']
           ok = True
@@ -97,17 +104,26 @@ jobs:
       - name: Publish report to workbench branch
         if: always() && hashFiles('paired-metrics-report.md') != ''
         run: |
+          REPORT="benchmark-results/paired-metrics-${{ matrix.variant }}.md"
           mkdir -p benchmark-results
-          cp paired-metrics-report.md benchmark-results/paired-metrics-report-latest.md
+          cp paired-metrics-report.md "$REPORT"
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -f benchmark-results/paired-metrics-report-latest.md
-          git diff --cached --quiet || git commit -m "bench: publish paired metrics report run ${{ github.run_id }}"
-          git push origin HEAD:workbench/ramen-mcts-iteration
+          for attempt in 1 2 3 4 5; do
+            git add -f "$REPORT"
+            git diff --cached --quiet || git commit -m "bench: publish ${{ matrix.variant }} report run ${{ github.run_id }}"
+            if git push origin HEAD:workbench/ramen-mcts-iteration; then
+              echo "pushed on attempt $attempt"; break
+            fi
+            echo "push conflict, retrying ($attempt)"
+            sleep $((attempt * 20))
+            git fetch origin workbench/ramen-mcts-iteration
+            git rebase --autostash FETCH_HEAD || true
+          done
       - uses: actions/upload-artifact@v4
         if: always() && hashFiles('paired-metrics-report.md') != ''
         with:
-          name: ramen-handwritten-paired-metrics-${{ matrix.deck }}-${{ github.run_id }}
+          name: ramen-paired-metrics-${{ matrix.variant }}-${{ github.run_id }}
           path: |
             baseline-metrics.txt
             candidate-metrics.txt
@@ -116,6 +132,6 @@ jobs:
       - name: Enforce strict improvement gate
         run: |
           if [ "$(cat .gate-result)" != "pass" ]; then
-            echo "Gate failed: 指标未全部提升，报告见仓库 benchmark-results/paired-metrics-report-latest.md"
+            echo "Gate failed: 变体 ${{ matrix.variant }} 未全部提升，报告见 benchmark-results/paired-metrics-${{ matrix.variant }}.md"
             exit 1
           fi
