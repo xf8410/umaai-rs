@@ -1,4 +1,4 @@
-//! 配对指标迭代用训练器包装（深水矿脉版 v2）。
+//! 配对指标迭代用训练器包装（深水矿脉版 v3）。
 //!
 //! 与上游 `RecommendedRamenTrainer` 的关系：本文件按上游 preset 的**原始配方**
 //! 等价重建三年策略实例（字段级对齐其 `new()` 内联配置），并把本 workbench
@@ -12,6 +12,17 @@
 //!   老卡组冠军 `hint9-res60`、比赛卡组 `sac180-win200-hint9-res60`（r800 三绿）
 //! - 弃用：bond12 组合塌缩、pt32 全负、rwc 无增益
 //! - 本轮新开深水矿脉：cook / y3pre / y3sf / y3hard / stv / prw / capd
+//!
+//! == 术语订正（2026-08-27，回应"玩家语义不对"）==
+//! 以下名称是上游自创剧本的内部代号，**不是赛马娘原作设定**，中文表述按机制本义改写：
+//! - `stv`(原"饥饿加成") → **食材告罄补给权重**：万能食材(special_feeling)上限4、
+//!   吃面约耗1.5、合宿+2/年末+1/友人外出+2；该权重让"库存见底时那次外出更值得"，
+//!   且外出前若有固定发放将补足缺口则不加分（防溢出）。token 沿用上游 starve 缩写以保
+//!   历史报告可比性
+//! - `prw`(原"主动积极使用") → **友人主动外出保守分**：未来三回合无固定发放且本次
+//!   不溢出时给的外出基础加值（体力维持+完链，不等饥饿才动）
+//! - `capd`(方案E"残余收益折扣") → **主属性近满时副属性打折系数**
+//! 其余字段语义与上游 Rustdoc 一致。
 //!
 //! 默认＝老卡组冠军全量固化；`RAMEN_VARIANT` 绝对值覆盖 token：
 //! - 基础层 `gapNNN` `ovNNN` `winNNN` `sacNNN` `rwcNNN` `bondN` `hintN` `resN` `pt32`
@@ -27,14 +38,14 @@ use crate::{
             policy::RamenPolicyConfig,
             {RamenAction, RamenGame}
         },
+        Game,
         Trainer
     },
     gamedata::{EventChoice, EventData},
-    trainer::local_ramen_trainer::LocalRamenConfig
+    trainer::local_ramen_trainer::{LocalRamenConfig, LocalRamenTrainer}
 };
-use crate::trainer::local_ramen_trainer::LocalRamenTrainer;
 
-/// 深水矿脉可调覆盖值集合。数值语义与上游 `LocalRamenConfig` 同名字段一致；
+/// 深水矿脉可调覆盖值集合。数值语义与上游配置同名字段一致；
 /// Default 即「上游 preset 值 ∪ 本 workbench 已锁定冠军项」。
 #[derive(Debug, Clone)]
 pub struct VeinOverrides {
@@ -58,18 +69,29 @@ pub struct VeinOverrides {
 
     // ==== 深水矿脉层（数值＝上游 preset 当前值）====
     /// Cook2 库存凹函数估值总权重（preset 40）。
+    ///
+    /// 对 A/B/C 三类食材算 sqrt(吃前+2)-sqrt(吃后+2) 的边际稀缺成本，
+    /// 越接近年末/RMJ 达标线该成本越低——控制"囤料还是立刻吃面"的取舍。
     pub cook2_stock_weight: f32,
-    /// 吃面前体力软目标（preset 25；三年决策都评估）。
+    /// 吃面前体力软目标（preset 25；三年吃面决策都评估）。
     pub y3_pre_train_vital_target: i32,
     /// 缺口软成本每点（preset 0.5）。
     pub y3_vital_shortfall_weight: f32,
     /// 非智力训练后硬底线（preset 15）。
     pub y3_post_train_hard_floor: i32,
-    /// 友人隐藏风味饥饿加成权重（preset 300）。
+    /// **食材告罄补给权重**（上游内部代号 starve，preset 300）。
+    ///
+    /// 万能食材被吃面持续消耗；缺口越大，友人外出"+2 补给"越有价值，
+    /// 本权重把该价值计入友人外出评分。外出前若近期有固定发放会先扣减，
+    /// 防止为即将自然回满的库存付费。
     pub friend_hidden_starve_weight: f32,
-    /// 友人主动积极使用固定加分（preset 150）。
+    /// **友人主动外出保守分**（上游内部代号 proactive，preset 150）。
+    ///
+    /// 未来三回合无固定发放、且本次 +2 不溢出时给予的基础加值——
+    /// 让策略在体力尚可时也愿意用友人维持体力线并推进完链，
+    /// 而不是拖到饥饿或被迫休息才使用。
     pub friend_proactive_weight: f32,
-    /// 残余收益折扣（方案 E）权重（preset 1.0）。
+    /// **主属性近满时副属性打折系数**（上游方案 E，preset 1.0）。
     pub cap_discount_weight: f32,
     /// 三年技能 PT 权重。
     pub pt_rates: [f32; 3]
