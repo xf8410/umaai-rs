@@ -15,6 +15,10 @@ on:
         description: '卡组显示名（可留空）'
         required: false
         default: ''
+      runs:
+        description: '配对局数（空=默认 300）'
+        required: false
+        default: ''
   push:
     branches: [workbench/ramen-mcts-iteration]
     paths:
@@ -34,27 +38,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # 老卡组：sac260 增量收窄（+5.2），探 280 确认平台起点
+          # 加固复验（RUNS=800）：固化后的最终配方各跑一次
           - deck_slug: deck21002
             deck_label: 2速1耐2智
             deck_counts: '21002'
-            variant: sac280
-            variant_env: sac280
-          # 比赛卡组：sac220→240 有 PT 悬崖（-0.64），细网格找悬崖前的最优格
+            variant: champion-r800
+            variant_env: ''
+            runs_count: '800'
           - deck_slug: deck20111
             deck_label: 2速1力1根1智
             deck_counts: '20111'
-            variant: sac230-win200
+            variant: sac230-win200-r800
             variant_env: sac230-win200
-          - deck_slug: deck20111
-            deck_label: 2速1力1根1智
-            deck_counts: '20111'
-            variant: sac235-win200
-            variant_env: sac235-win200
+            runs_count: '800'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
-      RUNS: '300'
+      RUNS: ${{ matrix.runs_count }}
       DECK_COUNTS: ${{ matrix.deck_counts }}
       DECK_LABEL: ${{ matrix.deck_label }}
       RAMEN_VARIANT: ${{ matrix.variant_env }}
@@ -69,7 +69,7 @@ jobs:
           SIDE: candidate-${{ matrix.deck_slug }}-${{ matrix.variant }}
           OUT: candidate-metrics.txt
         run: cargo run -p umasim --bin ramen_metric_compare --release --no-default-features
-      - name: Prepare exact upstream baseline checkout
+      - name: Prepare exact upstream baseline checkout (read-only fetch, no upstream CI)
         run: |
           git fetch --no-tags https://github.com/xulai1001/umaai-rs.git \
             ramen_workbench:refs/remotes/upstream/ramen_workbench
