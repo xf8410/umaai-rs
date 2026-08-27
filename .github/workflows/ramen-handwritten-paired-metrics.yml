@@ -38,50 +38,37 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ===== 第三卡组 3速1耐1智（31001）开局批 @300 =====
-          # 底座暂用老卡组冠军栈（hint9-res60），本批建立该卡组参照系。
-          # 情报源：上游 v46/v47 专项优化（未晋级）：放宽长期结构220均分最高、
-          # 对盘权重12/18为正（与另两卡组相反）、属性预留40进前列；
-          # 外加本轮深水双胜者 cook55 / y3loose。
-          # stv 轴已封盘（双卡组皆负）；prw 待该轴在其他卡组定型后再验。
+          # ===== 终验批：双冠军卡组 r800 定档 ＋ 31001 组合筛选 =====
+          # 深水矿脉终局：cook55×y3loose 双卡组均无交互惩罚且 P90/PT 面全绿。
+          # prw250 弃用（组合中稀释均分）。31001 六探针全绿，先筛两种组合再定其 r800。
+          # 本批同时是新编译速度档（O3+thinLTO+CGU1 / rayon 并行）的实测载体：
+          # candidate 与上游基线使用同一套新开关重编，配对口径不变。
+          - deck_slug: deck21002
+            deck_label: 2速1耐2智·final-v3
+            deck_counts: '21002'
+            variant: hint9-res60-cook55-y3loose
+            variant_env: hint9-res60-cook55-y3pre15-y3sf25-y3hard10
+            runs_count: '800'
+          - deck_slug: deck20111
+            deck_label: 2速1力1根1智·final-v3
+            deck_counts: '20111'
+            variant: sac180-cy3-combo
+            variant_env: sac180-win200-hint9-res60-cook55-y3pre15-y3sf25-y3hard10
+            runs_count: '800'
           - deck_slug: deck31001
-            deck_label: 3速1耐1智
+            deck_label: 3速1耐1智·comboA
             deck_counts: '31001'
-            variant: base
-            variant_env: ''
+            variant: c+y3+w12
+            variant_env: cook55-y3pre15-y3sf25-y3hard10-win120
             runs_count: '300'
           - deck_slug: deck31001
-            deck_label: 3速1耐1智
+            deck_label: 3速1耐1智·comboB
             deck_counts: '31001'
-            variant: sac220
-            variant_env: sac220
-            runs_count: '300'
-          - deck_slug: deck31001
-            deck_label: 3速1耐1智
-            deck_counts: '31001'
-            variant: win120
-            variant_env: win120
-            runs_count: '300'
-          - deck_slug: deck31001
-            deck_label: 3速1耐1智
-            deck_counts: '31001'
-            variant: res40
-            variant_env: res40
-            runs_count: '300'
-          - deck_slug: deck31001
-            deck_label: 3速1耐1智
-            deck_counts: '31001'
-            variant: cook55
-            variant_env: cook55
-            runs_count: '300'
-          - deck_slug: deck31001
-            deck_label: 3速1耐1智
-            deck_counts: '31001'
-            variant: y3loose
-            variant_env: y3pre15-y3sf25-y3hard10
+            variant: c+y3+w12+r40
+            variant_env: cook55-y3pre15-y3sf25-y3hard10-win120-res40
             runs_count: '300'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
       RUNS: ${{ matrix.runs_count }}
       DECK_COUNTS: ${{ matrix.deck_counts }}
