@@ -10,9 +10,9 @@
 //!    - `pt32`   分年技能 PT 权重 32/32/32（复赛在 2速2耐1力 上总分 +1036）
 //!    - `gap75`  短板追赶强度 0.75
 //!    - `ov100`  近上限衰减强度 1.00
-//!    未声明字段落回默认值；未知 token 直接报错，防止实验漂移。
+//!    未声明字段落回默认值；未知 token 触发 panic，防止实验漂移。
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rand::prelude::StdRng;
 
 use crate::{
@@ -25,6 +25,9 @@ use crate::{
 };
 
 /// 从正式 preset 复制、按 `RAMEN_VARIANT` 覆盖少量参数的训练器。
+///
+/// `new()` 保持与原 [`PresetRamenTrainer`] 相同的返回类型（`Self`），
+/// 这样既有二进制无需改动即可编译；变体非法时直接 panic 暴露配置错误。
 pub struct IterationRamenTrainer {
     inner: PresetRamenTrainer,
     /// 解析出的变体标签（供日志与测试断言）。
@@ -33,8 +36,12 @@ pub struct IterationRamenTrainer {
 
 impl IterationRamenTrainer {
     /// 默认：基线等价配置；存在 `RAMEN_VARIANT` 时按 token 覆盖。
-    pub fn new() -> Result<Self> {
-        Self::from_variant(&std::env::var("RAMEN_VARIANT").unwrap_or_default())
+    pub fn new() -> Self {
+        let variant = std::env::var("RAMEN_VARIANT").unwrap_or_default();
+        match Self::from_variant(&variant) {
+            Ok(t) => t,
+            Err(e) => panic!("RAMEN_VARIANT 无效: {e}")
+        }
     }
 
     /// 按 token 串构造；空串即纯恢复版。
@@ -54,7 +61,7 @@ impl IterationRamenTrainer {
                 "pt32" => pt_rates = [32.0, 32.0, 32.0],
                 "gap75" => gap_strength = 0.75,
                 "ov100" => overflow_strength = 1.00,
-                other => anyhow::bail!("未知 RAMEN_VARIANT token: {other}"),
+                other => return Err(anyhow!("未知 RAMEN_VARIANT token: {other}"))
             }
         }
 
@@ -100,14 +107,23 @@ impl Trainer<RamenGame> for IterationRamenTrainer {
 /// 兼容旧名的历史别名。
 pub type RestoredRamenTrainer = IterationRamenTrainer;
 
-/// 单候选解析：未知 token 必须报错而不是静默回退，防止实验漂移。
+/// 变体解析必须严格：未知 token 报错而不是静默回退。
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn unknown_variant_token_fails() {
-        let err = IterationRamenTrainer::from_variant("nonsense").expect_err("必须报错");
+        let err = match IterationRamenTrainer::from_variant("nonsense") {
+            Err(e) => e,
+            Ok(_) => panic!("未知 token 应报错")
+        };
         assert!(err.to_string().contains("未知 RAMEN_VARIANT token"));
+    }
+
+    #[test]
+    fn empty_variant_is_pure_restore() {
+        let t = IterationRamenTrainer::from_variant("").expect("空变体应合法");
+        assert_eq!(t.variant, "");
     }
 }
