@@ -2,6 +2,13 @@
 
 本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
 
+## 2026-08-29
+- **MCTS rollout 诊断运行时屏蔽**：`output/diagnostic` 新增运行时开关（`AtomicBool` + `set_enabled` + RAII `DiagGuard`，嵌套安全），`diag!` 宏升级为编译期 + 运行时双门控；8 处含重计算参数的 explain 块外加 `if enabled()`；`DiagGuard` 挂 `FlatSearch::search_with_terminal` 覆盖 rollout 边界（多局并行时全局抑制为已知局限）；basic.rs Begin 分隔线 `println!` 改 `diag!` 纳入日志系统
+- **决策理由输出（新功能）**：新增 `output/reason` 模块——险胜回合（与中选者分差 < `reason_gap_threshold`，默认 150、`0` 禁用）输出决策理由：中选行只显选项内容；未中选显示按口径评分降序前 `reason_max_display`（默认 5）个候选的 `±分差` 与维度子项（白名单简称 速/耐/力/根/智/PT，PT 由 `pt_score` 除回系数还原为点数，其余 19 维不进分析）；原始数据经 `DecisionReasonSink` 发出（umasim 默认 `NoopSink` 静默，下游可实现通道接 `LogJsonSink`）；两项参数走 `MctsConfig`/`OverrideMctsConfig`/`SearchConfig` 完整覆盖链
+- **日志降级**：`log_terminal_breakdown` 的 `[终局差异]` 由 info 降 debug，屏幕默认（info 级）不再每候选刷行，需要时调 `log_level` 恢复
+- **地区选择 diag 注记**：`apply_region_selection` 输出补"手写逻辑"标记，与 MCTS 搜索回合区分（RegionSelect 当前不在 `ramen_search_stages` 内、走推荐策略 fallback 不搜索）
+- **`LESSONS_LEARNED.md`**：诊断屏蔽任务的复盘总结（技术线 + 工作流程线）
+
 ## 2026-08-27
 - **MCTS rollout/fallback 切到 RecommendedRamenTrainer（单提交合入）**：搜索评分改用 `RecommendedRamenTrainer`（含吃面联动/体力门限/友人节奏/动态属性平衡等全机制），门控全关时与推荐策略逐位等价；新增 `for_rollout()` 关闭 breakdown 避免锁争用。诊断工具落盘 `trainer_overhead_diagnostic` 与 `mcts_rollout_switch_verify`；硬守门 4 测试基线重抓；`test_combined_on_skips_special_search` 放宽为「SpecialSelect 大多数走缓存命中」
 - **搜索掉分待调优**：search_n=4/128 × 30/10 局对照，搜索结果均略低于纯推荐策略（train_only -3k~-13k、train+ramen -2k~-15k），疑 rollout 评估路径 / radical_factor=0 取 mean 口径 / Score vs Pt 口径需后续调试
