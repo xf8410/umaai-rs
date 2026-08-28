@@ -110,6 +110,11 @@ name = "mine_pair_matrix"
 path = "tools/data_collection/mine_pair_matrix.rs"
 required-features = ["experiment-tools"]
 
+[[bin]]
+name = "hw_vs_mcts_compare"
+path = "tools/data_collection/hw_vs_mcts_compare.rs"
+required-features = ["experiment-tools"]
+
 [features]
 default = ["cli", "diag"]
 diag = []
