@@ -653,7 +653,8 @@ impl LocalRamenTrainer {
             let cur_score = cons.five_status_final_score.get(cur).copied().unwrap_or(0) as f32;
             let next_score = cons.five_status_final_score.get(next).copied().unwrap_or(0) as f32;
             let exact_margin = (next_score - cur_score) * self.policy.config.status_rate;
-            let gap_bonus = self.config.status_gap_strength * (leading - completion[i]).max(0.0);
+            let gap_strength = self.effective_status_gap(g);
+            let gap_bonus = gap_strength * (leading - completion[i]).max(0.0);
             let near_cap = ((completion[i] - 0.70) / 0.30).clamp(0.0, 1.0);
             let excess_cards = (g.card_type_count[i] - 2).max(0) as f32;
             let overflow = self.config.status_overflow_strength
@@ -790,6 +791,21 @@ impl LocalRamenTrainer {
         }
         let s = g.card_type_count[0];
         if s >= 3 { 6.0 } else { self.policy.config.event_vital_weight }
+    }
+
+    /// 配卡自适应：属性短板追赶力度的 effective 值。
+    ///
+    /// 挖矿配对矩阵（15 局同 seed A/B）结论：
+    /// - 速卡 ≥3（3速1耐1智）：1.0（速卡多意味着耐力/根性是绝对短板，需更强追赶，+1006 分）
+    /// - 其他配卡：保持 preset 默认 0.5
+    ///
+    /// 当前 preset 写死 0.5；本方法在 `composition_adaptive=true` 时按上表覆盖。
+    fn effective_status_gap(&self, g: &RamenGame) -> f32 {
+        if !self.config.composition_adaptive {
+            return self.config.status_gap_strength;
+        }
+        let s = g.card_type_count[0];
+        if s >= 3 { 1.0 } else { self.config.status_gap_strength }
     }
 
     fn vital_factor(t: i32) -> f32 {
