@@ -707,8 +707,9 @@ impl LocalRamenTrainer {
             return 0.0;
         }
         // 默认 (=0.0) 启用按 build 自适应查表（推荐 preset 默认行为）
+        // 挖矿配对矩阵验证：智卡≤1 时 weakboost=15 比 5.0 多 +212 分（3速1耐1智）
         let w = g.card_type_count[4];
-        if w <= 1 { 5.0 } else if w == 2 { 0.0 } else { 2.0 }
+        if w <= 1 { 15.0 } else if w == 2 { 0.0 } else { 2.0 }
     }
 
     /// 配卡自适应：cook2 库存权重的 effective 值。

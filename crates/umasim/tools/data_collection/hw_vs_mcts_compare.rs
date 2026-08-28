@@ -45,9 +45,9 @@ fn composition(index: usize) -> Result<DeckComposition> {
 }
 
 fn main() -> Result<()> {
-    let composition_index: usize = env::var("配卡索引")?.parse()?;
-    let search_n: usize = env::var("搜索次数").map_or(Ok(1024usize), |v| v.parse())?;
-    let runs: u64 = env::var("每策略局数").map_or(Ok(10u64), |v| v.parse())?;
+    let composition_index: usize = env::var("COMP_IDX")?.parse()?;
+    let search_n: usize = env::var("SEARCH_N").map_or(Ok(1024usize), |v| v.parse())?;
+    let runs: u64 = env::var("RUNS").map_or(Ok(10u64), |v| v.parse())?;
 
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;
@@ -55,11 +55,17 @@ fn main() -> Result<()> {
     let reps = bench::select_representatives(&CardPickOpts::default())?;
     let deck = composition.build_deck(&reps.picked, FRIEND)?;
 
-    let mut file = File::create("手写vs蒙特卡洛对比.csv")?;
-    writeln!(file, "配卡索引,配卡名,局序号,手写总分,手写技能点,手写属性分,MCTS总分,MCTS技能点,MCTS属性分,分差,MCTS胜")?;
+    let mut file = File::create("hw_vs_mcts.csv")?;
+    writeln!(file, "comp_idx,comp_name,run,hw_score,hw_pt,hw_status,hw_spd,hw_sta,hw_pow,hw_gut,hw_wis,hw_eat_y3,hw_rmj,mcts_score,mcts_pt,mcts_status,mcts_spd,mcts_sta,mcts_pow,mcts_gut,mcts_wis,mcts_eat_y3,mcts_rmj,diff,mcts_win")?;
 
     let mut hw_scores = Vec::new();
     let mut mcts_scores = Vec::new();
+    let mut hw_status_sum = [0i64; 5];
+    let mut mcts_status_sum = [0i64; 5];
+    let mut hw_eat_y3_sum = 0i64;
+    let mut mcts_eat_y3_sum = 0i64;
+    let mut hw_rmj_sum = 0i64;
+    let mut mcts_rmj_sum = 0i64;
 
     for run_index in 0..runs {
         // 手写策略
@@ -78,35 +84,59 @@ fn main() -> Result<()> {
 
         writeln!(
             file,
-            "{composition_index},{},{run_index},{},{},{},{},{},{},{diff},{}",
-            composition.name(),
-            hw.score, hw.skill_pt, status_score(&hw.five_status),
-            mcts.score, mcts.skill_pt, status_score(&mcts.five_status),
-            if mcts_win { "是" } else { "否" }
+            "{composition_index},{comp_name},{run_index},{hw_score},{hw_pt},{hw_st},{hw_spd},{hw_sta},{hw_pow},{hw_gut},{hw_wis},{hw_eat},{hw_rmj},{mcts_score},{mcts_pt},{mcts_st},{mcts_spd},{mcts_sta},{mcts_pow},{mcts_gut},{mcts_wis},{mcts_eat},{mcts_rmj},{diff},{mcts_win}",
+            comp_name = composition.name(),
+            hw_score = hw.score, hw_pt = hw.skill_pt, hw_st = status_score(&hw.five_status),
+            hw_spd = hw.five_status[0], hw_sta = hw.five_status[1], hw_pow = hw.five_status[2], hw_gut = hw.five_status[3], hw_wis = hw.five_status[4],
+            hw_eat = hw.yearly_eat_count[2], hw_rmj = hw.rmj_ok,
+            mcts_score = mcts.score, mcts_pt = mcts.skill_pt, mcts_st = status_score(&mcts.five_status),
+            mcts_spd = mcts.five_status[0], mcts_sta = mcts.five_status[1], mcts_pow = mcts.five_status[2], mcts_gut = mcts.five_status[3], mcts_wis = mcts.five_status[4],
+            mcts_eat = mcts.yearly_eat_count[2], mcts_rmj = mcts.rmj_ok,
+            diff = diff,
+            mcts_win = if mcts_win { "yes" } else { "no" }
         )?;
 
         hw_scores.push(hw.score);
         mcts_scores.push(mcts.score);
+        for i in 0..5 {
+            hw_status_sum[i] += hw.five_status[i] as i64;
+            mcts_status_sum[i] += mcts.five_status[i] as i64;
+        }
+        hw_eat_y3_sum += hw.yearly_eat_count[2] as i64;
+        mcts_eat_y3_sum += mcts.yearly_eat_count[2] as i64;
+        hw_rmj_sum += hw.rmj_ok as i64;
+        mcts_rmj_sum += mcts.rmj_ok as i64;
 
         println!(
-            "局{run_index}: 手写={} MCTS={} 差={:+} {}",
+            "run{run_index}: HW={} MCTS={} diff={:+} {} | HW[spd,sta,pow,gut,wis]={:?} eat_y3={} rmj={} | MCTS[...]={:?} eat_y3={} rmj={}",
             hw.score, mcts.score, diff,
-            if mcts_win { "→MCTS胜" } else if mcts.score < hw.score { "→手写胜" } else { "平" }
+            if mcts_win { "MCTS+" } else if mcts.score < hw.score { "HW+" } else { "=" },
+            hw.five_status, hw.yearly_eat_count[2], hw.rmj_ok,
+            mcts.five_status, mcts.yearly_eat_count[2], mcts.rmj_ok
         );
     }
 
-    let hw_avg = hw_scores.iter().sum::<i32>() as f64 / hw_scores.len() as f64;
-    let mcts_avg = mcts_scores.iter().sum::<i32>() as f64 / mcts_scores.len() as f64;
+    let n = runs as i64;
+    let hw_avg = hw_scores.iter().sum::<i32>() as f64 / runs as f64;
+    let mcts_avg = mcts_scores.iter().sum::<i32>() as f64 / runs as f64;
     let hw_wins = hw_scores.iter().zip(mcts_scores.iter()).filter(|(h, m)| h > m).count();
     let mcts_wins = hw_scores.iter().zip(mcts_scores.iter()).filter(|(h, m)| m > h).count();
 
-    println!("\n=== 汇总 ===");
-    println!("手写均分: {hw_avg:.0}  (min={}, max={})", hw_scores.iter().min().unwrap(), hw_scores.iter().max().unwrap());
-    println!("MCTS均分: {mcts_avg:.0}  (min={}, max={})", mcts_scores.iter().min().unwrap(), mcts_scores.iter().max().unwrap());
-    println!("均分差: {:+.0}", mcts_avg - hw_avg);
-    println!("胜/平/负: MCTS={mcts_wins} 平={} 手写={hw_wins}", runs as usize - mcts_wins - hw_wins);
+    println!("\n=== Summary (comp={} search_n={} runs={}) ===", composition_index, search_n, runs);
+    println!("HW   avg={:.0} (min={} max={})", hw_avg, hw_scores.iter().min().unwrap(), hw_scores.iter().max().unwrap());
+    println!("MCTS avg={:.0} (min={} max={})", mcts_avg, mcts_scores.iter().min().unwrap(), mcts_scores.iter().max().unwrap());
+    println!("Diff: {:+.0}  MCTS wins={}/{} HW wins={}/{}", mcts_avg - hw_avg, mcts_wins, runs, hw_wins, runs);
+    println!("\n=== Five-status avg diff (MCTS - HW) ===");
+    let names = ["spd", "sta", "pow", "gut", "wis"];
+    for i in 0..5 {
+        let hw_avg_s = hw_status_sum[i] as f64 / n as f64;
+        let mcts_avg_s = mcts_status_sum[i] as f64 / n as f64;
+        println!("  {:>3}: HW={:.0} MCTS={:.0} diff={:+.0}", names[i], hw_avg_s, mcts_avg_s, mcts_avg_s - hw_avg_s);
+    }
+    println!("\n=== Y3 eat count avg: HW={:.1} MCTS={:.1} diff={:+.1}", hw_eat_y3_sum as f64 / n as f64, mcts_eat_y3_sum as f64 / n as f64, (mcts_eat_y3_sum - hw_eat_y3_sum) as f64 / n as f64);
+    println!("=== RMJ ok avg: HW={:.2} MCTS={:.2} diff={:+.2}", hw_rmj_sum as f64 / n as f64, mcts_rmj_sum as f64 / n as f64, (mcts_rmj_sum - hw_rmj_sum) as f64 / n as f64);
 
-    ensure!(runs > 0, "局数必须大于0");
+    ensure!(runs > 0, "runs must > 0");
     Ok(())
 }
 
