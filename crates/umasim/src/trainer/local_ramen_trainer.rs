@@ -1641,7 +1641,13 @@ impl LocalRamenTrainer {
             if let Some(region_id) = act.ramen {
                 // 吃面后必训练 at_trains 覆盖位（C 方案简化约束）：预演该面落地后的最优训练位，
                 // 若不在 at_trains 内则否决（吃面加成浪费——玩家 87% 覆盖 vs 自动 52%）。
+                //
+                // 夏合宿例外：夏合宿回合诀窍槽全 MAX、训练等级高，吃面后训练效率极高，
+                // 即使最优训练位不在 at_trains 内也应允许吃面（吃面 PT + 训练数值都重要）。
+                // 不放宽会导致夏合宿 8 回合只吃 1-2 碗面，严重浪费高效率训练窗口。
+                let is_xiahesu = g.is_xiahesu();
                 if self.config.eat_requires_covered_train
+                    && !is_xiahesu
                     && !self.eat_covered_train_passes(g, region_id)?
                 {
                     o.score = f32::NEG_INFINITY;
