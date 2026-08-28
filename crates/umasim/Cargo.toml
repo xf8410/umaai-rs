@@ -14,6 +14,11 @@ path = "src/bin/ramen_manual.rs"
 required-features = ["cli", "diag"]
 
 [[bin]]
+name = "ramen_player"
+path = "src/bin/ramen_player.rs"
+required-features = ["experiment-tools"]
+
+[[bin]]
 name = "ramen_feature_dataset"
 path = "tools/data_collection/ramen_feature_dataset.rs"
 
@@ -78,6 +83,28 @@ name = "y3_eat_first_vital_matrix"
 path = "tools/data_collection/y3_eat_first_vital_matrix.rs"
 required-features = ["experiment-tools"]
 
+[[bin]]
+name = "region_gauge_diagnostic"
+path = "tools/data_collection/region_gauge_diagnostic.rs"
+required-features = ["experiment-tools"]
+
+[[bin]]
+name = "region_matrix"
+path = "tools/data_collection/region_matrix.rs"
+required-features = ["experiment-tools"]
+
+[[bin]]
+name = "trainer_overhead_diagnostic"
+path = "tools/data_collection/trainer_overhead.rs"
+
+[[bin]]
+name = "mcts_rollout_switch_verify"
+path = "tools/data_collection/mcts_rollout_switch_verify.rs"
+
+[[bin]]
+name = "sim_profiler"
+path = "tools/data_collection/sim_profiler.rs"
+
 [features]
 default = ["cli", "diag"]
 diag = []
@@ -128,3 +155,4 @@ tokio = { workspace = true, optional = true }
 
 tract-onnx = { workspace = true, optional = true }
 indexmap.workspace = true
+pprof = { workspace = true, features = ["protobuf-codec"] }

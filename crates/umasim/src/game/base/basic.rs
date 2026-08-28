@@ -202,7 +202,7 @@ impl BasicGame {
 
     pub fn newgame(uma_id: u32, deck_ids: &[u32; 6], inherit: InheritInfo) -> Result<Self> {
         let mut ret = BasicGame {
-            base: BaseGame::new(uma_id, deck_ids, inherit)?,
+            base: BaseGame::new(uma_id, deck_ids, inherit, global!(GAMECONSTANTS).five_status_limit_base)?,
             persons: vec![]
         };
         ret.init_persons()?;
@@ -390,7 +390,9 @@ impl Game for BasicGame {
         //diag!("-- Turn {}-{:?} --", self.turn, self.stage);
         match self.stage {
             TurnStage::Begin => {
+                #[cfg(feature = "diag")]
                 println!("-----------------------------------------");
+                #[cfg(feature = "diag")]
                 diag!("{}", self.explain()?);
                 let mut events = self.generate_events(rng);
                 // 友人强制事件
@@ -421,6 +423,7 @@ impl Game for BasicGame {
                 } else {
                     self.distribute_all(rng)?;
                     self.distribute_hint(rng)?;
+                    #[cfg(feature = "diag")]
                     diag!("训练:\n{}", self.explain_distribution()?);
                 }
             }

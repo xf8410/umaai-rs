@@ -63,7 +63,8 @@ fn stage_index(stage: &RamenStage) -> usize {
         RamenStage::NextTurn => 6,
         RamenStage::RegionSelect => 7,
         RamenStage::SuperRamenSelect => 8,
-        RamenStage::Settlement => 9
+        RamenStage::Settlement => 9,
+        RamenStage::BeginAfterRegionSelect => 10
     }
 }
 
@@ -84,7 +85,9 @@ fn action_features(game: &RamenGame, action: &RamenAction) -> Vec<f32> {
                 }
             }
         }
-        Operation::StageOnly => f[11] = 1.0
+        Operation::StageOnly => f[11] = 1.0,
+        // FIXME: 可能和其他特征冲突。临时值
+        Operation::SuperRamenSelect(sup) => f[13] = sup as f32
     }
     if let Some(r) = action.ramen {
         f[12] = 1.0;

@@ -83,6 +83,29 @@ impl GameConstants {
         load_json("gamedata/constants.json")
     }
 
+    /// 查五维属性对应的终局评分，越界饱和到表末
+    ///
+    /// `five_status_final_score` 长度有限（当前 3399 档），而五维上限 =
+    /// 剧本基值 + 继承三次，蓝因子拉满时会超出表长。此前三处消费点行为各不相同：
+    /// 裸下标会 panic，`unwrap_or(0)` 会静默把分数算成 0（进而让手写策略
+    /// 误判该维收益为极大负值、永久回避它）。统一走本方法，越界一律饱和。
+    pub fn status_final_score(&self, status: i32) -> i32 {
+        // 不用 `get().unwrap_or(0)` 兜底：那正是缺陷 C 的形态——下标算错时静默返回 0，
+        // 把「查不到」伪装成「零分」。这里下标已饱和到 len-1，非空表必然命中；
+        // 空表是数据损坏，返回 0 是唯一合理的降级。
+        match self.five_status_final_score.last() {
+            None => 0,
+            Some(&last) => {
+                let idx = (status.max(0) as usize).min(self.five_status_final_score.len() - 1);
+                if idx == self.five_status_final_score.len() - 1 {
+                    last
+                } else {
+                    self.five_status_final_score[idx]
+                }
+            }
+        }
+    }
+
     pub fn get_rank_name(&self, score: i32) -> String {
         self.rank_scores
             .iter()
@@ -790,11 +813,26 @@ fn default_simulation_count() -> usize {
 /// `default_config.toml` 的生产参数。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OverrideGameConfig {
+    /// 温泉顺序（可选；game_config.toml 可省略 `[onsen_order]` 段，使用 default）
+    #[serde(default)]
     pub onsen_order: OnsenOrder,
     pub config_override: OverrideConfig,
     /// MCTS 可选覆盖（`None` 字段不改写 default）
     #[serde(default)]
-    pub mcts: OverrideMctsConfig
+    pub mcts: OverrideMctsConfig,
+    /// 拉面杯第3年地区选择策略（顶层覆盖；对应 `GameConfig::ramen_region_strategy`）
+    ///
+    /// `None` = 不覆盖 default_config.toml。注意：game_config.toml 顶层写
+    /// `ramen_region_strategy = "fixed"`/`ramen_region_fixed = [[...]]` 才走这里；
+    /// `[config_override]` 段内没有这两个字段（地区策略不是"常用覆盖项"）。
+    #[serde(default)]
+    pub ramen_region_strategy: Option<RamenRegionStrategy>,
+    /// 第3年固定地区组合（顶层覆盖；仅 `ramen_region_strategy=fixed` 时生效）
+    ///
+    /// `None` = 不覆盖 default；写 `ramen_region_fixed = [[.., .., ..]]` 即覆盖；
+    /// 要显式清空 default 的 fixed 组合可写空数组 `[]`。
+    #[serde(default)]
+    pub ramen_region_fixed: Option<Vec<[usize; 3]>>
 }
 
 /// MCTS 覆盖配置：每个字段都是可选覆盖（`None` = 不覆盖 `default_config.toml`）。
@@ -863,6 +901,13 @@ pub struct OverrideConfig {
     /// 种马额外属性（可选覆盖）
     #[serde(default)]
     pub extra_count: Option<Array6>,
+    /// 训练员类型（可选覆盖；`"manual" | "random" | "handwritten" | "collector" | "neuralnet" | "mcts"`）
+    ///
+    /// `None` = 不覆盖 `default_config.toml`（仍是 `handwritten`）。
+    /// `trainer` 是 `GameConfig` 顶层字段、原本不在 `OverrideConfig` 里，
+    /// 此处加进来让 `game_config.toml` 能顶层切换 trainer 跑特定场景（不污染 default）。
+    #[serde(default)]
+    pub trainer: Option<String>,
     /// 温泉选择是否使用蒙特卡洛（可选覆盖）
     #[serde(default)]
     pub mcts_selected_onsen: Option<bool>,
@@ -903,6 +948,9 @@ impl OverrideGameConfig {
         }
         if let Some(v) = o.log_level {
             ret.log_level = v;
+        }
+        if let Some(v) = o.trainer {
+            ret.trainer = v;
         }
         if let Some(v) = o.mcts_selected_onsen {
             ret.mcts_selected_onsen = v;
@@ -956,6 +1004,12 @@ impl OverrideGameConfig {
         if let Some(v) = m.crn_stage_reseed {
             ret.mcts.crn_stage_reseed = v;
         }
+        if let Some(v) = self.ramen_region_strategy {
+            ret.ramen_region_strategy = v;
+        }
+        if let Some(v) = self.ramen_region_fixed {
+            ret.ramen_region_fixed = Some(v);
+        }
         ret
     }
 }
@@ -966,7 +1020,12 @@ mod tests {
     use fs_err::read_to_string;
 
     use super::*;
-    use crate::{trainer::RamenSearchStages, utils::Checks};
+    use crate::{
+        gamedata::{onsen::ONSENDATA, ramen::RAMENDATA},
+        global,
+        trainer::RamenSearchStages,
+        utils::Checks
+    };
 
     /// 构造全 None 的覆盖配置（= 不覆盖任何字段）。
     fn empty_override() -> OverrideConfig {
@@ -975,6 +1034,7 @@ mod tests {
             cards: None,
             blue_count: None,
             extra_count: None,
+            trainer: None,
             mcts_selected_onsen: None,
             log_level: None,
             num_threads: None,
@@ -988,7 +1048,9 @@ mod tests {
         OverrideGameConfig {
             onsen_order: OnsenOrder::default(),
             config_override: cfg,
-            mcts: OverrideMctsConfig::default()
+            mcts: OverrideMctsConfig::default(),
+            ramen_region_strategy: None,
+            ramen_region_fixed: None
         }
     }
 
@@ -1094,6 +1156,57 @@ year3 = []
         println!("无 bogus / 无 [mcts] 解析 = {:?}", result.as_ref().map(|_| "ok"));
         let mut c = Checks::new();
         c.check(result.is_ok(), "去掉 bogus_field 后应解析成功（[mcts] 可省略）");
+        c.finish()
+    }
+
+    /// 顶层覆盖：game_config.toml 顶层写 `ramen_region_strategy` / `ramen_region_fixed` 必须生效
+    /// （回归：此前顶层字段被 serde 静默忽略，解除 game_config.toml 注释后无法切换第3年固定选区。
+    /// 注意 TOML 结构：顶层字段必须写在所有 `[...]` 段**之前**，否则会被归入前一个段。
+    /// 用户 game_config.toml 曾把这两个字段写在 `[mcts]` 段后 → 被 `[mcts]` 的 unknown field 吸收。）
+    #[test]
+    fn test_top_level_region_override_takes_effect() -> Result<()> {
+        let base = GameConfig::default_for_init();
+        // 模拟 game_config.toml 顶层（段之前）写区域策略
+        let text = r#"
+ramen_region_strategy = "fixed"
+ramen_region_fixed = [[10, 12, 14]]
+
+[config_override]
+uma = 100901
+"#;
+        let mut c = Checks::new();
+        match toml::from_str::<OverrideGameConfig>(text) {
+            Ok(ov) => {
+                println!(
+                    "顶层 region 解析: strategy={:?} fixed={:?}",
+                    ov.ramen_region_strategy, ov.ramen_region_fixed
+                );
+                let merged = ov.merge(&base);
+                println!(
+                    "merge 后: strategy={:?} fixed={:?}",
+                    merged.ramen_region_strategy, merged.ramen_region_fixed
+                );
+                c.check(
+                    matches!(
+                        merged.ramen_region_strategy,
+                        RamenRegionStrategy::Fixed
+                    ),
+                    "顶层 ramen_region_strategy=fixed 应覆盖进 GameConfig",
+                );
+                c.check(
+                    merged.ramen_region_fixed.as_deref() == Some(&[[10, 12, 14]]),
+                    "顶层 ramen_region_fixed 应覆盖进 GameConfig",
+                );
+            }
+            Err(e) => {
+                println!("顶层 region 解析失败: {e:?}");
+                c.check(false, "顶层 region 字段应可解析");
+            }
+        }
+        c.check(
+            RamenRegionStrategy::default() == RamenRegionStrategy::All,
+            "RamenRegionStrategy 缺省应为 All（对照）",
+        );
         c.finish()
     }
 
@@ -1291,6 +1404,59 @@ ramen_search_stages = "train,region"
         c.check(from_toml.ramen_select, "toml 缺省搜 ramen（值 +2306 分）");
         c.check(from_serde.train, "serde 缺省搜 train");
         c.check(from_serde.ramen_select, "serde 缺省搜 ramen（值 +2306 分）");
+        c.finish()
+    }
+
+    /// [`GameConstants::status_final_score`] 越界必须**饱和**，不得 panic、不得返回 0
+    ///
+    /// 守缺陷 C 的回归：五维上限 = 剧本基值 + 继承三次，蓝因子拉满会超出评分表长度。
+    /// 此前三处消费点行为不一致——裸下标 panic、`unwrap_or(0)` 静默返回 0。
+    /// 后者最坏：`status_gain` 会算出约 -19000 的巨大负分，手写策略永久回避该维且不报错。
+    /// 本测试专门锁「越界返回表末且非 0」，改回 `unwrap_or(0)` 式实现即红。
+    #[test]
+    fn test_status_final_score_saturates_out_of_range() -> anyhow::Result<()> {
+        std::env::set_current_dir(crate::utils::get_workspace_root()?)?;
+        let cons = GameConstants::load()?;
+        let table = &cons.five_status_final_score;
+        let len = table.len();
+        let last = *table.last().ok_or_else(|| anyhow::anyhow!("评分表为空，constants.json 数据损坏"))?;
+        println!("评分表长度={len} 表末={last}");
+
+        let mut c = Checks::new();
+        c.check(cons.status_final_score(-1) == table[0], "负值查表 = 表首");
+        c.check(cons.status_final_score(0) == table[0], "0 查表 = 表首");
+        c.check(cons.status_final_score(2800) == table[2800], "表内值逐位相同");
+        c.check(cons.status_final_score(len as i32 - 1) == last, "最后一档 = 表末");
+
+        // 越界：必须饱和到表末，而不是 0
+        for over in [len as i32, len as i32 + 100, i32::MAX] {
+            let got = cons.status_final_score(over);
+            println!("越界 {over} -> {got}（期望 {last}）");
+            c.check(got == last, &format!("越界 {over} 饱和到表末"));
+            c.check(got != 0, &format!("越界 {over} 不得返回 0"));
+        }
+        c.finish()
+    }
+
+    /// 各剧本五维上限基值的**数据契约**：JSON 里的权威值不得被无意改动
+    ///
+    /// 与 `test_newgame_status_limit_is_scenario_base_plus_inherit` 分工：那条守
+    /// **代码路径**（基值有没有被事后补丁擦掉），期望值从 JSON 推导，因此改数据不误报；
+    /// 本条守**数据本身**。两条都在，才既能抓住「代码改坏」也能抓住「数据漂移」。
+    ///
+    /// 另一个只有本条能抓的回归：拉面 JSON 与 `constants.json` 当前数值恰好相同，
+    /// 若有人把拉面误接成全局常量，路径测试仍会绿。
+    #[test]
+    fn test_scenario_status_limit_base_contract() -> anyhow::Result<()> {
+        std::env::set_current_dir(crate::utils::get_workspace_root()?)?;
+        let _ = crate::gamedata::init_global();
+        let ramen = global!(RAMENDATA).status_limit_base();
+        let onsen = global!(ONSENDATA).status_limit_base();
+        println!("拉面基值={ramen:?} 温泉基值={onsen:?}");
+        let mut c = Checks::new();
+        c.check(ramen == [3100, 2400, 2200, 2200, 2400], "拉面杯五维上限基值");
+        c.check(onsen == [3000, 2200, 2200, 2200, 2400], "温泉杯五维上限基值");
+        c.check(ramen != onsen, "两剧本基值必须不同（否则剧本隔离形同虚设）");
         c.finish()
     }
 }

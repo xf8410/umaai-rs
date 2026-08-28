@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use super::{FeelingType, RamenStage, rules::NPC_CHARA_IDS};
 use crate::{
     game::{BaseGame, BasePerson, InheritInfo, PersonType, traits::Game},
-    gamedata::ramen::RAMENDATA,
+    gamedata::{GAMECONSTANTS, ramen::RAMENDATA},
     global,
     rng::{EventRng, SplitmixRng, StrategyRng, StreamTag, TurnFixedRng, derive_seed}
 };
@@ -74,6 +74,27 @@ pub struct RamenState {
     /// 映射：turn 2 → 0，turn 23 → 1，turn 47 → 2。
     #[serde(default)]
     pub yearly_selected_regions: [[usize; 3]; 3],
+    /// 观测用：当前年份下标（0/1/2），供诀窍流转埋点定位年份数组。
+    ///
+    /// 在 RMJ 归档（[`Self::archive_year_counters`]）时顺带推进（turn 71 后封顶 2），
+    /// 初始 0。**纯观测**，不参与任何规则/策略逻辑。
+    #[serde(default)]
+    pub obs_year: usize,
+    /// 观测用：逐年友情训练回合数（下标 0/1/2 = 第 1/2/3 年）。
+    ///
+    /// 写入点在 `fill_feeling_gauge`（`is_shining` 时累加）。**纯观测**。
+    #[serde(default)]
+    pub yearly_friend_turns: [i32; 3],
+    /// 观测用：逐年诀窍获得数（槽满 [`GAUGE_LIMIT`] 清零 +1 的次数）。
+    ///
+    /// 写入点在 `add_gauge` 清零分支。**纯观测**。
+    #[serde(default)]
+    pub yearly_gauge_gain: [i32; 3],
+    /// 观测用：逐年诀窍溢出数（库存超 [`FEELING_LIMIT`] 被丢弃）。
+    ///
+    /// 写入点在 `add_feeling` 丢弃分支。**纯观测**。
+    #[serde(default)]
+    pub yearly_gauge_overflow: [i32; 3],
     /// 诀窍角标分配（回合 2-71 时每个训练随机分配一个诀窍类型）
     pub train_feeling_type: Option<[FeelingType; 5]>,
 
@@ -284,6 +305,8 @@ impl RamenState {
             .yearly_eat_count
             .get_mut(year_idx)
             .ok_or_else(|| anyhow!("yearly_eat_count 下标 {year_idx} 越界"))? = self.eat_count;
+        // 观测：推进当前年份（turn 71 结算后封顶 2，覆盖超级拉面回合）
+        self.obs_year = (year_idx + 1).min(2);
         Ok(())
     }
 
@@ -312,7 +335,7 @@ impl RamenGame {
             anyhow::bail!("卡组未携带新友人卡(idrank=303051-303054，card_id=30305)，拉面杯模拟器仅支持新友人卡组");
         }
         let mut ret = RamenGame {
-            base: BaseGame::new(uma_id, deck_ids, inherit)?,
+            base: BaseGame::new(uma_id, deck_ids, inherit, global!(RAMENDATA).status_limit_base())?,
             stage: RamenStage::Begin,
             persons: vec![],
             ramen: RamenState::default(),
@@ -329,17 +352,14 @@ impl RamenGame {
         ret.base
             .friend_event_ids
             .extend(global!(RAMENDATA).friend_events.values().map(|e| e.id));
-        // 五维属性上限：拉面杯剧本数据覆盖（Phase 2 步骤 1：从 constants.json 隔离到 scenario_ramen）
-        // 若 scenario_ramen.json 未提供该字段，回退到全局默认值（防御）
-        if let Some(limit) = global!(RAMENDATA).five_status_limit_base {
-            for i in 0..5 {
-                ret.uma.five_status_limit[i] = limit[i].min(2800);
-            }
-        } else {
-            for i in 0..5 {
-                ret.uma.five_status_limit[i] = ret.uma.five_status_limit[i].min(2800);
-            }
-        }
+        // 五维属性上限：基值已由 [`BaseGame::new`] 用 [`RamenScenarioData::status_limit_base`]
+        // 初始化并叠加开局继承增量（[`InheritInfo::inherit_limit_newgame`]）。**不得**在此处
+        // 整体赋值 `five_status_limit`，那会把开局继承增量擦掉（PR #25 修复后该路径已删除）。
+        // 若基值需要修正，必须改 [`BaseGame::new`] 的构造顺序。
+        //
+        // 注意：温泉剧本对应字段（onsen/game.rs:135）有 `min(2800)` 防御性 cap，
+        // 但拉面剧本 speed 基础上限是 3100，`min(2800)` 会硬截断——把限高速玩家进 3100+
+        // 区间到不可达。两剧本基值范围不同，不能共用同一 cap：拉面无防御需要。
         // 携带4种卡以上才能分身
         ret.deck_can_split = ret.card_type_count.iter().filter(|x| **x > 0).count() >= 4;
         // 初始化人头（Game trait 方法）
@@ -456,12 +476,6 @@ impl RamenGame {
         self.reset_turn_streams();
     }
 
-    /// 按当前 `(rule_master, turn)` 重置两条规则流（counter 归零）
-    ///
-    /// 回合固定流 master = `derive_seed(rule_master, [turn])`；
-    /// 策略流 master = `derive_seed(rule_master, [turn, STRATEGY_TAG])`。
-    /// 未注入 rule_master 时清空两条流（规则层回退旧行为）。
-    /// 调用时机：`run_begin` 回合开始时（每次进入 Begin 阶段）。
     /// 按 `(rule_master, turn, tag)` 派生一条分身分配用的局部流
     ///
     /// 与从父流 fork 的做法（[`crate::rng::fork_local_stream`]）相比有两处好处：
@@ -478,6 +492,13 @@ impl RamenGame {
             .map(|master| SplitmixRng::new(derive_seed(master, &[self.base.turn as u64, tag])))
     }
 
+    /// 按当前 `(rule_master, turn)` 重置两条规则流（counter 归零）
+    ///
+    /// 回合固定流 master = `derive_seed(rule_master, [turn])`；
+    /// 策略流 master = `derive_seed(rule_master, [turn, STRATEGY_TAG])`。
+    /// 未注入 rule_master 时清空两条流（规则层回退旧行为）。
+    /// 调用时机：`run_begin` 前半段（每次进入 `Begin`）。
+    /// `BeginAfterRegionSelect` **不得**再调用，否则事件流被重置、随机语义已错。
     pub fn reset_turn_streams(&mut self) {
         match self.rule_master {
             Some(master) => {

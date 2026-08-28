@@ -1,33 +1,75 @@
 # UmaAI-RS 变更日志
 
-本文件用于简要记录每次任务的修改内容。
+本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
+
+## 2026-08-27
+- **MCTS rollout/fallback 切到 RecommendedRamenTrainer（单提交合入）**：搜索评分改用 `RecommendedRamenTrainer`（含吃面联动/体力门限/友人节奏/动态属性平衡等全机制），门控全关时与推荐策略逐位等价；新增 `for_rollout()` 关闭 breakdown 避免锁争用。诊断工具落盘 `trainer_overhead_diagnostic` 与 `mcts_rollout_switch_verify`；硬守门 4 测试基线重抓；`test_combined_on_skips_special_search` 放宽为「SpecialSelect 大多数走缓存命中」
+- **搜索掉分待调优**：search_n=4/128 × 30/10 局对照，搜索结果均略低于纯推荐策略（train_only -3k~-13k、train+ramen -2k~-15k），疑 rollout 评估路径 / radical_factor=0 取 mean 口径 / Score vs Pt 口径需后续调试
+- **rollout cfg gate 加速 + perf 诊断工具（单提交合入）**：复用 diag feature，5 处 explain 类调用编译期消失（rollout 路径的屏幕输出）；整局 CPU -29%（0.48s→0.34s/200局），分数不变 66313；MCTS search_n=128 train_only 外推 ~22.4s→~16s/局。新增 `sim_profiler`（pprof-rs 0.15 + 自写 top-fold）+ `microbench_top_fns` 单元测试；新增 `pprof = "0.15"` workspace 依赖
+
+## 2026-08-26（本轮）
+- **吃面-训练覆盖门控（C 方案）**：选面时预演"落地后最优训练位"，不在该面 `at_trains` 内则否决；吃面训练覆盖 80%→99%，总分与技能点双升。**改变拉面模拟数值，基线作废**
+- **弱位 boost 补"未满"条件**：弱位放大仅在 `five_status < limit` 时生效，避免已满位虚高。**改变拉面模拟数值**
+- **地区选择弱位覆盖参数 + 配置覆盖修复**：新增 `region_weak_cover_weight`（默认 0.0，实验入口）；game_config.toml 顶层覆盖修复
+
+## 2026-08-27（PR #25）
+- **五维上限剧本化 + 评分查表统一（PR #25）**：上限基值随 `Uma::new` / `BaseGame::new` 构造参数传入，顺序「先写剧本基值、再加继承」，删除事后赋值补丁与 `min(2800)` 硬截断；新增 `GameConstants::status_final_score` 越界饱和；新增跨三剧本守门 / 契约 / 越界饱和测试；三处硬守门快照基线随上限重抓。**改变拉面与温泉模拟数值，基线作废**
+
+## 2026-08-28
+- **OverrideConfig 扩展 trainer 字段**：扩展 `OverrideConfig.trainer: Option<String>` 让 `game_config.toml` 可独立切 trainer（不污染 default_config.toml）；同步加 `test_override_config_trainer_overrides_default` 守门。临时 `game_config.toml` 改为 `trainer="mcts"` / `num_threads=16` / `[mcts] search_n=4096 use_ucb=false` 跑 MCTS 单局验证 REC fallback 路径生效
+
+## 2026-08-26
+- **吃面后必训练 at_trains 覆盖位（C 方案）**：新增 `LocalRamenConfig.eat_requires_covered_train`（推荐 preset 开启）——`decide_ramen` 对每个吃面候选预演"落地后最优训练位"，不在该面 `at_trains` 内则否决，实现"吃面后必训练覆盖位、不训练就不吃面"。吃面训练覆盖实测 80%→99%，总分与技能点双升。**改变拉面模拟数值，基线作废**
+- **弱位 boost 补"未满"条件**：`ramen_weak_train_boost` 与 `ramen_window_alignment` 的弱位放大仅在 `five_status < limit` 时生效——已满位只剩 PT 收益，放大只会虚高训练分。**改变拉面模拟数值**
+- **地区选择弱位覆盖参数 + 配置覆盖修复**：`score_region` 新增 `region_weak_cover_weight`（默认 0.0，实验入口）；game_config.toml 顶层 `ramen_region_strategy/fixed` 覆盖修复（字段须写在所有 `[...]` 段之前，原注释位置被 `[mcts]` 段吸收导致不生效）
+
+## 2026-08-26
+- **搜索终局多维记录（P2）**：rollout 返回值扩为 `RolloutOutcome<T>`，新增 `search_with_terminal` 与 `MomentResult` 按候选累加终局观测量；`CandidateAccum` 收拢三条统计使其只在成功分支推进；UCB 失败计数统一末尾告警。**纯观测出口，模拟数值逐位不变**
+- **拉面终局 25 维与诊断出口**：在 rollout 内部归约阈值类维度（PT 达成率等），避免均值丢信息；RMJ 直接读规则层；维度键名与顺序冻结（FROZEN_DIM_KEYS + 守门测试），合作伙伴用于手写策略前后对比
+- **超级拉面纳入搜索**：补 `SuperRamenSelect` 阶段分支，新增 `Operation::SuperRamenSelect`；手写与 Local 同步补分支避免默认分支静默换选项。**门控默认关闭**
+- **第 1 年地区纳入搜索**：拆出 `BeginAfterRegionSelect` 阶段边界，回合 2 走 `Begin → RegionSelect → BeginAfterRegionSelect → Distribute`；修 `encode_regions` 未选出时被编三份「地区 0」。**门控默认关闭；`all()` 语义变真，历史基线作废**
+- **超级拉面搜索平局回退**：`deck_can_split == false` 时改为仅在确实平局时向选项二回退，判定跟随 `selection`
+- **地区候选生成抽为纯函数**：`region_select_combos` 显式传参，守门测试直接调它，避免 `test_year1_2_always_all_regardless_of_strategy` 空转仍绿
+- **补回 `test_combined_gate_off_full_game` 的 `#[test]`**：上次提交插入观察壳占用属性行导致该测试静默不运行，加静态扫描核对
+- **拉面 MCTS 诊断出口接线**：主二进制单局开启 verbose，补 `#[ignore]` 整局观察壳；观察壳须自行设日志 info 级
 
 ## 2026-08-25
-- **LocalRamenTrainer 补齐手写训练员的地区选择与 breakdown 机制**：第 1 年地区选择（回合 2 内联触发）此前按阶段分派落入默认分支恒选候选 0，现按动作类型判定进入打分，三年地区选择全部经过手写策略；新增 `collect_breakdown` 开关与 `for_rollout` 构造器（搜索 rollout 基策关闭分解采集，避免多线程锁争用），单候选决策点补记「仅1候选」breakdown 使决策日志完整。**改变推荐策略第 1 年地区选择，既有基准作废**
-- **拉面动作空间不变量 + 终局分分解（MCTS 完成计划 P0 安全网）**：钉死 `special_targets` 之和 ≤ 2 与合并候选峰值上限、新增 `Uma::score_parts()` 使 `calc_score` 对其求和、补温泉 CRN 阶段重播种的双向契约测试；顺带删 `MctsTrainer` 死字段 `last_game`、`rollout_batch_size` 标注为未接线空转、阶段 one-hot 预留两个空槽以免将来加阶段改掉输入维度。**输入维度变化（教师数据需重生成），模拟数值逐位不变**
-- **搜索层接受拉面合并动作（P1.1）**：`apply_root_action` 新增合并分支转交 `apply_combined_ramen_decision`，此前合并动作会被通用 `apply_action` 静默清零隐藏风味、连非法组合都照常返回成功；判别式为「`RamenSelect` + `StageOnly` + 携带 targets」，补整局冒烟（该落地入口此前从未在完整育成中跑过）。**三阶段动作逐位不变**
-- **拉面 `RamenSelect` 改用合并动作搜索（P1.2）**：`(ramen, targets)` 一次搜完并缓存 targets 供 `SpecialSelect` 取用，此前拆成两次独立搜索、前一次看不到后一次的收益；改在训练员内部而非游戏层，以免所有训练员都收到合并候选、连手写基线一起作废；取缓存须早于阶段门控，加命中计数守门。**搜索对外层 rng 消耗由两次降为一次，拉面基线作废**
-- **拉面搜索阶段缺省补上 `ramen`**：原缺省只搜 `train`，且两个 toml 都没写这一项，导致每局 61 个 `RamenSelect` 决策点在生产里一次 rollout 都不跑；实测补上后 42 局配对 +2306 分（七个 build 全为正），而同一笔算力加到 `train` 的 `search_n` 上只值 +39 分，即 `train` 一侧已饱和。`default_config.toml` 同步显式写出该项，bench_base 缺省对齐。**改变 MCTS 生产行为与拉面基线**
-- **测试有效性审查后的修补**：补上 `ramen_search_stages` 生产缺省的守门测试——此前把缺省改回 `train` 全量测试照常绿，等于那 +2306 分的配置没有任何防线；按语义解析而非字符串比较，重排写法不误报。合并候选峰值测试原先只有上限，去掉「不吃面」候选仍绿，改为断言「候选数 = 1 + 三地区 targets 数之和」这条与数值无关的结构恒等式并补下限。删除 `test_combined_vs_threestage_pairing` 及其四个统计辅助——该测量壳只断言局数与搜索次数，合并搜索完全坏掉也不会红，且其口径已被三臂实验取代。`score_parts` 与 `calc_score` 那条转发断言补注为「不是公式 oracle」以免误读。
-- **不在判定与得意率解耦（distribute_person 两步算法）**：先按 `absent_rate / (500 + absent_rate)` 判「不在」（不含得意率），判定出现后才按训练位权重（含得意率）分配；不在权重按实际规则分类型——支援卡 50、友人/团队卡 100（均可被 `absent_rate_drop` 降低），理事长/记者固定 200（不受 drop 影响），NPC 必定出现（无不在率，`distribute_all` 对 NPC 传 `allow_absent=false` 双保险）；所有判定不在的人头记录进 `RamenState.absent_cards`（每回合清空），供剧本机制按类型取用
-- **地区拉面分身缺席优先**：本回合判定「不在」的支援卡（`PersonType::Card`）按缺席顺序优先补进 `at_trains` 分身位（先缺谁补谁），全部支援卡都在训练后，剩余分身位才随机复制在场卡；`absent_cards` 为规则输入，与「不在判定」修复同一次提交落地
-- **上述两项改变拉面模拟数值，既有基线作废**：bench / 搜索 / MCTS 三处逐位基准快照已重抓；修复落在 `distribute_person` 默认实现上，**对 base/onsen 同样生效，属剧本通用正确行为，无需为其重抓基线**。新增 4 个单元测试（不在权重类型表 / 两步行为 / 24 轮集成记录与 NPC 必现 / 地区分身缺席优先三场景），全量 279 lib 测试通过
+- **自由比赛收益真实衡量**：`race_grade_weight`（等级×常数）退役，改走训练同管线折算（真实收益 + 赛程压力叠加）；折扣经实测削弱至 0.3。**改变拉面模拟数值，基线作废**
+- **bench handwritten 档切到正式推荐策略**：自动局表现失真，改为 `RecommendedRamenTrainer`；核心保留作 rollout 组件对照
+- **方案 E 确认 PT 不打折**：残余折扣只作用于副属性，PT 独立计分；单点启发式无法观测的跨回合项留给 MCTS
+- **拉面五维上限硬截断移除**：speed 恢复 3100，玩家高分档不再受 2800 截断拖累；bench 强制地区策略 All 不受手动模式影响
+- **弱位训练偏好 + 按 build 自适应查表**：双层级（吃面前 / 吃面后）放大 at_trains 卡少位 raw；按智卡数查表（推荐 preset 默认启用），build 异质性极强
+- **体力门限上调（30→40）**：300 局配对总加权 +397（7/7 build 正），失败率 1.5%→0.3%；y3 门禁改为每年评估，仅第三年吃面放掉硬门限
+- **支援卡连续事件增强（用户手动）**：8001/8002 事件数值上调（体力 5→10、五维/PT/hint 增强）
+- **地区权重重新评估**：当前策略下 300 局配对，`region_youqing_weight` 1.0→1.5（speed Y3 +387）
+- **友人词条加成 + 主动使用**：词条 bonus（体力×1.6 / 属性×1.3），不溢出时主动用友人；失败率 2.4%→1.6%，友人 4.9/5
+- **残余收益折扣（方案 E）**：主属性快满时副属性打折（PT 保留），300 局 +84
+- **手写策略四项提分机制**：吃面联动 / 必成价值 / 友人饥饿 300 / 动态属性平衡，100 局 +749
+- **地区选择修正公式 + 验证**：`bias×youqing - waste×10`；全 101 种验证：真实 build +99.9 / 残缺 -7.3
+- **region_matrix 诊断工具 + test_region_selection_per_build**：按 build 打印三年选区 + 占比；7 build × 3 年人工审查
+- **LocalRamenTrainer 补齐第 1 年地区选择打分**：不再恒选候选 0；基线作废
+- **拉面动作空间不变量 + 终局分分解（MCTS P0 安全网）**
+- **搜索层拉面合并动作落地（P1.1+P1.2）**：一次搜完 ramen×targets；拉面基线作废
+- **拉面搜索阶段缺省补 `ramen`**：42 局配对 +2306
+- **测试有效性审查修补**：缺省守门测试、结构恒等式、删无效测量壳
+- **不在判定与得意率解耦**：distribute_person 两步算法，缺席名单入 RamenState
+- **地区拉面分身缺席优先**：缺席卡优先补分身位；拉面基线作废
 
 ## 2026-08-24
-- **训练人数加成按人头类型计数**：`1 + 0.05 × 人数` 乘区原按硬编码人头下标排除理事长与记者，那是温泉布局的常量；拉面的理事长、友人卡、NPC、记者位置全不同，四项判反。改为按人头类型判定并抽出 count_training_persons，负数与越界下标一并不计。**改变拉面模拟数值，既有基线作废；温泉与 base 逐位不变，有回归用例守门**
-- **超级拉面分身补上友人卡**：候选收集写死卡组下标范围，取不到回合 2 才加入的友人卡，类型过滤里的友人分支成了死条件，友人卡分身从未生成过；同时给分身补上「每个训练只能出现一个友人」——本体由分配逻辑维护该约束，分身此前不受限，会出现与理事长 / 记者同格这种自然分配产生不出的局面。**改变拉面模拟数值**
-- **RecommendedTrainer 改进方案文档**：新增 `.trae/documents/workbench_improve_1.md`，规划三件事——地区打分补 `feeling_yield` / `recipe_balance` / `low_count_youqing_bonus` 三指标（修第3年地区 build 自适应）；第三年体力门禁按回合差异化（吃面回合放掉 / 不吃面回合保留）；`matrix_variant` DSL 改用 `lexopt` 数据驱动重构。**文档规划，未实施代码改动**
-- **配置层三处接线修复**：用户 toml 的 `[mcts]` 改为全 Option 覆盖层 + `deny_unknown_fields`（原为完整结构、merge 只拷两项，其余静默失效，而那个残缺 merge 反倒在护着生产参数）；主二进制 onsen 分支改调既有的 `SearchConfig::new_game_config`，不再手抄字段漏掉 `crn_stage_reseed`；补注 `expected_search_stdev` 是 UCB 探索项的缩放标尺而非实测统计量，两处默认值服务不同场景、无需对齐
-- **搜索层 CRN 与 UCB 三处修正**：CRN 收益测量的对照轴改按「候选间是否共享 `rule_master`」分臂（原按只在温泉生效的开关分臂，两臂输入相同等于没有对照），配套抽出双种子 rollout 入口拆开决策流与规则主种子；失败样本改按原始序号取双方成功的交集配对（原为各自压缩后按新下标配对，一侧失败即此后全部错位一格）；UCB 首组步长收进 `search_n`，不再无条件跑满 group 导致越预算且自适应零次。生产语义与分数逐位不变
-- **拉面规则层四处数值修复**：分身分配由概率重试改为合法集直选（只剩一格时约一成概率明明放得下却放弃，且失败不计数不告警），并改用按回合派生的局部流使策略流消耗归零、各候选拿到同一份分身随机性以加强配对方差削减；训练人数加成改按人头类型计数（原用温泉布局的硬编码下标，拉面四项全判反）；超级拉面分身补上友人卡与「每训练一个友人」约束（候选收集写死卡组下标范围，友人分支是死条件）。**改变拉面模拟数值，既有基线作废；温泉与 base 逐位不变**
-- **拉面杯逐年观测出口**：`scenario_pt` / `eat_count` 在每年结算回合清零而育成结束在其后，局末读到恒为 0；改为归零前按年归档并新增逐年地区选择，CSV 换成逐年三列，外部重算一并删除。年份索引按回合硬编码而非 `current_year()`（结算回合它仍判上一年，但那一刻选的是下一年地区）。**纯观测出口，模拟数值逐位不变**
-- **第三方库引用规范化（续）**：bench 模块中 anyhow 宏的全名引用改为 use 导入
+- **训练人数加成按人头类型计数**：`1 + 0.05 × 人数` 乘区改按 `PersonType` 判定（替代硬编码下标），抽出 `count_training_persons`，负数与越界下标一并不计。**改变拉面模拟数值，基线作废；温泉与 base 逐位不变**
+- **超级拉面分身补上友人卡**：候选收集改全扫全体人头（不再写死卡组下标范围），同时加「每训练一个友人」约束。**改变拉面模拟数值**
+- **RecommendedTrainer 改进方案文档**：新增 `workbench_improve_1.md`，规划地区打分三指标、第三年体力门禁回合差异化、`matrix_variant` DSL 重构三件事。**文档规划，未实施代码**
+- **配置层三处接线修复**：`[mcts]` 改全 Option + `deny_unknown_fields`；主二进制 onsen 改调既有 `SearchConfig::new_game_config`；`expected_search_stdev` 补注为 UCB 缩放标尺非实测统计量
+- **搜索层 CRN 与 UCB 三处修正**：CRN 对照轴改按「候选间是否共享 `rule_master`」分臂（双种子 rollout 入口拆开决策流与规则主种子）；失败样本改按原始序号交集配对；UCB 首组步长收进 `search_n`。**生产语义与分数逐位不变**
+- **拉面规则层四处数值修复**：分身分配改合法集直选（消除概率重试假失败）+ 按回合派生局部流使策略流消耗归零；训练人数加成改按人头类型计数；超级拉面分身补上友人卡与「每训练一个友人」约束。**改变拉面模拟数值，基线作废**
+- **拉面杯逐年观测出口**：`scenario_pt` / `eat_count` / 地区选择改归零前按年归档，CSV 换逐年三列。**纯观测出口，模拟数值逐位不变**
+- **第三方库引用规范化（续）**：bench 模块中 anyhow 宏的全名引用改 use 导入
 
 ## 2026-08-23
-- **拉面杯 MCTS 训练员**：按阶段门控的搜索训练员，命中的决策点走扁平搜索、其余转发手写策略，门控全关时与纯手写逐位一致；bench_base 与主二进制接入搜索参数；搜索层新增由剧本指定的 rollout 根动作路径
-- **拉面局面特征编码器**：新增 features 模块，把局面编码为定长向量（global / cards / persons 三段），较温泉版补齐成长率与属性上限并开启人头分支；查表失败报错不填 0，移除恒全零的 current_effect 块
-- **人头下标与卡组槽位解耦**：拉面下人头顺序与卡组顺序不一致，原先按 person_index 直接当卡组下标的调用点全部改为按 card_id 反查。**改变拉面模拟数值，既有基线与落盘教师数据作废**
-- **手写策略地区打分覆盖第 1 年 + build 自适应**：新增有效阶段判定使回合开始阶段内联触发的第 1 年地区选择也进入打分（MCTS 门控仍用原始阶段以免破坏 rollout 的阶段推进契约）；score_region 纳入 youqing 项并按卡组 bias 统一缩放。**改变手写策略基线数值**
+- **拉面杯 MCTS 训练员**：按阶段门控的搜索训练员，命中的决策点走扁平搜索、其余转发手写策略，门控全关时与纯手写逐位一致
+- **拉面局面特征编码器**：新增 features 模块，把局面编码为定长向量（global / cards / persons 三段），较温泉版补齐成长率与属性上限并开启人头分支
+- **人头下标与卡组槽位解耦**：拉面下人头顺序与卡组顺序不一致，原先按 person_index 直接当卡组下标的调用点全部改为按 card_id 反查。**改变拉面模拟数值，基线与落盘教师数据作废**
+- **手写策略地区打分覆盖第 1 年 + build 自适应**：新增有效阶段判定使回合开始阶段内联触发的第 1 年地区选择也进入打分；`score_region` 纳入 youqing 项并按卡组 bias 统一缩放。**改变手写策略基线数值**
 - **测试观测收集器**：新增 `utils::Checks`，测试全程 println 记 OK/NG、末尾汇总有失败才报错；既有裸断言与重复本地实现一并归拢
 
 ## 2026-08-22
