@@ -27,7 +27,7 @@ pub mod ramen_special_root;
 //pub mod neural_net_trainer;
 
 pub use handwritten_trainer::HandwrittenTrainer;
-pub use local_ramen_trainer::{LocalRamenTrainer, RecommendedRamenTrainer};
+pub use local_ramen_trainer::{LocalRamenTrainer, ParamOverride, RecommendedRamenTrainer};
 pub use logging_trainer::LoggingTrainer;
 pub use mcts_trainer::MctsTrainer;
 pub use ramen_handwritten_trainer::RamenHandwrittenTrainer;

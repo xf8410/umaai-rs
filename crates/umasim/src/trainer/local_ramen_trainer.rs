@@ -1989,6 +1989,427 @@ impl RecommendedRamenTrainer {
     }
 }
 
+/// GA 参数覆盖层（遗传算法优化器 design.md §5）。
+///
+/// 每个字段对应一个可调参数位：`None` = 保留 [`RecommendedRamenTrainer::new()`]
+/// 正式 preset 值（即"现行为"），`Some(v)` = 覆盖为 `v`。**全 `None` 的覆盖层
+/// 与基线逐位一致**（零差异验证是 GA 的正确性地基，见 `genetic_optimizer`
+/// 模块的对应单元测试）。
+///
+/// 覆盖语义与 [`RecommendedRamenTrainer::with_tokens`] 严格隔离：GA 评估时
+/// tokens 恒为空串，GA 收益不得经由 token 变体实现，两通道永不叠加。
+///
+/// 分年说明：preset 中只有 `pt_rate`（16/64/64）与 `vital_rest_eating`
+///（40/40/0）按年取值，故这两个参数位按年各设一个 `Option`；其余参数位
+/// 三年统一覆盖（`None` 时保留 preset 各年原值）。
+///
+/// 口径纪律：`effective_ramen_failure` 在 [`RamenPolicyConfig`] 与
+/// [`LocalRamenConfig`] 各有一份同名字段（preset 均为 `false`、Default 均为
+/// `true`），属同一逻辑参数的双层副本；覆盖层只设**一个**基因，`Some(v)`
+/// 时同写两层，避免两层口径漂移。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ParamOverride {
+    // ---- RamenPolicyConfig（policy 层）----
+    /// 不吃面回合体力硬门限（三年统一；preset 40）。
+    pub vital_rest: Option<i32>,
+    /// 吃面回合体力门限，按年（preset 40/40/0；0 = 该年吃面回合不强制休息）。
+    pub vital_rest_eating: [Option<i32>; 3],
+    /// 智力训练体力豁免下限（preset `i32::MAX` = 不豁免；`Some(v)` = 启用豁免）。
+    pub wisdom_vital_floor: Option<i32>,
+    /// 心情低外出门限（preset 3）。
+    pub motivation_outing: Option<i32>,
+    /// 属性增益计价系数（preset 1.0）。
+    pub status_rate: Option<f32>,
+    /// 剧本 PT 折算评分价，按年（preset 16/64/64）。
+    pub pt_rate: [Option<f32>; 3],
+    /// 已满位训练 PT 折算价（preset 16.0）。
+    pub pt_tradeoff: Option<f32>,
+    /// 已满位 + 彩圈 PT 折算价（preset 随全局标定分段 36/44/52/64；`Some` 固定取值）。
+    pub pt_tradeoff_shining: Option<f32>,
+    /// 超级拉面已满位 PT 折算价（preset 0 = 关闭）。
+    pub pt_tradeoff_super: Option<f32>,
+    /// 副属性残余收益折扣权重（preset 1.0；0 = 关闭）。
+    pub cap_discount_weight: Option<f32>,
+    /// 失败惩罚（preset 60.0）。
+    pub failure_penalty: Option<f32>,
+    /// 吃面失败口径开关（双层同写：policy + local；preset 均 `false`）。
+    pub effective_ramen_failure: Option<bool>,
+    /// 彩圈奖励（preset 60.0）。
+    pub shining_bonus: Option<f32>,
+    /// 训练体力消耗计价（preset 1.8）。
+    pub train_vital_value: Option<f32>,
+    /// 休息基础价值（preset 20.0）。
+    pub rest_base: Option<f32>,
+    /// 每点体力对休息价值的增益（preset 2.5）。
+    pub rest_vital_value: Option<f32>,
+    /// 休息目标体力（preset 55）。
+    pub rest_target_vital: Option<i32>,
+    /// 比赛面板折扣（preset 0.3）。
+    pub race_panel_discount: Option<f32>,
+    /// 自选比赛紧迫度权重（preset 2000.0）。
+    pub race_free_urgency_weight: Option<f32>,
+    /// 自选比赛出赛门槛缓冲（preset 1；慎动）。
+    pub race_gate_slack: Option<u32>,
+    /// 外出基础价值（preset 15.0）。
+    pub outing_base: Option<f32>,
+    /// 友人外出附加价值（preset 45.0）。
+    pub friend_outing_bonus: Option<f32>,
+    /// 吃面 PT 收益权重（preset 2.0）。
+    pub ramen_pt_weight: Option<f32>,
+    /// 吃面效果收益权重（preset 3.0）。
+    pub ramen_effect_weight: Option<f32>,
+    /// 隐藏风味消耗成本（preset 12.0）。
+    pub ramen_special_cost: Option<f32>,
+    /// 诀窍库存成本系数（preset 0.4）。
+    pub ramen_stock_cost: Option<f32>,
+    /// 地区选择训练收益权重（preset 40.0）。
+    pub region_xunlian_weight: Option<f32>,
+    /// 地区选择 PT 收益权重（preset 30.0）。
+    pub region_pt_weight: Option<f32>,
+    /// 地区选择 Hint 收益权重（preset 15.0）。
+    pub region_hint_weight: Option<f32>,
+    /// 地区选择友情收益权重（preset 1.5）。
+    pub region_youqing_weight: Option<f32>,
+    /// 地区选择弱位覆盖权重（preset 0.0）。
+    pub region_weak_cover_weight: Option<f32>,
+    /// 事件体力选项权重（preset 2.2）。
+    pub event_vital_weight: Option<f32>,
+    /// 事件心情选项权重（preset 40.0）。
+    pub event_motivation_weight: Option<f32>,
+    /// 事件负面 flag 惩罚（preset 300.0）。
+    pub event_bad_flag_penalty: Option<f32>,
+
+    // ---- LocalRamenConfig（trainer 层，三年统一）----
+    /// 早期羁绊估值（preset 8.0；0 = 关闭）。
+    pub early_bond_value: Option<f32>,
+    /// 点击 Hint 卡附加价值（preset 6.0）。
+    pub hint_bonus: Option<f32>,
+    /// 友人卡首次点击价值（preset 75.0）。
+    pub first_friend_click_value: Option<f32>,
+    /// 友人卡低羁绊点击价值（preset 35.0）。
+    pub low_friend_bond_value: Option<f32>,
+    /// 友人卡活跃阶段点击价值（preset 8.0）。
+    pub active_friend_value: Option<f32>,
+    /// 诀窍溢出压力阈值（preset 8）。
+    pub feeling_overflow_threshold: Option<i32>,
+    /// 超阈值溢出压力（preset 8.0）。
+    pub overflow_value: Option<f32>,
+    /// 训练评分让步上限（preset 140.0）。
+    pub max_base_score_sacrifice: Option<f32>,
+    /// 预留上限空间（preset 40.0；0 = 关闭）。
+    pub status_reserve_max: Option<f32>,
+    /// 动态属性平衡开关（preset `true`）。
+    pub dynamic_status_balance: Option<bool>,
+    /// 短板追赶强度（preset 0.5）。
+    pub status_gap_strength: Option<f32>,
+    /// 近上限衰减强度（preset 0.5）。
+    pub status_overflow_strength: Option<f32>,
+    /// 动态体力计价开关（preset `true`）。
+    pub dynamic_vital: Option<bool>,
+    /// 概率化 Hint 估值开关（preset `true`）。
+    pub probabilistic_hint: Option<bool>,
+    /// 期望失败模型开关（preset `true`）。
+    pub expected_fail: Option<bool>,
+    /// 剧本 PT 档位前瞻倍率（preset 0.0 = 关闭）。
+    pub checkpoint_scale: Option<f32>,
+    /// RMJ 达成跨档一次性奖励（preset 0.0 = 关闭）。
+    pub rmj_cross_bonus: Option<f32>,
+    /// 大成功跨档一次性奖励（preset 0.0 = 关闭）。
+    pub great_cross_bonus: Option<f32>,
+    /// 吃面窗口权重（preset 0.10）。
+    pub ramen_window_weight: Option<f32>,
+    /// 吃面-训练联动权重（preset 2.0）。
+    pub ramen_train_coupling_weight: Option<f32>,
+    /// 弱位训练偏好（preset 0.0 = 关闭）。
+    pub ramen_weak_train_boost: Option<f32>,
+    /// 隐藏风味饥饿权重（preset 300.0）。
+    pub friend_hidden_starve_weight: Option<f32>,
+    /// 未来供给缺口权重（preset 0.0，实测单调负收益，GA 可再探索）。
+    pub friend_future_hidden_weight: Option<f32>,
+    /// 友人主动使用权重（preset 150.0）。
+    pub friend_proactive_weight: Option<f32>,
+    /// 吃面必成价值权重（preset 3.0）。
+    pub eat_guarantee_weight: Option<f32>,
+    /// 诀窍边际库存权重（preset 40.0）。
+    pub cook2_stock_weight: Option<f32>,
+    /// 吃面前置训练约束开关（preset `true`）。
+    pub eat_requires_training: Option<bool>,
+    /// 吃面后必训练覆盖位约束开关（preset `true`）。
+    pub eat_requires_covered_train: Option<bool>,
+    /// 第三年吃面前软目标体力（preset 25；0 = 关闭）。
+    pub y3_pre_train_vital_target: Option<i32>,
+    /// 第三年训练后软目标体力（preset 0 = 关闭）。
+    pub y3_post_train_vital_target: Option<i32>,
+    /// 第三年体力缺口软成本（preset 0.5）。
+    pub y3_vital_shortfall_weight: Option<f32>,
+    /// 第三年训练后硬底线（preset 15；0 = 关闭）。
+    pub y3_post_train_hard_floor: Option<i32>,
+    /// 第三年恢复周期视野开关（preset `true`）。
+    pub y3_recovery_horizon: Option<bool>,
+    /// 友人外出替代休息开关（preset `true`）。
+    pub friend_outing_replaces_rest: Option<bool>,
+    /// 第三年友人外出体力恢复量（preset 0 = 关闭）。
+    pub friend_outing3_recovery_vital: Option<i32>,
+    /// 友人外出累计上限（按年，preset [0, 2, 5]，累计口径须单调且 ≤5）。
+    pub friend_outing_cumulative_caps: [Option<usize>; 3],
+    /// 动态特殊目标开关（preset `true`）。
+    pub dynamic_special_targets: Option<bool>
+}
+
+impl ParamOverride {
+    /// 全 `None` 覆盖层：与 [`RecommendedRamenTrainer::new()`] 基线逐位一致。
+    pub fn all_none() -> Self {
+        Self::default()
+    }
+}
+
+impl RecommendedRamenTrainer {
+    /// GA 通道构造器：在正式 preset 之上应用参数覆盖层。
+    ///
+    /// - `Some(v)` 覆盖、`None` 保留 preset（分年参数按年分别处理）；
+    /// - 与 `with_tokens` 严格隔离：本构造器不读取、不写入任何 token 状态；
+    /// - `effective_ramen_failure` 单基因同写 policy/local 两层（同一逻辑参数）。
+    pub fn with_overrides(ov: &ParamOverride) -> Self {
+        Self::apply_overrides_to(Self::new(), ov)
+    }
+
+    /// [`Self::with_overrides`] 的 rollout 变体：基于 [`Self::for_rollout()`]
+    /// （关闭评分分解/原因字符串/日志文本），决策与 `with_overrides` 逐位一致
+    /// （由 `recommended_for_rollout_decisions_identical` 与零差异测试共同保证）。
+    /// GA 批量评估走本构造器以省掉观测开销。
+    pub fn with_overrides_for_rollout(ov: &ParamOverride) -> Self {
+        Self::apply_overrides_to(Self::for_rollout(), ov)
+    }
+
+    /// 覆盖层应用核心：对三年配置逐位应用（`Some` 覆盖、`None` 跳过）。
+    fn apply_overrides_to(mut trainer: Self, ov: &ParamOverride) -> Self {
+        for year in 0..3 {
+            let year_trainer = &mut trainer.years[year];
+            let policy = &mut year_trainer.policy.config;
+            if let Some(v) = ov.vital_rest {
+                policy.vital_rest = v;
+            }
+            if let Some(v) = ov.vital_rest_eating[year] {
+                policy.vital_rest_eating = v;
+            }
+            if let Some(v) = ov.wisdom_vital_floor {
+                policy.wisdom_vital_floor = v;
+            }
+            if let Some(v) = ov.motivation_outing {
+                policy.motivation_outing = v;
+            }
+            if let Some(v) = ov.status_rate {
+                policy.status_rate = v;
+            }
+            if let Some(v) = ov.pt_rate[year] {
+                policy.pt_rate = v;
+            }
+            if let Some(v) = ov.pt_tradeoff {
+                policy.pt_tradeoff = v;
+            }
+            if let Some(v) = ov.pt_tradeoff_shining {
+                policy.pt_tradeoff_shining = v;
+            }
+            if let Some(v) = ov.pt_tradeoff_super {
+                policy.pt_tradeoff_super = v;
+            }
+            if let Some(v) = ov.cap_discount_weight {
+                policy.cap_discount_weight = v;
+            }
+            if let Some(v) = ov.failure_penalty {
+                policy.failure_penalty = v;
+            }
+            if let Some(v) = ov.effective_ramen_failure {
+                // 双层同写：policy 与 local 各持一份同逻辑参数（见 ParamOverride 文档）。
+                policy.effective_ramen_failure = v;
+                year_trainer.config.effective_ramen_failure = v;
+            }
+            if let Some(v) = ov.shining_bonus {
+                policy.shining_bonus = v;
+            }
+            if let Some(v) = ov.train_vital_value {
+                policy.train_vital_value = v;
+            }
+            if let Some(v) = ov.rest_base {
+                policy.rest_base = v;
+            }
+            if let Some(v) = ov.rest_vital_value {
+                policy.rest_vital_value = v;
+            }
+            if let Some(v) = ov.rest_target_vital {
+                policy.rest_target_vital = v;
+            }
+            if let Some(v) = ov.race_panel_discount {
+                policy.race_panel_discount = v;
+            }
+            if let Some(v) = ov.race_free_urgency_weight {
+                policy.race_free_urgency_weight = v;
+            }
+            if let Some(v) = ov.race_gate_slack {
+                policy.race_gate_slack = v;
+            }
+            if let Some(v) = ov.outing_base {
+                policy.outing_base = v;
+            }
+            if let Some(v) = ov.friend_outing_bonus {
+                policy.friend_outing_bonus = v;
+            }
+            if let Some(v) = ov.ramen_pt_weight {
+                policy.ramen_pt_weight = v;
+            }
+            if let Some(v) = ov.ramen_effect_weight {
+                policy.ramen_effect_weight = v;
+            }
+            if let Some(v) = ov.ramen_special_cost {
+                policy.ramen_special_cost = v;
+            }
+            if let Some(v) = ov.ramen_stock_cost {
+                policy.ramen_stock_cost = v;
+            }
+            if let Some(v) = ov.region_xunlian_weight {
+                policy.region_xunlian_weight = v;
+            }
+            if let Some(v) = ov.region_pt_weight {
+                policy.region_pt_weight = v;
+            }
+            if let Some(v) = ov.region_hint_weight {
+                policy.region_hint_weight = v;
+            }
+            if let Some(v) = ov.region_youqing_weight {
+                policy.region_youqing_weight = v;
+            }
+            if let Some(v) = ov.region_weak_cover_weight {
+                policy.region_weak_cover_weight = v;
+            }
+            if let Some(v) = ov.event_vital_weight {
+                policy.event_vital_weight = v;
+            }
+            if let Some(v) = ov.event_motivation_weight {
+                policy.event_motivation_weight = v;
+            }
+            if let Some(v) = ov.event_bad_flag_penalty {
+                policy.event_bad_flag_penalty = v;
+            }
+
+            let local = &mut year_trainer.config;
+            if let Some(v) = ov.early_bond_value {
+                local.early_bond_value = v;
+            }
+            if let Some(v) = ov.hint_bonus {
+                local.hint_bonus = v;
+            }
+            if let Some(v) = ov.first_friend_click_value {
+                local.first_friend_click_value = v;
+            }
+            if let Some(v) = ov.low_friend_bond_value {
+                local.low_friend_bond_value = v;
+            }
+            if let Some(v) = ov.active_friend_value {
+                local.active_friend_value = v;
+            }
+            if let Some(v) = ov.feeling_overflow_threshold {
+                local.feeling_overflow_threshold = v;
+            }
+            if let Some(v) = ov.overflow_value {
+                local.overflow_value = v;
+            }
+            if let Some(v) = ov.max_base_score_sacrifice {
+                local.max_base_score_sacrifice = v;
+            }
+            if let Some(v) = ov.status_reserve_max {
+                local.status_reserve_max = v;
+            }
+            if let Some(v) = ov.dynamic_status_balance {
+                local.dynamic_status_balance = v;
+            }
+            if let Some(v) = ov.status_gap_strength {
+                local.status_gap_strength = v;
+            }
+            if let Some(v) = ov.status_overflow_strength {
+                local.status_overflow_strength = v;
+            }
+            if let Some(v) = ov.dynamic_vital {
+                local.dynamic_vital = v;
+            }
+            if let Some(v) = ov.probabilistic_hint {
+                local.probabilistic_hint = v;
+            }
+            if let Some(v) = ov.expected_fail {
+                local.expected_fail = v;
+            }
+            if let Some(v) = ov.checkpoint_scale {
+                local.checkpoint_scale = v;
+            }
+            if let Some(v) = ov.rmj_cross_bonus {
+                local.rmj_cross_bonus = v;
+            }
+            if let Some(v) = ov.great_cross_bonus {
+                local.great_cross_bonus = v;
+            }
+            if let Some(v) = ov.ramen_window_weight {
+                local.ramen_window_weight = v;
+            }
+            if let Some(v) = ov.ramen_train_coupling_weight {
+                local.ramen_train_coupling_weight = v;
+            }
+            if let Some(v) = ov.ramen_weak_train_boost {
+                local.ramen_weak_train_boost = v;
+            }
+            if let Some(v) = ov.friend_hidden_starve_weight {
+                local.friend_hidden_starve_weight = v;
+            }
+            if let Some(v) = ov.friend_future_hidden_weight {
+                local.friend_future_hidden_weight = v;
+            }
+            if let Some(v) = ov.friend_proactive_weight {
+                local.friend_proactive_weight = v;
+            }
+            if let Some(v) = ov.eat_guarantee_weight {
+                local.eat_guarantee_weight = v;
+            }
+            if let Some(v) = ov.cook2_stock_weight {
+                local.cook2_stock_weight = v;
+            }
+            if let Some(v) = ov.eat_requires_training {
+                local.eat_requires_training = v;
+            }
+            if let Some(v) = ov.eat_requires_covered_train {
+                local.eat_requires_covered_train = v;
+            }
+            if let Some(v) = ov.y3_pre_train_vital_target {
+                local.y3_pre_train_vital_target = v;
+            }
+            if let Some(v) = ov.y3_post_train_vital_target {
+                local.y3_post_train_vital_target = v;
+            }
+            if let Some(v) = ov.y3_vital_shortfall_weight {
+                local.y3_vital_shortfall_weight = v;
+            }
+            if let Some(v) = ov.y3_post_train_hard_floor {
+                local.y3_post_train_hard_floor = v;
+            }
+            if let Some(v) = ov.y3_recovery_horizon {
+                local.y3_recovery_horizon = v;
+            }
+            if let Some(v) = ov.friend_outing_replaces_rest {
+                local.friend_outing_replaces_rest = v;
+            }
+            if let Some(v) = ov.friend_outing3_recovery_vital {
+                local.friend_outing3_recovery_vital = v;
+            }
+            for (slot, cap) in local.friend_outing_cumulative_caps.iter_mut().zip(ov.friend_outing_cumulative_caps) {
+                if let Some(v) = cap {
+                    *slot = v;
+                }
+            }
+            if let Some(v) = ov.dynamic_special_targets {
+                local.dynamic_special_targets = v;
+            }
+        }
+        trainer
+    }
+}
+
 impl Default for RecommendedRamenTrainer {
     fn default() -> Self {
         Self::new()
@@ -2100,6 +2521,126 @@ mod tests {
     use crate::game::{Game, Trainer};
 
     use super::{LocalRamenConfig, LocalRamenTrainer, LocalTrainCache, RamenPolicyConfig, RecommendedRamenTrainer};
+
+    // ==================== GA 零差异验证（design.md §7 · 配置层） ====================
+
+    /// 把配置对象的 `{:#?}` 输出按行对比，返回 (是否全等, 首个差异描述)。
+    ///
+    /// LocalRamenConfig 未 derive PartialEq，用 Debug 逐行对比实现"逐字段 OK/NG"：
+    /// derive(Debug) 会展开全部字段，任何字段不同都会体现为行差异。
+    ///
+    /// `tolerant = false`（all_none 通道）：逐字符全等——零差异铁律。
+    /// `tolerant = true`（all_preset 回环通道）：数值行允许 1e-4 相对误差——
+    /// f32 基因空间量化（1.8 → gene 0.36 → 回读 1.8000001）是编码固有误差，
+    /// 非逻辑错误；整数/布尔行仍逐字符全等。
+    fn ga_config_line_diff(
+        a: &impl std::fmt::Debug,
+        b: &impl std::fmt::Debug,
+        tolerant: bool
+    ) -> (bool, String) {
+        let la: Vec<String> = format!("{a:#?}").lines().map(String::from).collect();
+        let lb: Vec<String> = format!("{b:#?}").lines().map(String::from).collect();
+        if la.len() != lb.len() {
+            return (false, format!("行数不同 {} vs {}", la.len(), lb.len()));
+        }
+        let parse_num = |line: &str| -> Option<f64> {
+            // Debug 行形如 "    field: 1.8,"，取冒号后到结尾去掉逗号再解析
+            let val = line.split_once(':')?.1.trim().trim_end_matches(',');
+            val.parse::<f64>().ok()
+        };
+        for (i, (x, y)) in la.iter().zip(lb.iter()).enumerate() {
+            if x == y {
+                continue;
+            }
+            if tolerant {
+                if let (Some(nx), Some(ny)) = (parse_num(x), parse_num(y)) {
+                    let rel = ((nx - ny).abs()) / nx.abs().max(1e-12);
+                    if rel <= 1e-4 {
+                        continue;
+                    }
+                }
+            }
+            return (false, format!("第 {i} 行: {x} != {y}"));
+        }
+        (true, format!("共 {} 行全等", la.len()))
+    }
+
+    /// GA 零差异验证第一层（配置层）：全 None 覆盖层与全 preset 回环基因组
+    /// 产出的三年配置必须与 `new()` 逐字段一致。
+    ///
+    /// 覆盖四个通道：
+    /// 1. `with_overrides(all_none)`（观测模式）；
+    /// 2. `with_overrides_for_rollout(all_none)`（rollout 模式，GA 批评估实际走的路径）；
+    /// 3. `with_overrides(decode(GaGenome::all_preset()))`（基因空间 Some(preset) 回环；
+    ///    `wisdom_vital_floor`/`pt_tradeoff_shining` 的 preset 不可单值表示，基因位
+    ///    为 None，同样应保留 preset）。
+    /// 4. `ParamOverride::all_none()` ≡ `ParamOverride::default()`。
+    ///
+    /// 这是 GA 正确性的地基：全 None 基因组必须 ≡ 现行为，否则 GA 基线漂移。
+    #[test]
+    fn ga_zero_diff_configs_all_none_preset_identical() -> Result<()> {
+        use crate::genetic_optimizer::{GaGenome, decode};
+        use crate::utils::Checks;
+        use super::ParamOverride;
+
+        // 自带引导（禁止依赖其他测试的字母序先初始化全局）：new() 的
+        // pt_tradeoff_shining 分段读取 GAMECONFIG，未初始化会 panic。
+        let workspace_root = crate::utils::get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = crate::utils::init_test_logger("error");
+        let _ = crate::gamedata::init_global();
+
+        let baseline = RecommendedRamenTrainer::new();
+        let all_none = ParamOverride::all_none();
+        let from_rollout = RecommendedRamenTrainer::with_overrides_for_rollout(&all_none);
+        let from_obs = RecommendedRamenTrainer::with_overrides(&all_none);
+        let preset_genome_ov =
+            decode(&GaGenome::all_preset()).expect("all_preset 是合法基因组，解码必成功");
+        let from_preset_genome = RecommendedRamenTrainer::with_overrides(&preset_genome_ov);
+
+        let mut c = Checks::new();
+
+        for (label, trainer) in [
+            ("with_overrides(all_none)", &from_obs),
+            ("with_overrides_for_rollout(all_none)", &from_rollout),
+            ("with_overrides(decode(all_preset))", &from_preset_genome)
+        ] {
+            for year in 0..3 {
+                let base_year = &baseline.years[year];
+                let test_year = &trainer.years[year];
+
+                // all_none 通道逐字符全等；preset 回环通道容忍 f32 量化
+                let tolerant = label.contains("all_preset");
+                // policy 层（RamenPolicyConfig，34 字段，derive(Debug) 全展开）
+                let (ok, detail) =
+                    ga_config_line_diff(&base_year.policy.config, &test_year.policy.config, tolerant);
+                println!("  {label} 第{}年 policy: {}", year + 1, detail);
+                c.check(ok, &format!("{label} 第{}年 policy 配置逐字段一致", year + 1));
+
+                // trainer 层（LocalRamenConfig，约 50 字段）
+                let (ok, detail) = ga_config_line_diff(&base_year.config, &test_year.config, tolerant);
+                println!("  {label} 第{}年 local: {}", year + 1, detail);
+                c.check(ok, &format!("{label} 第{}年 local 配置逐字段一致", year + 1));
+            }
+        }
+
+        // 抽查关键 preset 锚点字段（防 Debug 全等掩盖字段名错位）
+        println!("锚点抽查: vital_rest={:?} rest_target={:?} caps={:?} dynamic_vital={:?}",
+            from_obs.years[0].policy.config.vital_rest,
+            from_obs.years[0].policy.config.rest_target_vital,
+            from_obs.years[0].config.friend_outing_cumulative_caps,
+            from_obs.years[0].config.dynamic_vital
+        );
+        c.check(from_obs.years[0].policy.config.vital_rest == 40, "第1年 vital_rest preset = 40");
+        c.check(from_obs.years[0].policy.config.rest_target_vital == 55, "第1年 rest_target_vital preset = 55");
+        c.check(
+            from_obs.years[0].config.friend_outing_cumulative_caps == [0, 2, 5],
+            "友人外出累计上限 preset = [0, 2, 5]"
+        );
+        c.check(from_obs.years[0].config.dynamic_vital, "dynamic_vital preset = true");
+
+        c.finish()
+    }
 
     /// 第1年地区选择（turn 2 在 run_begin 内联触发、stage=Begin）必须走 decide_region 打分。
     ///
@@ -2526,7 +3067,8 @@ mod tests {
         let mut local_off = LocalRamenConfig::default();
         local_off.eat_requires_covered_train = false;
         local_off.ramen_window_weight = 0.10;
-        let off = LocalRamenTrainer::with_configs(policy, local_off);
+        // 门控关闭对照实例（文档断言3待补实现，当前仅验证可构建）
+        let _off = LocalRamenTrainer::with_configs(policy, local_off);
 
         let mut game = RamenGame::newgame(
             102601,
