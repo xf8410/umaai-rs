@@ -18,6 +18,10 @@ use umasim::{
     utils::{get_workspace_root, load_game_config}
 };
 const BASE_SEED: u64 = 61444;
+/// 种子基座可注入：CI 复跑时经 BASE_SEED env 换新种子块，未设置时保持 61444 历史口径。
+fn base_seed() -> u64 {
+    std::env::var("BASE_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(BASE_SEED)
+}
 const UMA: u32 = 102601;
 const DECK: [u32; 6] = [302424, 302894, 303044, 302924, 303024, 303054];
 const INHERIT: InheritInfo = InheritInfo {
@@ -85,7 +89,7 @@ fn status_score(s: &[i32; 5]) -> i32 {
         .sum()
 }
 fn run<T: Trainer<RamenGame>>(t: T, i: u64) -> Result<bench::GameOutcome> {
-    bench::run_seeded(UMA, &DECK, &INHERIT, BASE_SEED, i, &LoggingTrainer::new(t, i))
+    bench::run_seeded(UMA, &DECK, &INHERIT, base_seed(), i, &LoggingTrainer::new(t, i))
 }
 fn main() -> Result<()> {
     let variant = env::var("VARIANT").context("缺少 VARIANT")?;

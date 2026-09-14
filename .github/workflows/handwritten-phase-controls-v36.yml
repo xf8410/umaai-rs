@@ -6,6 +6,10 @@ on:
         description: Same-seed games per shard
         required: false
         default: '100'
+      base_seed:
+        description: Seed base (default 61444 keeps historical alignment)
+        required: false
+        default: '61444'
 permissions:
   contents: read
 jobs:
@@ -35,6 +39,7 @@ jobs:
       STRUCTURE_Y3: ${{ matrix.y3 }}
       SHARD: ${{ matrix.shard }}
       RUNS_PER_SHARD: ${{ inputs.runs_per_shard }}
+      BASE_SEED: ${{ inputs.base_seed }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
