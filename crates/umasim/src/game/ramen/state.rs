@@ -127,11 +127,6 @@ pub struct RamenState {
 }
 
 /// 拉面效果合并（基础效果 + 地区效果 + 超级拉面效果 + Pt常驻效果）
-///
-/// 字段对应剧本加成词条，参见 ramen_memo_cn 的"剧本加成"和"训练计算公式"。
-/// 训练数值公式：
-/// - 属性: lower_value * (100 + xunlian)/100 * (100 + youqing)/100
-/// - PT: lower_value * (100 + xunlian)/100 * (100 + youqing)/100 * (100 + pt_bonus)/100
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct RamenEffect {
     // ========== 基础效果 ==========
@@ -325,14 +320,12 @@ impl RamenState {
 impl RamenGame {
     /// 创建新的拉面杯游戏实例
     pub fn newgame(uma_id: u32, deck_ids: &[u32; 6], inherit: InheritInfo) -> Result<Self> {
-        // 检测卡组是否携带新友人卡(card_id=30305，rank=1-4，即 idrank 303051-303054)
-        // 注意：旧实现 `id / 10 == 30305` 会误判 rank=0（303050）和 rank=5-9（303055-303059）
-        let has_new_friend = deck_ids.iter().any(|&idrank| {
-            let rank = idrank % 10;
-            idrank / 10 == 30305 && (1..=4).contains(&rank)
-        });
+        // 检测卡组是否携带新友人卡（card_id=30305，突破等级 rank 0-4，idrank 303050-303054）
+        // rank=0 为未突破（合法）；rank=5-9（303055-303059）超出突破等级范围（非法）。
+        // 注意：rank 范围检查是必须的——只按 `id / 10 == 30305` 判断会放过 rank>4 的非法 idrank。
+        let has_new_friend = deck_ids.iter().any(|&idrank| idrank / 10 == 30305 && idrank % 10 <= 4);
         if !has_new_friend {
-            anyhow::bail!("卡组未携带新友人卡(idrank=303051-303054，card_id=30305)，拉面杯模拟器仅支持新友人卡组");
+            anyhow::bail!("卡组未携带合法的新友人卡(idrank=303050-303054，card_id=30305)，拉面杯模拟器仅支持新友人卡组");
         }
         let mut ret = RamenGame {
             base: BaseGame::new(uma_id, deck_ids, inherit, global!(RAMENDATA).status_limit_base())?,
@@ -352,11 +345,55 @@ impl RamenGame {
         ret.base
             .friend_event_ids
             .extend(global!(RAMENDATA).friend_events.values().map(|e| e.id));
-        // 携带4种卡以上才能分身
+        // 五维属性上限：基值已由 [`BaseGame::new`] 用 [`RamenScenarioData::status_limit_base`]
+        // 初始化并叠加开局继承增量（[`InheritInfo::inherit_limit_newgame`]）。**不得**在此处
+        // 整体赋值 `five_status_limit`，那会把开局继承增量擦掉（PR #25 修复后该路径已删除）。
+        // 若基值需要修正，必须改 [`BaseGame::new`] 的构造顺序。
+        //
+        // 注意：温泉剧本对应字段（onsen/game.rs:135）有 `min(2800)` 防御性 cap，
+        // 但拉面剧本 speed 基础上限是 3100，`min(2800)` 会硬截断——把限高速玩家进 3100+
+        // 区间到不可达。两剧本基值范围不同，不能共用同一 cap：拉面无防御需要。
+        // 携带4种以上卡才能分身
         ret.deck_can_split = ret.card_type_count.iter().filter(|x| **x > 0).count() >= 4;
         // 初始化人头（Game trait 方法）
         Game::init_persons(&mut ret)?;
         Ok(ret)
+    }
+
+    /// 由**外部输入**（协议 `parse_basegame`）重建拉面剧本基础
+    ///
+    /// 与 [`Self::newgame`] 的差别在于基底 `BaseGame` 的构造方式：
+    /// - [`BaseGame::new`] 会从 gamedata 重建 Uma、推算 `five_status_limit` 并合并
+    ///   `friend_event_ids`；`from_base_game` **不做**这些，基底完全按外部输入落地
+    ///   （Uma / Friend 经 `parse_uma` / `parse_friend` 重建，`five_status_limit` 取协议值，
+    ///   `friend_event_ids` 不合并、保持外部给定）。
+    /// - 这里只做拉面剧本的胶水初始化：校验卡组、装备默认状态、计算分身条件。
+    pub fn from_base_game(base: BaseGame) -> Result<Self> {
+        // 检测卡组是否携带新友人卡（card_id=30305，rank=1-4；与 newgame 同口径）
+        let has_new_friend = base
+            .deck
+            .iter()
+            .any(|card| card.card_id == 30305);
+        if !has_new_friend {
+            anyhow::bail!("卡组未携带新友人卡(card_id=30305)，拉面杯模拟器仅支持新友人卡组");
+        }
+        // 携带4种以上卡才能分身
+        let deck_can_split = base.card_type_count.iter().filter(|x| **x > 0).count() >= 4;
+        // 未合并 `RAMENDATA.friend_events` 到 `friend_event_ids`：友人事件按外部判定，
+        // 不再依赖协议之外的剧本友人事件集合。
+        Ok(Self {
+            base,
+            stage: RamenStage::Begin,
+            persons: vec![],
+            ramen: RamenState::default(),
+            current_effect: RamenEffect::default(),
+            deck_can_split,
+            internal_rng: None,
+            rule_master: None,
+            turn_fixed: None,
+            strategy: None,
+            event: None
+        })
     }
 
     /// 添加友人卡和NPC（第2回合开始）

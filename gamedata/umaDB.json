@@ -3842,6 +3842,44 @@
     ],
     "star": 5
   },
+  "104302": {
+    "bonusData": [],
+    "fiveStatusBonus": [
+      8,
+      0,
+      8,
+      14,
+      0
+    ],
+    "fiveStatusInitial": [
+      120,
+      103,
+      117,
+      111,
+      99
+    ],
+    "freeRaces": [
+      {
+        "startTurn": 12,
+        "endTurn": 24,
+        "count": 1
+      }
+    ],
+    "gameId": 104302,
+    "name": "[嗷呜嗷呜☆捣蛋鬼]新光风",
+    "preferRaces": [],
+    "preferReds": [],
+    "races": [
+      11,
+      35,
+      36,
+      49,
+      51,
+      59,
+      70
+    ],
+    "star": 5
+  },
   "104401": {
     "bonusData": [],
     "fiveStatusBonus": [
@@ -9271,6 +9309,41 @@
     ],
     "star": 5
   },
+  "112702": {
+    "bonusData": [],
+    "fiveStatusBonus": [
+      10,
+      10,
+      0,
+      10,
+      0
+    ],
+    "fiveStatusInitial": [
+      97,
+      133,
+      110,
+      107,
+      103
+    ],
+    "freeRaces": [],
+    "gameId": 112702,
+    "name": "[刚毅之紫焰]超常骏骥",
+    "preferRaces": [],
+    "preferReds": [],
+    "races": [
+      11,
+      23,
+      31,
+      33,
+      43,
+      45,
+      53,
+      55,
+      59,
+      71
+    ],
+    "star": 5
+  },
   "112901": {
     "bonusData": [],
     "fiveStatusBonus": [
@@ -9753,6 +9826,45 @@
       48,
       59,
       71
+    ],
+    "star": 5
+  },
+  "114901": {
+    "bonusData": [],
+    "fiveStatusBonus": [
+      0,
+      10,
+      10,
+      10,
+      0
+    ],
+    "fiveStatusInitial": [
+      111,
+      99,
+      113,
+      120,
+      107
+    ],
+    "freeRaces": [
+      {
+        "startTurn": 12,
+        "endTurn": 22,
+        "count": 1
+      }
+    ],
+    "gameId": 114901,
+    "name": "[绝佳之晓暗]蝴蝶兰",
+    "preferRaces": [],
+    "preferReds": [],
+    "races": [
+      11,
+      30,
+      33,
+      43,
+      55,
+      56,
+      63,
+      68
     ],
     "star": 5
   }

@@ -121,10 +121,10 @@ impl GameConstants {
     }
 
     /// 随机事件为支援卡，马娘，掉心情和不发生的分布
-    pub fn get_event_distribution(&self) -> Vec<f64> {
+    pub fn get_event_distribution(&self) -> [f64; 4] {
         let probs = &self.event_probs;
-        let mut ret = vec![probs["card_event"], probs["uma_event"], probs["drop_motivation"]];
-        ret.push(1.0 - ret[0] - ret[1] - ret[2]);
+        let mut ret = [probs["card_event"], probs["uma_event"], probs["drop_motivation"], 0.0];
+        ret[3] = 1.0 - ret[0] - ret[1] - ret[2];
         ret
     }
 }
@@ -191,7 +191,21 @@ pub struct MctsConfig {
     ///
     /// 拉面规则层已由无状态流接管（RNG Refactor Plan v2 §5.2），不受此开关影响。
     #[serde(default = "default_mcts_crn_stage_reseed")]
-    pub crn_stage_reseed: bool
+    pub crn_stage_reseed: bool,
+    /// 决策理由分差门限（保留字段，不再用作触发器）
+    ///
+    /// 当前每回合都输出决策理由；分差仅用于选择其他候选的显示颜色档位
+    ///（与最优项的差距 <30/<100/<300/其余 → 亮绿/绿/黄/灰）。字段值仍
+    /// 写入 [`DecisionReasonData::threshold`]，供下游兼容与对照。
+    #[serde(default = "default_mcts_reason_gap_threshold")]
+    pub reason_gap_threshold: f64,
+    /// 决策理由最多显示选项数
+    ///
+    /// 全部候选按评分降序只取前 N 个进入显示与分析，其余**直接排除**：
+    /// 不显示内容、不做原因分析。中选者一般也在前 N 内；若不在，渲染时
+    /// 仍按"首选"在第 1 行单独显示。
+    #[serde(default = "default_mcts_reason_max_display")]
+    pub reason_max_display: usize
 }
 
 impl Default for MctsConfig {
@@ -208,7 +222,9 @@ impl Default for MctsConfig {
             search_group_size: default_mcts_search_group_size(),
             search_cpuct: default_mcts_search_cpuct(),
             expected_search_stdev: default_mcts_expected_search_stdev(),
-            crn_stage_reseed: default_mcts_crn_stage_reseed()
+            crn_stage_reseed: default_mcts_crn_stage_reseed(),
+            reason_gap_threshold: default_mcts_reason_gap_threshold(),
+            reason_max_display: default_mcts_reason_max_display()
         }
     }
 }
@@ -261,6 +277,17 @@ fn default_mcts_expected_search_stdev() -> f64 {
 /// [`MctsConfig::crn_stage_reseed`] 默认值
 fn default_mcts_crn_stage_reseed() -> bool {
     true
+}
+
+/// `reason_gap_threshold` 缺省值：保留兼容值，分差档位（<30/<100/<300/其余）
+/// 在 `reason.rs` 内硬编码；颜色档位不再依赖此门限
+fn default_mcts_reason_gap_threshold() -> f64 {
+    150.0
+}
+
+/// `reason_max_display` 缺省值：理由最多显示/分析评分前 5 个选项
+fn default_mcts_reason_max_display() -> usize {
+    5
 }
 
 /// 训练数据生成（collector）配置
@@ -596,7 +623,30 @@ pub struct GameConfig {
     ///
     /// 例如 `[[10, 12, 14]]`：第3年固定选 [10,12,14]
     #[serde(default)]
-    pub ramen_region_fixed: Option<Vec<[usize; 3]>>
+    pub ramen_region_fixed: Option<Vec<[usize; 3]>>,
+    /// 拉面手写策略：为多拿总 PT 最多愿意牺牲的总评分（评分换PT，顶层可调）
+    ///
+    /// 语义：策略终盘训练主属性已满的位时只剩 PT 收益；本值表示玩家愿意
+    /// 为该训练位多产的 PT **总共**放弃多少最终评分（不是每 PT 的单价）。
+    /// 内部映射到「已满位 + 有彩圈」训练的 PT 定价（实测标定曲线，7 build×100局）：
+    ///
+    /// | 本值（最多牺牲总评分） | 内部定价 | 实测得分 | 实际牺牲 | skill_pt |
+    /// |---|---:|---:|---:|---:|
+    /// | 0（默认，评分优先） | 36 | 65266 | 0（基准） | 8600 |
+    /// | ≤60 | 44 | 65214 | 52 | 8625 |
+    /// | ≤160 | 52 | 65210 | 56 | 8650 |
+    /// | ≤550 | 64 | 64733 | 533 | 8690（PT 峰值） |
+    ///
+    /// 只影响已满位训练（未满位训练/比赛/事件的 PT 估值不变），超过 64 的
+    /// 定价会误选已满位导致评分与 PT 双降，故内部封顶在 64。
+    #[serde(default = "default_ramen_pt_sacrifice_score")]
+    pub ramen_pt_sacrifice_score: f32,
+}
+
+fn default_ramen_pt_sacrifice_score() -> f32 {
+    // 默认 0 = 评分优先（已满位+有彩圈定价 36，实测评分峰值）。
+    // >0 = 为多拿总 PT 愿意牺牲的评分（见 GameConfig::ramen_pt_sacrifice_score 标定表）。
+    0.0
 }
 
 fn default_mcts_turn_bonus() -> i32 {
@@ -604,7 +654,7 @@ fn default_mcts_turn_bonus() -> i32 {
 }
 
 fn default_pt_favor_rate() -> f32 {
-    8.0
+    1.0
 }
 
 fn default_race_grades() -> Vec<i32> {
@@ -647,6 +697,7 @@ impl GameConfig {
             pt_favor_rate: default_pt_favor_rate(),
             race_grades: default_race_grades(),
             ramen_region_strategy: RamenRegionStrategy::default(),
+            ramen_pt_sacrifice_score: default_ramen_pt_sacrifice_score(),
             ramen_region_fixed: None
         }
     }
@@ -680,6 +731,7 @@ impl GameConfig {
     pub fn policy(&self) -> PolicyConfig {
         PolicyConfig {
             ramen_region_strategy: self.ramen_region_strategy,
+            ramen_pt_sacrifice_score: self.ramen_pt_sacrifice_score,
             ramen_region_fixed: self.ramen_region_fixed.clone()
         }
     }
@@ -764,6 +816,8 @@ pub enum RamenRegionStrategy {
 pub struct PolicyConfig {
     /// 拉面杯第3年地区选择策略
     pub ramen_region_strategy: RamenRegionStrategy,
+    /// 为多拿总 PT 最多愿意牺牲的总评分（映射见 [`GameConfig::ramen_pt_sacrifice_score`]）
+    pub ramen_pt_sacrifice_score: f32,
     /// 第3年固定地区组合（`Fixed` 策略时生效；长度必须 = 1，每项为 3 个地区 id）
     ///
     /// 例如 `[[10, 12, 14]]`：第3年固定选 [10,12,14]
@@ -832,7 +886,13 @@ pub struct OverrideGameConfig {
     /// `None` = 不覆盖 default；写 `ramen_region_fixed = [[.., .., ..]]` 即覆盖；
     /// 要显式清空 default 的 fixed 组合可写空数组 `[]`。
     #[serde(default)]
-    pub ramen_region_fixed: Option<Vec<[usize; 3]>>
+    pub ramen_region_fixed: Option<Vec<[usize; 3]>>,
+    /// 为多拿总 PT 最多愿意牺牲的总评分（顶层覆盖；对应
+    /// `GameConfig::ramen_pt_sacrifice_score`）。`None` = 不覆盖 default。
+    ///
+    /// 须写在 game_config.toml 所有 `[xxx]` 段之前（同 `ramen_region_strategy`）。
+    #[serde(default)]
+    pub ramen_pt_sacrifice_score: Option<f32>
 }
 
 /// MCTS 覆盖配置：每个字段都是可选覆盖（`None` = 不覆盖 `default_config.toml`）。
@@ -878,7 +938,13 @@ pub struct OverrideMctsConfig {
     pub expected_search_stdev: Option<f64>,
     /// 是否按阶段重播种 rollout 随机流（可选覆盖）
     #[serde(default)]
-    pub crn_stage_reseed: Option<bool>
+    pub crn_stage_reseed: Option<bool>,
+    /// 决策理由分差门限（可选覆盖；`0` 等价禁用理由输出）
+    #[serde(default)]
+    pub reason_gap_threshold: Option<f64>,
+    /// 决策理由最多显示选项数（可选覆盖）
+    #[serde(default)]
+    pub reason_max_display: Option<usize>
 }
 
 /// 简化的覆盖配置 - GameConfig部分
@@ -901,6 +967,13 @@ pub struct OverrideConfig {
     /// 种马额外属性（可选覆盖）
     #[serde(default)]
     pub extra_count: Option<Array6>,
+    /// 训练员类型（可选覆盖；`"manual" | "random" | "handwritten" | "collector" | "neuralnet" | "mcts"`）
+    ///
+    /// `None` = 不覆盖 `default_config.toml`（仍是 `handwritten`）。
+    /// `trainer` 是 `GameConfig` 顶层字段、原本不在 `OverrideConfig` 里，
+    /// 此处加进来让 `game_config.toml` 能顶层切换 trainer 跑特定场景（不污染 default）。
+    #[serde(default)]
+    pub trainer: Option<String>,
     /// 温泉选择是否使用蒙特卡洛（可选覆盖）
     #[serde(default)]
     pub mcts_selected_onsen: Option<bool>,
@@ -941,6 +1014,9 @@ impl OverrideGameConfig {
         }
         if let Some(v) = o.log_level {
             ret.log_level = v;
+        }
+        if let Some(v) = o.trainer {
+            ret.trainer = v;
         }
         if let Some(v) = o.mcts_selected_onsen {
             ret.mcts_selected_onsen = v;
@@ -994,11 +1070,20 @@ impl OverrideGameConfig {
         if let Some(v) = m.crn_stage_reseed {
             ret.mcts.crn_stage_reseed = v;
         }
+        if let Some(v) = m.reason_gap_threshold {
+            ret.mcts.reason_gap_threshold = v;
+        }
+        if let Some(v) = m.reason_max_display {
+            ret.mcts.reason_max_display = v;
+        }
         if let Some(v) = self.ramen_region_strategy {
             ret.ramen_region_strategy = v;
         }
         if let Some(v) = self.ramen_region_fixed {
             ret.ramen_region_fixed = Some(v);
+        }
+        if let Some(v) = self.ramen_pt_sacrifice_score {
+            ret.ramen_pt_sacrifice_score = v;
         }
         ret
     }
@@ -1024,6 +1109,7 @@ mod tests {
             cards: None,
             blue_count: None,
             extra_count: None,
+            trainer: None,
             mcts_selected_onsen: None,
             log_level: None,
             num_threads: None,
@@ -1039,7 +1125,8 @@ mod tests {
             config_override: cfg,
             mcts: OverrideMctsConfig::default(),
             ramen_region_strategy: None,
-            ramen_region_fixed: None
+            ramen_region_fixed: None,
+            ramen_pt_sacrifice_score: None
         }
     }
 
@@ -1223,7 +1310,7 @@ radical_factor_max = 1.4
         let merged = ov.merge(&base);
         dump_mcts("日常路径 merge 后", &merged.mcts);
         let mut c = Checks::new();
-        c.check(merged.mcts.search_group_size == 2048, "search_group_size == 2048");
+        c.check(merged.mcts.search_group_size == 512, "search_group_size == 512");
         c.check(
             merged.mcts.expected_search_stdev == 15000.0,
             "expected_search_stdev == 15000.0"

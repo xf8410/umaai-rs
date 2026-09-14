@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use comfy_table::{ColumnConstraint, Table, Width};
 use enum_iterator::Sequence;
 use rand::{Rng, rngs::StdRng, seq::IndexedRandom};
-use rand_distr::{Distribution, weighted::WeightedIndex};
+use rand_distr::Distribution;
 
 use crate::{
     diag,
@@ -28,7 +28,7 @@ use crate::{
     },
     gamedata::{onsen::ONSENDATA, *},
     global,
-    utils::{AttributeArray, global_events, system_event, system_event_prob}
+    utils::{AttributeArray, global_event_distribution, global_events, system_event, system_event_prob}
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -191,7 +191,11 @@ impl DerefMut for BasicGame {
 
 impl BasicGame {
     pub fn add_person(&mut self, mut person: BasePerson) {
-        diag!("新训练角色: {}", person.explain());
+        // enabled() 包裹：person.explain() 构造 String，MCTS rollout 期间由 DiagGuard 静默
+        #[cfg(feature = "diag")]
+        if crate::output::diagnostic::enabled() {
+            diag!("新训练角色: {}", person.explain());
+        }
         person.person_index = self.persons.len() as i32;
         self.persons.push(person);
     }
@@ -335,8 +339,7 @@ impl Game for BasicGame {
                 }
             }
             // 之后处理一般随机事件
-            let weights = WeightedIndex::new(global!(GAMECONSTANTS).get_event_distribution()).expect("event weights");
-            match weights.sample(rng) {
+            match global_event_distribution().sample(rng) {
                 0 => {
                     // 支援卡事件. 再精细一点模拟 后一段事件发生次数不能多于前一段事件
                     let card_event_times: Vec<_> = vec![8001, 8002, 8003]
@@ -390,8 +393,14 @@ impl Game for BasicGame {
         //diag!("-- Turn {}-{:?} --", self.turn, self.stage);
         match self.stage {
             TurnStage::Begin => {
-                println!("-----------------------------------------");
-                diag!("{}", self.explain()?);
+                // enabled() 包裹：explain() 构造 String，rollout 期间静默；
+                // 原先的 cfg println 分隔线一并纳入 diag!（受运行时开关管辖，
+                // 否则 rollout 时该线每回合直打 stdout，无任何开关能屏蔽）
+                #[cfg(feature = "diag")]
+                if crate::output::diagnostic::enabled() {
+                    diag!("-----------------------------------------");
+                    diag!("{}", self.explain()?);
+                }
                 let mut events = self.generate_events(rng);
                 // 友人强制事件
                 if self.friend.out_state == FriendOutState::AfterUnlock {
@@ -421,7 +430,11 @@ impl Game for BasicGame {
                 } else {
                     self.distribute_all(rng)?;
                     self.distribute_hint(rng)?;
-                    diag!("训练:\n{}", self.explain_distribution()?);
+                    // enabled() 包裹：explain_distribution() 构造 comfy-table，rollout 期间静默
+                    #[cfg(feature = "diag")]
+                    if crate::output::diagnostic::enabled() {
+                        diag!("训练:\n{}", self.explain_distribution()?);
+                    }
                 }
             }
             TurnStage::Train => {
@@ -479,16 +492,19 @@ impl Game for BasicGame {
         Ok(())
     }
 
-    fn deyilv(&mut self, person_index: i32) -> Result<f32> {
+    fn deyilv(&mut self, person_index: i32) -> f32 {
         if person_index < 6 {
-            let (eff, lock) = self.deck[person_index as usize].calc_training_effect(self, 0)?;
-            self.deck[person_index as usize].effect = eff.clone();
-            if lock {
-                self.deck[person_index as usize].is_locked = true;
-            }
-            Ok(eff.deyilv)
+            // `calc_training_effect` 返回 owned cumulative effect——先取出 `deyilv`
+            // 后直接 `move` 进 `self.deck[i].effect`（避免 `.clone()`）。features.rs
+            // NN 输入读 `card.effect` 取累计 deyilv 与此一致。
+            let eff = self.deck[person_index as usize].calc_training_effect(self, 0);
+            let deyilv = eff.deyilv;
+            self.deck[person_index as usize].effect = eff;
+            // is_locked 字段保留（NN feature 兼容），每次 deyilv 调用都标记
+            self.deck[person_index as usize].is_locked = true;
+            deyilv
         } else {
-            Ok(0.0)
+            0.0
         }
     }
     fn explain_distribution(&self) -> Result<String> {

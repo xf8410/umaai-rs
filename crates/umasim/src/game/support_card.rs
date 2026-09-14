@@ -1,4 +1,4 @@
-use std::{collections::HashMap, default::Default, sync::Arc};
+use std::{collections::HashMap, default::Default};
 
 use anyhow::{Result, anyhow};
 use log::debug;
@@ -185,8 +185,8 @@ impl From<&CardValue> for CardTrainingEffect {
 /// 局中的支援卡信息，剧本通用
 #[derive(Debug, Clone, PartialEq)]
 pub struct SupportCard {
-    /// 面板数据，避免查表
-    pub data: Arc<SupportCardData>,
+    /// 直接借用进程期只读全局卡表中的面板数据。
+    pub data: &'static SupportCardData,
     /// 支援卡ID(5位)
     pub card_id: u32,
     /// 突破等级
@@ -244,7 +244,7 @@ impl SupportCard {
         let effect = CardTrainingEffect::from(&data.card_value[rank as usize]);
         let friendship = data.card_value[rank as usize].initial_jiban;
         Ok(Self {
-            data: Arc::new(data.clone()),
+            data,
             card_id: id,
             rank,
             card_type: data.card_type,
@@ -256,99 +256,114 @@ impl SupportCard {
             total_hints: 0
         })
     }
-    /// 计算当前卡在指定位置时, 考虑固有的实际面板  
-    /// 返回true为已经锁定，调用者可以把值更新到self.effect上
-    pub fn calc_training_effect<G: Game>(&self, game: &G, train: i32) -> Result<(CardTrainingEffect, bool)> {
-        let mut ret = self.effect.clone();
-        let mut locking = false;
-        if !self.is_locked {
-            // locked就不计算，节省时间
-            let param = &self.data.unique_effect_param;
-            match self.data.unique_effect_type {
-                0 => {
-                    locking = true;
-                }
-                1 | 2 => {
-                    // 羁绊>args[1]时触发词条args[2] = args[3]
-                    if self.friendship >= param[1] {
-                        debug!("{} 羁绊>{}, 触发固有: {:?}", self.data.short_name(), param[1], param);
-                        if param[2] > 0 {
-                            ret.add_effect_line(param[2], param[3]);
-                        }
-                        if param[4] > 0 {
-                            ret.add_effect_line(param[4], param[5]);
-                        }
-                        locking = true;
+    /// 计算支援卡当前 buff（基础面板 + 已触发的 unique_effect 词条）。
+    pub fn calc_training_effect<G: Game>(&self, game: &G, train: i32) -> CardTrainingEffect {
+        // 起点是基础面板，确保每次返回 fresh cumulative，
+        // 不会被 Game impl override 的 lock 回写后多次累加 unique_effect 词条
+        let mut ret = CardTrainingEffect::from(&self.data.card_value[self.rank as usize]);
+        let param = &self.data.unique_effect_param;
+        match self.data.unique_effect_type {
+            0 => {}
+            1 | 2 => {
+                // 羁绊>args[1]时触发词条args[2] = args[3]
+                if self.friendship >= param[1] {
+                    debug!("{} 羁绊>{}, 触发固有: {:?}", self.data.short_name(), param[1], param);
+                    if param[2] > 0 {
+                        ret.add_effect_line(param[2], param[3]);
+                    }
+                    if param[4] > 0 {
+                        ret.add_effect_line(param[4], param[5]);
                     }
                 }
-                13 => {
-                    // b95 参与友情训练时触发
-                    if game.shining_count(train as usize) > 0 {
-                        ret.add_effect_line(param[1], param[2]);
-                    }
+            }
+            13 => {
+                // b95 参与友情训练时触发
+                if game.shining_count(train as usize) > 0 {
+                    ret.add_effect_line(param[1], param[2]);
                 }
-                20 => {
-                    // 巨匠: 羁绊>80时根据卡组决定加成
-                    if self.friendship >= param[2] {
-                        let mut card_type_count = vec![0, 0, 0, 0, 0, 0];
-                        for c in game.deck() {
-                            if c.card_type >= 5 {
-                                card_type_count[5] += 1;
-                            } else {
-                                card_type_count[c.card_type as usize] += 1;
-                            }
+            }
+            20 => {
+                // 巨匠: 羁绊>80时根据卡组决定加成
+                if self.friendship >= param[2] {
+                    let mut card_type_count = [0; 6];
+                    for c in game.deck() {
+                        if c.card_type >= 5 {
+                            card_type_count[5] += 1;
+                        } else {
+                            card_type_count[c.card_type as usize] += 1;
                         }
-                        debug!(
-                            "{} 羁绊>{}, 副属性加成(最大+2): {:?}",
-                            self.data.short_name(),
-                            param[2],
-                            card_type_count
-                        );
-                        for i in 0..5 {
-                            if card_type_count[i] > 0 {
-                                // 0-4对应副属性词条#3-7
-                                ret.add_effect_line((i + 3) as i32, card_type_count[i].max(2));
-                            }
-                        }
-                        if card_type_count[5] > 0 {
-                            ret.add_effect_line(30, card_type_count[5].max(2));
-                        }
-                        locking = true;
                     }
-                }
-                _ => {
-                    diag!(
-                        "未实现固有逻辑: #{} - {}",
-                        self.data.unique_effect_type,
-                        self.short_name()
+                    debug!(
+                        "{} 羁绊>{}, 根据卡组决定加成(最大+2): {:?}",
+                        self.data.short_name(),
+                        param[2],
+                        card_type_count
                     );
-                    locking = true;
+                    for i in 0..5 {
+                        if card_type_count[i] > 0 {
+                            // 0-4对应副属性词条#3-7
+                            ret.add_effect_line((i + 3) as i32, card_type_count[i].max(2));
+                        }
+                    }
+                    if card_type_count[5] > 0 {
+                        ret.add_effect_line(30, card_type_count[5].max(2));
+                    }
                 }
-            } // match unique_effect_type
-        }
-        Ok((ret, locking))
+            }
+            _ => {
+                diag!(
+                    "未实现固有逻辑: #{} - {}",
+                    self.data.unique_effect_type,
+                    self.short_name()
+                );
+            }
+        } // match unique_effect_type
+        ret
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ptr;
+
     use super::*;
     use crate::{
         gamedata::init_global,
-        utils::{get_workspace_root, init_test_logger}
+        utils::{Checks, get_workspace_root, init_test_logger}
     };
 
+    /// 不同突破等级共享全局面板，克隆后的动态卡状态独立。
     #[test]
     fn test_support() -> Result<()> {
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(workspace_root)?;
         init_test_logger("info")?;
         init_global()?;
-        let card = SupportCard::new(302424)?;
+        let mut card = SupportCard::new(302424)?;
         println!("{}", card.explain()?);
         let card2 = SupportCard::new(302464)?;
         println!("{}", card2.explain()?);
         println!("{}", (card.effect.add(&card2.effect)).explain());
-        Ok(())
+        let panel = global!(GAMEDATA).get_card(card.card_id)?;
+        let original_value = card.card_value().clone();
+        let rank0 = SupportCard::new(302420)?;
+        let mut checks = Checks::new();
+        checks.check(ptr::eq(card.data, panel) && ptr::eq(rank0.data, panel), "同卡不同突破等级直接共享全局面板");
+        checks.check(card.card_value() == &original_value, "构造另一突破等级不改变原卡数值");
+        checks.check(card.card_value() == &panel.card_value[4] && rank0.card_value() == &panel.card_value[0], "各卡读取自身突破等级的数值");
+
+        card.effect_state.insert("test".to_string(), 1);
+        let original_effect = card.effect.clone();
+        let original_friendship = card.friendship;
+        let mut branch = card.clone();
+        branch.effect_state.insert("test".to_string(), 2);
+        branch.effect.xunlian += 1;
+        branch.friendship += 1;
+        println!("克隆动态状态: {:?}，训练效果: {:?}，羁绊: {}", branch.effect_state, branch.effect, branch.friendship);
+        checks.check(ptr::eq(branch.data, panel), "克隆继续共享同一全局面板");
+        checks.check(card.effect_state.get("test") == Some(&1), "修改克隆固有状态不影响原卡");
+        checks.check(card.effect == original_effect && card.friendship == original_friendship, "修改克隆训练效果和羁绊不影响原卡");
+        checks.check(card.card_value() == &original_value && branch.card_value() == &original_value, "动态修改不改变共享面板数值");
+        checks.finish()
     }
 }

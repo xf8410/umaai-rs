@@ -1,7 +1,8 @@
 #[cfg(feature = "cli")]
 use std::io::Write;
 #[cfg(feature = "cli")]
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use anyhow::{Result, anyhow};
 use colored::Colorize;
@@ -12,6 +13,7 @@ use flexi_logger::{DeferredNow, Duplicate, FileSpec, style};
 #[cfg(feature = "cli")]
 use log::Record;
 use log::{error, info};
+use rand_distr::weighted::WeightedIndex;
 #[cfg(feature = "cli")]
 use serde::Serialize;
 
@@ -308,12 +310,19 @@ macro_rules! global {
 pub fn global_events() -> &'static EventCollection {
     &global!(GAMEDATA).events
 }
+/// 复用全局只读常量表的随机事件分布，在首次随机事件采样时初始化。
+pub fn global_event_distribution() -> &'static WeightedIndex<f64> {
+    static DISTRIBUTION: OnceLock<WeightedIndex<f64>> = OnceLock::new();
+    DISTRIBUTION.get_or_init(|| {
+        WeightedIndex::new(global!(GAMECONSTANTS).get_event_distribution()).expect("event weights")
+    })
+}
 /// 获得events.json里记载的指定system事件
 pub fn system_event(key: &str) -> Result<&'static EventData> {
     global_events()
         .system_events
         .get(key)
-        .ok_or(anyhow!("未知系统事件: {key}"))
+        .ok_or_else(|| anyhow!("未知系统事件: {key}"))
 }
 /// 获得constants.json里记载的指定事件概率
 pub fn system_event_prob(key: &str) -> Result<f64> {
@@ -321,7 +330,7 @@ pub fn system_event_prob(key: &str) -> Result<f64> {
         .event_probs
         .get(key)
         .map(|x| *x as f64)
-        .ok_or(anyhow!("未知事件概率: {key}"))
+        .ok_or_else(|| anyhow!("未知事件概率: {key}"))
 }
 
 pub trait AttributeArray {
@@ -437,6 +446,7 @@ pub(crate) fn fallback_override_game_config() -> OverrideGameConfig {
             cards: None,
             blue_count: None,
             extra_count: None,
+            trainer: None,
             mcts_selected_onsen: None,
             log_level: None,
             num_threads: None,
@@ -446,20 +456,19 @@ pub(crate) fn fallback_override_game_config() -> OverrideGameConfig {
         },
         mcts: OverrideMctsConfig::default(),
         ramen_region_strategy: None,
-        ramen_region_fixed: None
+        ramen_region_fixed: None,
+        ramen_pt_sacrifice_score: None
     }
 }
 
 /// 载入 gamedata/default_config.toml, 和 game_config.toml 合并
 pub fn load_game_config() -> Result<GameConfig> {
     let def_path = resolve_default_config_path();
-    info!("载入默认配置: {}", def_path.display());
     let def_file = fs_err::read_to_string(&def_path)?;
     let default_config: GameConfig = toml::from_str(&def_file)?;
 
     let cfg_path = resolve_user_config_path();
     let override_config: OverrideGameConfig = if cfg_path.exists() {
-        info!("载入用户配置: {}", cfg_path.display());
         let cfg_file = fs_err::read_to_string(&cfg_path)?;
         toml::from_str(&cfg_file)?
     } else {
@@ -478,6 +487,37 @@ pub fn load_game_config() -> Result<GameConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 共享事件分布与原构造的抽样结果和随机流推进一致，重复取得时复用同一实例。
+    #[test]
+    fn test_global_event_distribution() -> Result<()> {
+        use std::{env::set_current_dir, ptr};
+
+        use rand::RngCore;
+        use rand_distr::Distribution;
+
+        use crate::{gamedata::init_global, rng::EventRng};
+
+        set_current_dir(get_workspace_root()?)?;
+        init_global()?;
+        let original = WeightedIndex::new(global!(GAMECONSTANTS).get_event_distribution())?;
+        let mut original_rng = EventRng::new(61444);
+        let mut shared_rng = original_rng.clone();
+        let mut counts = [0; 4];
+        let mut same = true;
+        for _ in 0..1024 {
+            let expected = original.sample(&mut original_rng);
+            let actual = global_event_distribution().sample(&mut shared_rng);
+            same &= actual == expected;
+            counts[actual] += 1;
+        }
+        println!("共享事件分布抽样计数: {counts:?}");
+        let mut c = Checks::new();
+        c.check(same, "事件类别抽样序列一致");
+        c.check(original_rng.next_u64() == shared_rng.next_u64(), "采样后随机流位置一致");
+        c.check(ptr::eq(global_event_distribution(), global_event_distribution()), "事件分布实例复用");
+        c.finish()
+    }
 
     /// 缺文件兜底：手写构造路径 merge 后必须是生产值 12288 / 1.4，不是代码缺省 10240 / 2.0。
     ///
@@ -546,6 +586,29 @@ mod tests {
 
         cfg.trainer = "unknown".to_string();
         assert!(validate_game_config(&cfg).is_err());
+    }
+
+    /// `[config_override] trainer` 应能覆盖 `default_config.toml` 的 trainer。
+    ///
+    /// 回归：trainer 是 GameConfig 顶层字段，原本不在 OverrideConfig 里，
+    /// game_config.toml 顶层写 trainer=... 会被 serde 默默忽略。
+    /// 本测试是 OverrideConfig 收容 trainer 字段的合并守门。
+    #[test]
+    fn test_override_config_trainer_overrides_default() -> Result<()> {
+        let root = get_workspace_root()?;
+        let def_path = root.join("gamedata").join("default_config.toml");
+        let default_config: GameConfig = toml::from_str(&fs_err::read_to_string(&def_path)?)?;
+
+        let mut o = fallback_override_game_config();
+        o.config_override.trainer = Some("mcts".to_string());
+        let merged = o.merge(&default_config);
+        println!(
+            "覆盖前 default trainer = {}，覆盖后 merged trainer = {}",
+            default_config.trainer, merged.trainer
+        );
+        let mut c = Checks::new();
+        c.check(merged.trainer == "mcts", "OverrideConfig.trainer 覆盖 default");
+        c.finish()
     }
 
     #[test]

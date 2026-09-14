@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use log::warn;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -11,9 +9,11 @@ use umasim::{
 };
 
 pub mod onsen;
+pub mod ramen;
 pub mod story;
 pub mod urafile;
 pub use onsen::*;
+pub use ramen::*;
 pub use story::*;
 
 /// 描述不同剧本的通信状态，需要能转为对应的Game结构
@@ -119,7 +119,22 @@ pub struct GameStatusBase {
     #[serde(default)]
     pub race_history: Vec<i32>,
     /// 事件信息
-    pub story: Option<StoryStatus>
+    pub story: Option<StoryStatus>,
+    /// 回合阶段来源（C# 端 thisTurn.json 顶层 `source`；拉面剧本用，影响 stage dispatch）
+    ///
+    /// 取值 `"command"` / `"event"` / `"special"` 之一。详见 `protocol/ramen.rs`
+    /// 文件头注释的 stage dispatch 规则表。旧数据可能缺失 → 不强制要求存在。
+    #[serde(default)]
+    pub source: Option<String>,
+    /// 单次育成模式的 chara_id（C# 端 `single_mode_chara_id`，单调递增）
+    ///
+    /// 与 `uma_id` 不同：同一马娘（`uma_id`）可重复训练，`single_mode_chara_id`
+    /// 每次训练 +1。luck tracker 切局检测使用此字段——`uma_id` 不足以分辨"同一
+    /// 马娘重开新一局"。
+    ///
+    /// 旧数据可能缺失 → `#[serde(default)]` 兜底为 `None`，切局检测退化到 `uma_id` 兜底。
+    #[serde(default, rename = "single_mode_chara_id")]
+    pub single_mode_chara_id: Option<u64>
 }
 
 impl GameStatusBase {
@@ -208,7 +223,11 @@ impl GameStatusBase {
         let mut card_type_count = [0; 7];
         for (index, id) in self.card_id.iter().enumerate() {
             let mut card = SupportCard::new(*id)?;
-            card.friendship = self.persons[index].friendship;
+            // persons 可能不全（如 parse_game_by_scenario 的 ramen fixture 为 []），
+            // 越界时保留卡默认羁绊
+            if index < self.persons.len() {
+                card.friendship = self.persons[index].friendship;
+            }
             uma.race_bonus += card.effect.saihou;
             if card.card_type < 7 {
                 card_type_count[card.card_type as usize] += 1;
@@ -231,11 +250,11 @@ impl GameStatusBase {
             stage: TurnStage::Train, // 随便列一个
             uma,
             deck,
-            inherit: Arc::new(inherit),
+            inherit,
             friend,
             train_level_count: self.train_level_count.clone(),
             distribution: self.person_distribution.clone(),
-            card_type_count: Arc::new(card_type_count),
+            card_type_count,
             unresolved_events,
             ..Default::default()
         })
@@ -300,7 +319,249 @@ impl From<&BaseGame> for GameStatusBase {
             friend_outgoing_used,
             playing_state: 1,
             race_history: game.uma.list_races(),
-            story: None
+            story: None,
+            source: None,
+            single_mode_chara_id: None
         }
+    }
+}
+
+/// 解析后的剧本：用于 main loop 按 scenarioId 分发（避免一个 `Game` trait object
+/// 处理两种剧本的复杂度——`G::Action` 是关联类型，trait object 路径受限）
+///
+/// **Step 7 现状**：两种剧本路径均完整可用——`GameStatusRamen::into_game` 实现
+/// 12 ramen 段字段覆写 + stage dispatch（详见 `protocol/ramen.rs`）。
+///
+/// **Ramen 变体附 `single_mode_chara_id`**：切局检测使用此字段（C# 端单调递增，
+/// 同一 uma_id 重复训练也能识别新局）——`RamenGame`（`BaseGame` 包装）不含此协议
+/// 字段，所以 `ParsedGame::Ramen` 直接附带，避免主循环二次解析。
+#[derive(Debug)]
+pub enum ParsedGame {
+    /// `scenarioId == 12`：温泉剧本
+    Onsen(umasim::game::onsen::game::OnsenGame),
+    /// `scenarioId == 14`：拉面剧本
+    Ramen {
+        /// 已 into_game 后的 RamenGame
+        game: umasim::game::ramen::RamenGame,
+        /// `baseGame.single_mode_chara_id`（C# 端单调递增切局键）
+        single_mode_chara_id: Option<u64>
+    }
+}
+
+/// 从 `thisTurn.json` 内容读 `baseGame.scenarioId`（int）
+///
+/// 不走 `parse_game::<GameStatusOnsen>`（会消耗一次解析），用 `serde_json::Value`
+/// 偷出 scenarioId 即可。
+pub fn extract_scenario_id(contents: &str) -> Result<u32> {
+    let value: serde_json::Value = serde_json::from_str(contents)?;
+    value
+        .get("baseGame")
+        .and_then(|b| b.get("scenarioId"))
+        .and_then(|s| s.as_u64())
+        .map(|id| id as u32)
+        .ok_or_else(|| anyhow::anyhow!("baseGame.scenarioId 缺失或类型错误"))
+}
+
+/// 按 `baseGame.scenarioId` 分发解析（详见 `umaai_air_redirector_integration.md` §3.4）
+///
+/// - `12` → `GameStatusOnsen` → `OnsenGame`
+/// - `14` → `GameStatusRamen::into_game` → `RamenGame`（Step 7 完整覆写；附带 `single_mode_chara_id`）
+/// - 其它 → `Err`
+pub fn parse_game_by_scenario(contents: &str) -> Result<ParsedGame> {
+    use crate::protocol::urafile::parse_game;
+    let scenario_id = extract_scenario_id(contents)?;
+    match scenario_id {
+        12 => parse_game::<GameStatusOnsen>(contents).map(ParsedGame::Onsen),
+        14 => {
+            // 拉面：先 parse GameStatusRamen 取 single_mode_chara_id，再走 into_game。
+            // 两次 parse 避免在协议层字段侵入 RamenGame。
+            let status: GameStatusRamen = serde_json::from_str(contents)?;
+            let single_mode_chara_id = status.base_game.single_mode_chara_id;
+            status.into_game().map(|game| ParsedGame::Ramen { game, single_mode_chara_id })
+        }
+        other => Err(anyhow::anyhow!("不支持的 scenarioId: {other}（仅支持 12=温泉 / 14=拉面）"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::{bail, ensure};
+    use serde_json::from_str;
+    use umasim::{gamedata::init_global, utils::get_workspace_root};
+
+    use super::*;
+
+    /// 最小 thisTurn.json fixture（scenarioId=12 温泉）
+    ///
+    /// 注：`GameStatusBase` 用 `rename_all = "camelCase"`，但部分字段有
+    /// `#[serde(rename = "...")]` 覆盖为 snake_case（friend_stage / playing_state /
+    /// friendship_noncard_yayoi / friend_outgoingUsed 等）——fixture 必须保持原样。
+    const FIXTURE_ONSEN: &str = r#"{
+        "baseGame": {
+            "scenarioId": 12,
+            "umaId": 102601,
+            "umaStar": 5,
+            "turn": 0,
+            "vital": 100,
+            "maxVital": 120,
+            "motivation": 4,
+            "fiveStatus": [1000, 800, 800, 800, 800],
+            "fiveStatusLimit": [1600, 1500, 1400, 1400, 1500],
+            "skillPt": 0,
+            "skillScore": 0,
+            "totalHints": 0,
+            "trainLevelCount": [1, 1, 1, 1, 1],
+            "ptScoreRate": 2.0,
+            "failureRateBias": 0,
+            "isIll": false,
+            "isQieZhe": false,
+            "isAiJiao": false,
+            "isPositiveThinking": false,
+            "isRefreshMind": false,
+            "isLucky": false,
+            "zhongMaBlueCount": [0, 0, 0, 0, 0],
+            "isRacing": false,
+            "cardId": [],
+            "persons": [],
+            "personDistribution": [[], [], [], [], []],
+            "lockedTrainingId": -1,
+            "friendship_noncard_yayoi": 0,
+            "friendship_noncard_reporter": 0,
+            "friend_stage": 0,
+            "friend_outgoingUsed": 0,
+            "playing_state": 1,
+            "raceHistory": [],
+            "story": null
+        },
+        "onsen": {
+            "currentOnsen": 0,
+            "bathing": { "ticketNum": 5, "buffRemainTurn": 0, "isSuperReady": false },
+            "onsenState": [],
+            "digRemain": [],
+            "digCount": 0,
+            "digPower": [1, 1, 1],
+            "digLevel": [1, 1, 1],
+            "digVitalCost": 5,
+            "pendingSelection": false
+        }
+    }"#;
+
+    /// 最小 thisTurn.json fixture（scenarioId=14 拉面）—— ramen 段空（Step 6 占位）
+    const FIXTURE_RAMEN: &str = r#"{
+        "baseGame": {
+            "scenarioId": 14,
+            "umaId": 102601,
+            "umaStar": 5,
+            "turn": 0,
+            "vital": 100,
+            "maxVital": 120,
+            "motivation": 4,
+            "fiveStatus": [1000, 800, 800, 800, 800],
+            "fiveStatusLimit": [1600, 1500, 1400, 1400, 1500],
+            "skillPt": 0,
+            "skillScore": 0,
+            "totalHints": 0,
+            "trainLevelCount": [1, 1, 1, 1, 1],
+            "ptScoreRate": 2.0,
+            "failureRateBias": 0,
+            "isIll": false,
+            "isQieZhe": false,
+            "isAiJiao": false,
+            "isPositiveThinking": false,
+            "isRefreshMind": false,
+            "isLucky": false,
+            "zhongMaBlueCount": [15, 3, 0, 0, 0],
+            "isRacing": false,
+            "cardId": [302424, 302894, 303044, 302924, 303024, 303054],
+            "persons": [],
+            "personDistribution": [[], [], [], [], []],
+            "lockedTrainingId": -1,
+            "friendship_noncard_yayoi": 0,
+            "friendship_noncard_reporter": 0,
+            "friend_stage": 0,
+            "friend_outgoingUsed": 0,
+            "playing_state": 1,
+            "raceHistory": [],
+            "story": null
+        },
+        "ramen": {}
+    }"#;
+
+    /// extract_scenario_id：正常字段
+    #[test]
+    fn test_extract_scenario_id_ok() {
+        assert_eq!(extract_scenario_id(FIXTURE_ONSEN).unwrap(), 12);
+        assert_eq!(extract_scenario_id(FIXTURE_RAMEN).unwrap(), 14);
+    }
+
+    /// extract_scenario_id：缺 baseGame
+    #[test]
+    fn test_extract_scenario_id_missing_basegame() {
+        let json = r#"{}"#;
+        let r = extract_scenario_id(json);
+        println!("缺 baseGame: is_err={}", r.is_err());
+        assert!(r.is_err());
+    }
+
+    /// extract_scenario_id：缺 scenarioId
+    #[test]
+    fn test_extract_scenario_id_missing_field() {
+        let json = r#"{"baseGame": {}}"#;
+        let r = extract_scenario_id(json);
+        println!("缺 scenarioId: is_err={}", r.is_err());
+        assert!(r.is_err());
+    }
+
+    /// extract_scenario_id：scenarioId 是字符串而非数字
+    #[test]
+    fn test_extract_scenario_id_wrong_type() {
+        let json = r#"{"baseGame": {"scenarioId": "12"}}"#;
+        let r = extract_scenario_id(json);
+        println!("scenarioId 类型错: is_err={}", r.is_err());
+        assert!(r.is_err());
+    }
+
+    /// parse_game_by_scenario：onsen fixture 路由到 ParsedGame::Onsen
+    #[test]
+    fn test_parse_game_by_scenario_onsen() {
+        // 跑前需要 init_global + cwd 是 workspace 根（gamedata/default_config.toml）
+        let workspace_root = umasim::utils::get_workspace_root().unwrap();
+        let _ = std::env::set_current_dir(workspace_root);
+        let _ = umasim::gamedata::init_global();
+        let r = parse_game_by_scenario(FIXTURE_ONSEN);
+        println!("onsen fixture: is_ok={}", r.is_ok());
+        match r {
+            Ok(ParsedGame::Onsen(_)) => {}
+            Ok(ParsedGame::Ramen { .. }) => panic!("不应路由到 Ramen"),
+            Err(e) => panic!("onsen fixture 不应报错: {e}")
+        }
+    }
+
+    /// 拉面协议导入保留继承和卡组计数，导出保留蓝因子。
+    #[test]
+    fn test_parse_game_by_scenario_ramen() -> Result<()> {
+        std::env::set_current_dir(get_workspace_root()?)?;
+        init_global()?;
+        let status: GameStatusRamen = from_str(FIXTURE_RAMEN)?;
+        let inherit = status.base_game.parse_inherit()?;
+        let ParsedGame::Ramen { game, .. } = parse_game_by_scenario(FIXTURE_RAMEN)? else {
+            bail!("拉面协议不应路由到 Onsen");
+        };
+        println!("导入继承: {:?}，卡组计数: {:?}", game.inherit, game.card_type_count);
+        ensure!(game.inherit == inherit, "协议蓝因子和配置剧本因子应完整保留");
+        ensure!(game.card_type_count == [3, 1, 0, 0, 1, 1, 0], "协议卡组应包含三速、一耐、一智、一友人");
+        let exported = GameStatusBase::from(&game.base);
+        println!("导出蓝因子: {:?}", exported.zhongma_blue_count);
+        ensure!(exported.zhongma_blue_count == status.base_game.zhongma_blue_count, "导出蓝因子应与协议输入一致");
+        Ok(())
+    }
+
+    /// parse_game_by_scenario：未知 scenarioId 报错
+    #[test]
+    fn test_parse_game_by_scenario_unknown_id() {
+        let json = r#"{"baseGame": {"scenarioId": 999}}"#;
+        let r = parse_game_by_scenario(json);
+        println!("scenarioId=999: is_err={}", r.is_err());
+        assert!(r.is_err());
     }
 }

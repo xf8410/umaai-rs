@@ -14,7 +14,7 @@ use super::{
     RamenSearchOutput,
     config::{SearchConfig, TOTAL_TURN},
     ramen_terminal::RamenTerminal,
-    result::{ActionResult, SearchOutput},
+    result::{ActionResult, OrderedRollouts, SearchOutput},
     searchable::{FlatSearchGame, SearchScore},
     seeds::RolloutSeeds,
     terminal::{NoTerminal, RolloutOutcome, TerminalRecord}
@@ -37,7 +37,7 @@ use crate::{
 /// 计数后，位置参数已经不可读。
 ///
 /// `D` 未接入观测的剧本为 [`NoTerminalStats`](super::terminal::NoTerminalStats)
-/// （ZST），此时本结构与原先的 `(ActionResult, ActionResult, usize)` 同尺寸。
+/// （ZST）。`ordered` 在开关关闭时为 `None`，不分配有序缓冲的堆内存。
 struct CandidateAccum<D> {
     /// 结算评分统计（参与排序）
     score: ActionResult,
@@ -46,32 +46,64 @@ struct CandidateAccum<D> {
     /// 终局多维统计（不参与排序）
     terminal: D,
     /// rollout 失败次数
-    failed: usize
+    failed: usize,
+    /// 按 rollout 序号对齐的原始分（`score` 轴）
+    ///
+    /// `None`：开关关闭，不分配。`Some`：`ordered[k]` 为第 k 次的分数，
+    /// 失败则为内层 `None`。Vec 按需 `resize(idx + 1, None)` 增长。
+    ordered: Option<Vec<Option<f64>>>
 }
 
 impl<D: Default> CandidateAccum<D> {
     /// 创建空累加器
-    fn new() -> Self {
+    ///
+    /// `record_ordered` 为真时 `ordered` 为 `Some(空 Vec)`，按序号按需增长；
+    /// 为假时为 `None`，不分配有序缓冲。
+    fn new(record_ordered: bool) -> Self {
         Self {
             score: ActionResult::new(),
             score_pt: ActionResult::new(),
             terminal: D::default(),
-            failed: 0
+            failed: 0,
+            ordered: if record_ordered {
+                Some(Vec::new())
+            } else {
+                None
+            }
         }
     }
 }
 
 impl<D> CandidateAccum<D> {
-    /// 并入一次 rollout 的结果
+    /// 确保有序槽位覆盖到 `idx`（失败序号保持 `None`）
+    fn ensure_ordered_slot(&mut self, idx: usize) {
+        if let Some(ordered) = self.ordered.as_mut() {
+            if ordered.len() <= idx {
+                ordered.resize(idx + 1, None);
+            }
+        }
+    }
+
+    /// 并入一次成功 rollout 的结果
     ///
     /// 三份统计在同一处推进，避免出现「评分记了、终局漏了」的样本集合错位。
-    fn push<T>(&mut self, outcome: &RolloutOutcome<T>)
+    /// `idx` 是本次 rollout 的序号（`offset + k`），失败项不走本方法，由调用方
+    /// [`Self::ensure_ordered_slot`] 留空。
+    fn push<T>(&mut self, idx: usize, outcome: &RolloutOutcome<T>)
     where
         T: TerminalRecord<Stats = D>
     {
         self.score.add(outcome.score.score);
         self.score_pt.add(outcome.score.score_pt);
         outcome.terminal.accumulate_into(&mut self.terminal);
+        // 单次判空即完成「补齐槽位 + 写入」：开关关闭时（生产路径）这里只剩一次
+        // 恒假的 Option 判别，与合并前同构；写在两个方法里会白白多一次分支
+        if let Some(ordered) = self.ordered.as_mut() {
+            if ordered.len() <= idx {
+                ordered.resize(idx + 1, None);
+            }
+            ordered[idx] = Some(outcome.score.score);
+        }
     }
 }
 
@@ -83,7 +115,7 @@ enum LeafEvaluator {
 }
 
 impl LeafEvaluator {
-    fn name(&self) -> &'static str {
+    fn _name(&self) -> &'static str {
         match self {
             LeafEvaluator::Handwritten => "handwritten",
             #[cfg(feature = "onnx")]
@@ -266,6 +298,14 @@ where
             seeds.root()
         );
 
+        // rollout 期间全局静默诊断输出（RAII，Err 提前返回同样恢复）：
+        // 覆盖均匀分配 / UCB 两条路径的全部 rayon 并行段，规则层 diag! 与
+        // cfg explain 块（`if diagnostic::enabled()` 门控）一并跳过。每回合仅
+        // 一条的搜索根 debug! 在 guard 之前；失败汇总 warn_failures 虽在 guard
+        // 作用域内，但 warn! 不走 diag 开关，照常输出。多局并行
+        // （simulation_count > 1）时任一局的搜索会顺带抑制其他局真实回合的
+        // diag——已知局限，见 diagnostic.rs 模块文档。
+        let _diag_guard = crate::output::diagnostic::DiagGuard::suppress();
         let collected = if self.config.use_ucb {
             self.search_ucb(game, actions, radical_factor, &seeds, &rollout)?
         } else {
@@ -279,19 +319,35 @@ where
             }
         }
 
+        let record = self.config.record_ordered_rollouts;
         let mut action_results = Vec::with_capacity(collected.len());
         let mut terminal_results = Vec::with_capacity(collected.len());
+        let mut per_candidate = if record {
+            Some(Vec::with_capacity(collected.len()))
+        } else {
+            None
+        };
         for acc in collected {
             action_results.push((acc.score, acc.score_pt));
             terminal_results.push(acc.terminal);
+            if let Some(ref mut rows) = per_candidate {
+                rows.push(acc.ordered.unwrap_or_default());
+            }
         }
 
-        Ok(SearchOutput::with_terminals(
+        let mut out = SearchOutput::with_terminals(
             actions.to_vec(),
             action_results,
             terminal_results,
             radical_factor
-        ))
+        );
+        if let Some(per_candidate) = per_candidate {
+            out.ordered_rollouts = Some(OrderedRollouts {
+                root_seed: seeds.root(),
+                per_candidate
+            });
+        }
+        Ok(out)
     }
 
     /// 计算激进度因子
@@ -388,8 +444,7 @@ where
     /// 每个动作平均分配 `search_n` 次搜索。所有候选的第 j 次 rollout 共用
     /// `seeds.seed_at(j)`（CRN 载体），故并行粒度不影响结果。
     ///
-    /// 注：此处按候选并行，并行度上限即候选数（≤10）。改为按 `(候选, rollout)`
-    /// 扁平并行可提升吞吐且结果位级不变，留作后续性能对照实验。
+    /// 候选之间和候选内部共用 Rayon 线程池；每个候选的结果按 rollout 序号累加。
     fn search_uniform<F, T>(
         &self, game: &G, actions: &[G::Action], seeds: &RolloutSeeds, rollout: &F
     ) -> Result<Vec<CandidateAccum<T::Stats>>>
@@ -398,10 +453,11 @@ where
         F: Fn(&G, &G::Action, u64) -> Result<RolloutOutcome<T>> + Sync
     {
         let n = self.config.search_n;
+        let record = self.config.record_ordered_rollouts;
         let run = |action: &G::Action| -> Result<CandidateAccum<T::Stats>> {
-            let mut acc = CandidateAccum::<T::Stats>::new();
+            let mut acc = CandidateAccum::<T::Stats>::new(record);
             // offset=0：均匀分配下每个候选都从 rollout 0 开始，天然完全配对
-            self.simulate_many(game, action, n, seeds, 0, &mut acc, rollout)?;
+            self.simulate_many(game, action, n, seeds, 0, &mut acc, rollout, "")?;
             Ok(acc)
         };
 
@@ -427,24 +483,34 @@ where
         }
     }
 
-    /// 对同一候选连续跑 `n` 次 rollout，累加进 `acc`
+    /// 对同一候选执行 `n` 次 rollout，保序收集后累加进 `acc`
     ///
     /// 第 k 次取 `seeds.seed_at(offset + k)` 播种，`offset` 为该候选**已计划**的次数。
     /// 失败次数累加进 `acc.failed`（不中断搜索，由调用方汇总告警）。
+    /// 临时缓冲保留全部 `Result`，避免失败项压缩槽位或中止余下 rollout。
     fn simulate_many<F, T>(
         &self, game: &G, action: &G::Action, n: usize, seeds: &RolloutSeeds, offset: usize,
-        acc: &mut CandidateAccum<T::Stats>, rollout: &F
+        acc: &mut CandidateAccum<T::Stats>, rollout: &F, log_context: &str
     ) -> Result<()>
     where
         T: TerminalRecord,
         F: Fn(&G, &G::Action, u64) -> Result<RolloutOutcome<T>> + Sync
     {
-        for k in 0..n {
-            match rollout(game, action, seeds.seed_at(offset + k)) {
-                Ok(v) => acc.push(&v),
+        let run_one = |k: usize| rollout(game, action, seeds.seed_at(offset + k));
+        let outcomes: Vec<Result<RolloutOutcome<T>>> = if self.use_parallel_simulation() {
+            (0..n).into_par_iter().map(run_one).collect()
+        } else {
+            (0..n).map(run_one).collect()
+        };
+        // IndexedParallelIterator 的 collect 保序；逐项累加保持浮点运算顺序。
+        for (k, outcome) in outcomes.into_iter().enumerate() {
+            let idx = offset + k;
+            match outcome {
+                Ok(v) => acc.push(idx, &v),
                 Err(e) => {
-                    debug!("[搜索] rollout {} 失败: {e}", offset + k);
+                    debug!("[搜索]{log_context} rollout {} 失败: {e}", idx);
                     acc.failed += 1;
+                    acc.ensure_ordered_slot(idx);
                 }
             }
         }
@@ -466,8 +532,7 @@ where
         F: Fn(&G, &G::Action, u64) -> Result<RolloutOutcome<T>> + Sync
     {
         let num_actions = actions.len();
-        let mut collected: Vec<CandidateAccum<T::Stats>> =
-            (0..num_actions).map(|_| CandidateAccum::<T::Stats>::new()).collect();
+        let record = self.config.record_ordered_rollouts;
         ensure!(
             self.config.search_group_size > 0,
             "search_group_size 不能为 0（UCB 分配会死循环）"
@@ -483,25 +548,19 @@ where
         //
         // 种子偏移必须用计划次数而非 `ActionResult::count()`：后者会因 rollout 失败
         // 而少计，导致同一 rollout 序号在不同候选上错位，破坏配对。
-        let mut planned = vec![0usize; num_actions];
+        let mut planned = vec![group_size; num_actions];
 
         // 第一阶段：每个动作先搜一组（并行）
         let run_initial = |action: &G::Action| -> Result<CandidateAccum<T::Stats>> {
-            let mut acc = CandidateAccum::<T::Stats>::new();
-            self.simulate_many(game, action, group_size, seeds, 0, &mut acc, rollout)?;
+            let mut acc = CandidateAccum::<T::Stats>::new(record);
+            self.simulate_many(game, action, group_size, seeds, 0, &mut acc, rollout, "")?;
             Ok(acc)
         };
-        let initial: Vec<CandidateAccum<T::Stats>> = if use_parallel {
+        let mut collected: Vec<CandidateAccum<T::Stats>> = if use_parallel {
             actions.par_iter().map(run_initial).collect::<Result<Vec<_>>>()?
         } else {
             actions.iter().map(run_initial).collect::<Result<Vec<_>>>()?
         };
-
-        // 合并初始结果（告警统一到函数末尾，避免首组被日志打两遍）
-        for (i, acc) in initial.into_iter().enumerate() {
-            collected[i] = acc;
-            planned[i] = group_size;
-        }
 
         let mut total_n = (group_size * num_actions) as f64;
 
@@ -525,28 +584,9 @@ where
             // 两个候选因而在 0..min(n_a, n_b) 上完全配对，多出的部分为 unpaired，
             // 这是 CRN 在不等样本数下的标准做法。
             let offset = planned[best_action_idx];
-            let run_one = |k: usize| -> Option<RolloutOutcome<T>> {
-                match rollout(game, action, seeds.seed_at(offset + k)) {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        debug!("[搜索][UCB] rollout {} 失败: {e}", offset + k);
-                        None
-                    }
-                }
-            };
-            // rayon 的 collect 保序，故累加顺序与串行路径一致
-            let outcomes: Vec<RolloutOutcome<T>> = if use_parallel {
-                (0..group_size).into_par_iter().filter_map(run_one).collect()
-            } else {
-                (0..group_size).filter_map(run_one).collect()
-            };
-            if outcomes.len() < group_size {
-                collected[best_action_idx].failed += group_size - outcomes.len();
-            }
-
-            for v in &outcomes {
-                collected[best_action_idx].push(v);
-            }
+            self.simulate_many(
+                game, action, group_size, seeds, offset, &mut collected[best_action_idx], rollout, "[UCB]"
+            )?;
 
             planned[best_action_idx] += group_size;
             total_n += group_size as f64;
@@ -909,7 +949,7 @@ impl<'a> crate::game::Trainer<OnsenGame> for SimulationTrainer<'a> {
 mod tests {
     use std::cell::RefCell;
 
-    use rand::SeedableRng;
+    use rand::{RngCore, SeedableRng};
     use anyhow::anyhow;
     use super::*;
     use crate::{
@@ -1398,16 +1438,20 @@ mod tests {
         let a = ramen_search(42)?;
         let b = ramen_search(42)?;
         // 2026-08-25 更新：不在判定与得意率解耦 + 地区分身缺席优先，rollout 数值变化，基准重抓
-        // 2026-08-27 更新：五维上限剧本化（基值前置 + 删 `min(2800)` + 保住开局继承），
-        // 速度上限 2958→3337，rollout 终局分数整体抬升，基准重抓
+        // 2026-08-27 更新（两次叠加）：
+        // (1) 五维上限剧本化，速度上限 2958→3337，rollout 终局分数整体抬升；
+        // (2) searchable.rs RolloutTrainer 切到 RecommendedRamenTrainer，均值再上移 ~10k。
+        // 上游 (2) 的基准是在 (1) 之前测的，两者叠加后已在本分支重抓。
+        // 2026-09 更新：吃面 PT 增量 / eat_count 延后到 NextTurn，训练阶段用吃面前 PT
+        // 算 ramen_pt_effect / region_bonus 档位，rollout 数值整体下移，基准重抓。
         let expected: [(u32, f64); 7] = [
-            (16, 56919.062500),
-            (16, 57847.250000),
-            (16, 57827.937500),
-            (16, 57520.562500),
-            (16, 57440.000000),
-            (16, 58555.875000),
-            (16, 58626.062500)
+            (16, 63290.500000),
+            (16, 63485.000000),
+            (16, 63013.562500),
+            (16, 63082.000000),
+            (16, 62927.125000),
+            (16, 63676.625000),
+            (16, 63690.125000)
         ];
         for (i, ((x, y), (en, em))) in a.iter().zip(b.iter()).zip(expected).enumerate() {
             println!(
@@ -1427,7 +1471,7 @@ mod tests {
     /// P1.1 测试 3：合并动作整局冒烟，全程跳过 SpecialSelect
     #[test]
     fn test_ramen_combined_action_full_game_smoke() -> Result<()> {
-        use crate::trainer::RamenHandwrittenTrainer;
+        use crate::trainer::RecommendedRamenTrainer;
 
         let workspace_root = get_workspace_root()?;
         std::env::set_current_dir(workspace_root)?;
@@ -1443,7 +1487,7 @@ mod tests {
         let mut game = RamenGame::newgame(102601, &deck, inherit)?;
         game.set_rule_master(rule_master);
 
-        let trainer = RamenHandwrittenTrainer::new();
+        let trainer = RecommendedRamenTrainer::new();
         let mut ramen_select_n = 0usize;
         let mut special_select_n = 0usize;
         let mut combined_n = 0usize;
@@ -1882,6 +1926,238 @@ mod tests {
             "共享臂增益 {g_shared:.3} > 下限 {RAMEN_SHARED_CRN_GAIN_FLOOR}"
         );
         c.check(g_shared > RAMEN_SHARED_CRN_GAIN_FLOOR, &floor_msg);
+        c.finish()
+    }
+
+    /// 有序 rollout：开关开时按序号对齐；关时不分配；开/关不扰动搜索本身
+    #[test]
+    fn test_ordered_rollouts_records_and_neutral() -> Result<()> {
+        let (game, actions) = ramen_root()?;
+        println!(
+            "拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个",
+            game.turn(),
+            game.stage,
+            actions.len()
+        );
+        let search_n = 8;
+        let cfg_off = SearchConfig::default().with_search_n(search_n).with_ucb(false);
+        let cfg_on = cfg_off.clone().with_record_ordered_rollouts(true);
+        let search_off: FlatSearch<RamenGame> = FlatSearch::new(cfg_off);
+        let search_on: FlatSearch<RamenGame> = FlatSearch::new(cfg_on);
+
+        let mut rng_off = StdRng::seed_from_u64(42);
+        let mut rng_on = StdRng::seed_from_u64(42);
+        let out_off = search_off.search(&game, &actions, &mut rng_off)?;
+        let out_on = search_on.search(&game, &actions, &mut rng_on)?;
+
+        println!(
+            "off ordered_rollouts is_none={} best={} | on is_some={} best={}",
+            out_off.ordered_rollouts.is_none(),
+            out_off.best_action_idx,
+            out_on.ordered_rollouts.is_some(),
+            out_on.best_action_idx
+        );
+
+        let mut c = Checks::new();
+        c.check(
+            out_off.ordered_rollouts.is_none(),
+            "开关关时 ordered_rollouts 为 None（不分配）"
+        );
+        c.check(
+            out_on.ordered_rollouts.is_some(),
+            "开关开时 ordered_rollouts 为 Some"
+        );
+
+        if let Some(ord) = out_on.ordered_rollouts.as_ref() {
+            println!("root_seed={:#018x} per_candidate={}", ord.root_seed, ord.per_candidate.len());
+            c.check(
+                ord.per_candidate.len() == actions.len(),
+                "per_candidate 长度等于候选数"
+            );
+            for (i, (row, (ar, _))) in ord.per_candidate.iter().zip(out_on.action_results.iter()).enumerate()
+            {
+                let n_some = row.iter().filter(|x| x.is_some()).count() as u32;
+                let sum_some: f64 = row.iter().filter_map(|x| *x).sum();
+                let sum_ok = (sum_some - ar.sum).abs() < 1e-9;
+                println!(
+                    "候选 {i}: len={} some={} count={} sum_ordered={:.6} sum_hist={:.6} Δ={:.3e}",
+                    row.len(),
+                    n_some,
+                    ar.count(),
+                    sum_some,
+                    ar.sum,
+                    (sum_some - ar.sum).abs()
+                );
+                let len_msg = format!("候选 {i} 有序长度 == search_n");
+                c.check(row.len() == search_n, &len_msg);
+                let n_msg = format!("候选 {i} 非 None 个数 == count");
+                c.check(n_some == ar.count(), &n_msg);
+                let sum_msg = format!("候选 {i} 非 None 之和与 sum 在 1e-9 内一致");
+                c.check(sum_ok, &sum_msg);
+            }
+        }
+
+        c.check(
+            out_off.best_action_idx == out_on.best_action_idx,
+            "同种子下开关不改变 best_action_idx"
+        );
+        for (i, (a, b)) in out_off.action_results.iter().zip(out_on.action_results.iter()).enumerate()
+        {
+            let mean_msg = format!("候选 {i} mean 逐位相同");
+            c.check(a.0.mean() == b.0.mean(), &mean_msg);
+        }
+        c.finish()
+    }
+
+    /// 有序槽位必须**逐序号**对上 CRN 种子，且各候选在同一序号上共享同一种子
+    ///
+    /// 这是保留顺序的**全部意义**所在：离线 cross-fitting 靠的是「各候选第 k 次
+    /// rollout 是同一个随机世界」。只验「非 None 个数 == count」「和一致」不够——
+    /// 把整行倒序、或让某个候选整体错开一位，那两条都仍然成立。
+    ///
+    /// 做法是让 rollout 闭包直接把种子当分数返回（取模保证 `f64` 精确表示），
+    /// 于是有序行本身就是该候选实际用过的种子序列，可以逐位对照 `seed_at(k)`。
+    #[test]
+    fn test_ordered_rollouts_align_with_crn_seeds() -> Result<()> {
+        let (game, actions) = ramen_root()?;
+        let search_n = 8;
+        let cfg = SearchConfig::default()
+            .with_search_n(search_n)
+            .with_ucb(false)
+            .with_record_ordered_rollouts(true);
+        let search: FlatSearch<RamenGame> = FlatSearch::new(cfg);
+
+        // 种子原样当分数会超出 f64 的整数精确区间，取模后仍是单射到本次搜索的 8 个种子
+        let seed_score = |seed: u64| (seed % 1_000_000) as f64;
+        let echo = |_: &RamenGame, _: &RamenAction, seed: u64| -> Result<SearchScore> {
+            Ok(SearchScore {
+                score: seed_score(seed),
+                score_pt: 0.0
+            })
+        };
+
+        let mut probe = StdRng::seed_from_u64(20260830);
+        let root = probe.next_u64();
+        let seeds = RolloutSeeds::from_root(root);
+        let want: Vec<f64> = (0..search_n).map(|k| seed_score(seeds.seed_at(k))).collect();
+        println!("root={root:#018x}");
+        println!("期望序列（各候选应逐位相同）: {want:?}");
+
+        let mut rng = StdRng::seed_from_u64(20260830);
+        let out = search.search_with(&game, &actions, &mut rng, echo)?;
+        let ord = out
+            .ordered_rollouts
+            .as_ref()
+            .ok_or_else(|| anyhow!("开关开时 ordered_rollouts 不应为 None"))?;
+
+        let mut c = Checks::new();
+        c.check(ord.root_seed == root, "root_seed 就是本次搜索的 CRN 起点");
+        let mut mismatched = 0usize;
+        for (i, row) in ord.per_candidate.iter().enumerate() {
+            let got: Vec<f64> = row.iter().map(|v| v.unwrap_or(f64::NAN)).collect();
+            if got != want {
+                mismatched += 1;
+                println!("  ⚠ 候选 {i} 序列不符: {got:?}");
+            }
+        }
+        println!("{} 个候选，序列不符 {mismatched} 个", ord.per_candidate.len());
+        c.check(
+            ord.per_candidate.len() == actions.len(),
+            "每个候选都有一行有序记录"
+        );
+        c.check(mismatched == 0, "所有候选的有序槽位逐位等于 seed_at(k)（跨候选完全配对）");
+        // 反面：若把某行整体左移一位，上面的逐位比较必须能发现
+        let shifted: Vec<f64> = want.iter().skip(1).chain(want.first()).copied().collect();
+        c.check(shifted != want, "错开一位的序列与期望不同（说明本测试确有分辨力）");
+        c.finish()
+    }
+
+    /// 单候选的均匀分配与 UCB 首组、追加组在不同线程数下保持统计、种子序号及失败槽。
+    #[test]
+    fn test_ordered_rollouts_ucb_keeps_failed_slots() -> Result<()> {
+        use rayon::ThreadPoolBuilder;
+
+        let (game, actions) = ramen_root()?;
+        let actions = &actions[..1];
+        let terminal = RamenTerminal::from_game(&game);
+        let search_n = 8;
+        let group_size = 4;
+        let mut probe = StdRng::seed_from_u64(42);
+        let root = probe.next_u64();
+        let seeds = RolloutSeeds::from_root(root);
+        let fail_indices = [1, search_n - 1];
+        let fail_seeds = fail_indices.map(|idx| seeds.seed_at(idx));
+        let seed_score = |seed: u64| (seed % 1_000_000) as f64;
+        println!("注入失败: root={root:#018x} rollout序号={fail_indices:?}");
+
+        let dummy = |_: &RamenGame, _: &RamenAction, seed: u64| -> Result<RolloutOutcome<RamenTerminal>> {
+            if fail_seeds.contains(&seed) {
+                bail!("injected failure for seed {seed:#018x}");
+            }
+            Ok(RolloutOutcome {
+                score: SearchScore {
+                    score: seed_score(seed),
+                    score_pt: seed_score(seed) * 0.37
+                },
+                terminal
+            })
+        };
+
+        let mut c = Checks::new();
+        for use_ucb in [false, true] {
+            let cfg = SearchConfig::default()
+                .with_search_n(search_n)
+                .with_ucb(use_ucb)
+                .with_search_group_size(group_size)
+                .with_record_ordered_rollouts(true);
+            let search: FlatSearch<RamenGame> = FlatSearch::new(cfg);
+            let mut baseline: Option<RamenSearchOutput> = None;
+            for threads in [1, 4] {
+                let pool = ThreadPoolBuilder::new().num_threads(threads).build()?;
+                let out = pool.install(|| {
+                    let mut rng = StdRng::seed_from_u64(42);
+                    search.search_with_terminal(&game, actions, &mut rng, dummy)
+                })?;
+                let ord = out
+                    .ordered_rollouts
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("开关开时 ordered_rollouts 不应为 None"))?;
+
+                c.check(ord.root_seed == root, "root_seed 与本次搜索 CRN 起点一致");
+                c.check(ord.per_candidate.len() == actions.len(), "每个候选都有有序记录");
+                c.check(
+                    ord.per_candidate.iter().all(|row| row.len() == search_n),
+                    "单候选执行到计划末尾，覆盖追加组的末位失败"
+                );
+                for (i, (row, (ar, _))) in ord.per_candidate.iter().zip(out.action_results.iter()).enumerate() {
+                    let expected: Vec<Option<f64>> = (0..row.len())
+                        .map(|idx| (!fail_indices.contains(&idx)).then(|| seed_score(seeds.seed_at(idx))))
+                        .collect();
+                    let n_some = row.iter().filter(|x| x.is_some()).count() as u32;
+                    println!("ucb={use_ucb} threads={threads} 候选{i}: slots={row:?}, count={}", ar.count());
+                    c.check(row == &expected, "失败槽留空，成功槽逐位对应 seed_at(idx)");
+                    c.check(n_some == ar.count(), "非空槽数量等于成功样本数");
+                    c.check(n_some < row.len() as u32, "失败仍占据计划序号");
+                }
+                if let Some(base) = &baseline {
+                    c.check(out.actions == base.actions && out.best_action_idx == base.best_action_idx, "候选与决策一致");
+                    c.check(out.radical_factor.to_bits() == base.radical_factor.to_bits(), "激进度逐位一致");
+                    c.check(out.terminal_results == base.terminal_results, "全部终局维度统计一致");
+                    let stats = |ar: &ActionResult| {
+                        [
+                            ar.count() as f64, ar.sum, ar.sum_sq, ar.min(), ar.max(), ar.mean(), ar.stdev(),
+                            ar.weighted_mean(out.radical_factor)
+                        ].map(f64::to_bits)
+                    };
+                    for (now, old) in out.action_results.iter().zip(base.action_results.iter()) {
+                        c.check(stats(&now.0) == stats(&old.0), "评分轴完整统计逐位一致");
+                        c.check(stats(&now.1) == stats(&old.1), "PT轴完整统计逐位一致");
+                    }
+                } else {
+                    baseline = Some(out);
+                }
+            }
+        }
         c.finish()
     }
 
