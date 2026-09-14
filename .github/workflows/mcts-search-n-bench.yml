@@ -1,0 +1,47 @@
+name: MCTS search_n benchmark
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: runs per search_n (same seeds across tiers = CRN pairing)
+        required: false
+        default: '100'
+      base_seed:
+        description: base seed (run seed = base_seed + run_idx)
+        required: false
+        default: '61444'
+permissions:
+  contents: read
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        search_n: [64, 4096, 8192, 12288, 16384]
+    env:
+      SN: ${{ matrix.search_n }}
+      RUNS: ${{ inputs.runs }}
+      SEED: ${{ inputs.base_seed }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: bench-searchn
+      - name: Tune config for 4-core runner
+        run: sed -i 's/^num_threads = 16/num_threads = 4/' game_config.toml
+      - name: Build bench_base (release)
+        run: cargo build --release -p umasim --bin bench_base
+      - name: Run bench search_n=$SN
+        run: |
+          ./target/release/bench_base --runs "$RUNS" --seed "$SEED" \
+            --trainer mcts --search-n "$SN" --out "logs/sn$SN" 2>&1 | tee "logs/bench_sn$SN.log"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-sn${{ matrix.search_n }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
