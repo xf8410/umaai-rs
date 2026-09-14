@@ -237,9 +237,8 @@ fn run() -> Result<()> {
     println!("=== 跑 MCTS ===");
     println!("当前 stage = {:?}", game.stage);
     println!("list_actions 长度 = {}", actions.len());
-    println!("search config: search_n={}  selection={:?}",
-        trainer.search.config().search_n,
-        trainer.selection);
+    println!("search config: search_n={}",
+        trainer.search.config().search_n);
 
     let mut rng = StdRng::from_os_rng();
     let t0 = Instant::now();
