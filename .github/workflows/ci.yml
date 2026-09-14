@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-check
+
+      - name: cargo check（umasim 库 + umaai 主二进制）
+        run: |
+          cargo check -p umasim --no-default-features
+          cargo check -p umaai --no-default-features
