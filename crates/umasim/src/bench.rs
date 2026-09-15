@@ -9,7 +9,7 @@
 //! - [`select_representatives`] + [`CardPickOpts`]：代表性支援卡选择（bench 专用粗略估计）
 //! - [`parse_value`]：lexopt 键值参数读取 helper
 
-use std::{path::Path, time::Instant};
+use std::{path::Path, sync::OnceLock, time::Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use indexmap::IndexMap;
@@ -524,6 +524,46 @@ impl DeckComposition {
     }
 }
 
+/// 合法布局数量（5 张普通卡合计 5、单属性 ≤ 3 的全部构成）。
+pub const COMPOSITION_COUNT: usize = 101;
+
+/// 默认布局索引（[3,1,0,0,1] = speed build，在 `all_compositions()` 中的位置）。
+pub const DEFAULT_COMP_INDEX: usize = 97;
+
+/// 默认布局（[3,1,0,0,1] = 速主 build，与 bench_config.toml 传统 speed 一致）。
+pub const DEFAULT_COMP_COUNTS: [usize; 5] = [3, 1, 0, 0, 1];
+
+/// 全枚举 101 种合法普通卡类型构成（[usize; 5]，保声明序）。
+///
+/// 约束：各维度 0..=3、合计 = 5。结果惰性缓存（OnceLock），首次调用后零开销。
+/// 与 `bin/bench_compositions.rs` 的 `enumerate_compositions()` 逻辑完全一致。
+pub fn all_compositions() -> &'static [[usize; 5]; COMPOSITION_COUNT] {
+    static TABLE: OnceLock<[[usize; 5]; COMPOSITION_COUNT]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut result = [[0usize; 5]; COMPOSITION_COUNT];
+        let mut idx = 0;
+        for speed in 0..=3 {
+            for stamina in 0..=3 {
+                for power in 0..=3 {
+                    for guts in 0..=3 {
+                        for wisdom in 0..=3 {
+                            let counts = [speed, stamina, power, guts, wisdom];
+                            if counts.iter().sum::<usize>() == 5 {
+                                result[idx] = counts;
+                                idx += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        debug_assert_eq!(idx, COMPOSITION_COUNT, "合法构成应为 101 种");
+        // 编译期校验默认布局在表中的位置
+        debug_assert_eq!(result[DEFAULT_COMP_INDEX], DEFAULT_COMP_COUNTS);
+        result
+    })
+}
+
 /// 从 lexopt 解析器中读取当前键值参数的值（支持 `--key value` 与 `--key=value`）。
 pub fn parse_value<T: std::str::FromStr>(parser: &mut lexopt::Parser, key: &str) -> Result<T> {
     let value = parser.value().with_context(|| format!("参数 {key} 缺少值"))?;
@@ -902,4 +942,26 @@ average = [1, 0, 1, 1, 2]
         let _ = std::fs::remove_file(&path);
         c.finish()
     }
+    /// 全枚举 101 种合法布局 + 默认布局索引正确。
+    #[test]
+    fn test_all_compositions_count_and_default() -> Result<()> {
+        let table = all_compositions();
+        let mut c = Checks::new();
+        c.check(table.len() == COMPOSITION_COUNT, &format!("全枚举 = {} 种", table.len()));
+        // 每种布局合法性：合计 5、单类 ≤ 3
+        for (i, counts) in table.iter().enumerate() {
+            c.check(counts.iter().sum::<usize>() == 5, &format!("布局 {i} 合计 = 5"));
+            c.check(counts.iter().all(|&x| x <= 3), &format!("布局 {i} 单类 ≤ 3"));
+        }
+        // 默认布局位置正确
+        c.check(table[DEFAULT_COMP_INDEX] == DEFAULT_COMP_COUNTS, "默认布局索引正确");
+        c.check(DEFAULT_COMP_COUNTS == [3, 1, 0, 0, 1], "默认布局 = [3,1,0,0,1]");
+        // 无重复
+        let mut sorted = table.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        c.check(sorted.len() == COMPOSITION_COUNT, "无重复布局");
+        c.finish()
+    }
+
 }

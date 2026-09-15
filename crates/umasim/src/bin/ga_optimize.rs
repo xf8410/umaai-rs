@@ -438,7 +438,7 @@ fn main() -> Result<()> {
     for (i, name) in umasim::card_pool::ATTR_NAMES.iter().enumerate() {
         println!("  {}{}: {} 张", name, umasim::card_pool::ATTR_NAMES_ZH[i], pool.pool_size(i));
     }
-    let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, &builds, &screen_names, params.clone(), pool)
+    let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, params.clone(), pool)
         .context("构造 SimFitnessEvaluator 失败")?;
 
     let report = GaOptimizer::new(params.clone()).run(&mut evaluator)?;

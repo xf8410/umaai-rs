@@ -486,6 +486,25 @@ pub fn genome_hash(genome: &GaGenome) -> u64 {
     hasher.finish()
 }
 
+/// 布局维度哈希（comp_idx + counts 联合，防不同索引碰巧同 counts 碰撞）。
+fn comp_hash(comp_idx: usize, counts: &[usize; 5]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    comp_idx.hash(&mut hasher);
+    counts.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// 布局 counts → 展示名（如 "3speed+1stamina+1wisdom"）。
+fn format_comp_name(counts: &[usize; 5]) -> String {
+    let mut parts = Vec::new();
+    for (i, &c) in counts.iter().enumerate() {
+        if c > 0 {
+            parts.push(format!("{c}{}", bench::TYPE_NAMES[i]));
+        }
+    }
+    parts.join("+")
+}
+
 /// 评估级别（design.md §3.2 两级评估 + holdout）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvalLevel {
@@ -562,9 +581,10 @@ pub type DetailRow = (EvalLevel, u64, f64, Vec<String>);
 
 /// 适应度评估器抽象（GA 主循环只依赖本 trait；模拟评估与测试 mock 各有一实现）。
 pub trait FitnessEvaluator {
-    /// 评估指定基因组+配卡选择在指定级别下的适应度（内部按 (组合键, 级别) 缓存去重）。
-    /// `key` = genome_hash ⊕ card_sel_hash（调用方组合）。
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard>;
+    /// 评估指定基因组+布局+配卡选择在指定级别下的适应度（内部按 (组合键, 级别) 缓存去重）。
+    /// `key` = genome_hash ⊕ comp_hash ⊕ card_sel_hash（调用方组合）。
+    /// `comp_counts` = 该个体的 5 属性普通卡数量分布（合计 5、单类 ≤ 3）。
+    fn evaluate(&mut self, key: u64, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard>;
     /// 取走自上次调用以来积累的单局明细行（GA 逐代落盘后清空，防内存膨胀）。
     fn take_detail_rows(&mut self) -> Vec<DetailRow>;
     /// 累计评估计数。
@@ -573,19 +593,16 @@ pub trait FitnessEvaluator {
     fn pool(&self) -> &SsrPool;
 }
 
-/// 模拟评估器：100% 复用 `bench::run_seeded`，rayon 按 (build, 局) 并行。
+/// 模拟评估器：100% 复用 `bench::run_seeded`，rayon 按局并行。
 ///
-/// 配卡基因改造后，卡组由 CardSelection + pool + build counts 动态构建，
-/// 不再预计算固定卡组。缓存键 = genome_hash ⊕ card_sel_hash。
+/// 布局基因改造后，每个个体自带布局（comp_counts）和配卡（card_sel），
+/// 卡组由 comp_counts + CardSelection + pool 动态构建，不再依赖外部 build 列表。
+/// 缓存键 = genome_hash ⊕ comp_hash ⊕ card_sel_hash。
 pub struct SimFitnessEvaluator {
     uma: u32,
     inherit: InheritInfo,
     /// SSR 卡池（按属性分组，降序排列）。
     pool: SsrPool,
-    /// 全部 build 布局（含 counts）。
-    builds: Vec<bench::DeckComposition>,
-    /// 初筛 build 名（子集索引到 builds）。
-    screen_build_indices: Vec<usize>,
     params: GaParams,
     cache: HashMap<(u64, EvalLevel), ScoreCard>,
     counts: EvalCounts,
@@ -602,28 +619,13 @@ impl SimFitnessEvaluator {
         uma: u32,
         _friend: u32,
         inherit: InheritInfo,
-        builds: &[bench::DeckComposition],
-        screen_build_names: &[String],
         params: GaParams,
         pool: SsrPool,
     ) -> Result<Self> {
-        let screen_build_indices = screen_build_names
-            .iter()
-            .map(|name| {
-                builds
-                    .iter()
-                    .position(|b| &b.name == name)
-                    .ok_or_else(|| anyhow::anyhow!("初筛 build {name} 不在全集内"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        ensure!(!screen_build_indices.is_empty(), "初筛 build 子集不能为空");
-        ensure!(!builds.is_empty(), "精评 build 全集不能为空");
         Ok(Self {
             uma,
             inherit,
             pool,
-            builds: builds.to_vec(),
-            screen_build_indices,
             params,
             cache: HashMap::new(),
             counts: EvalCounts::default(),
@@ -632,63 +634,45 @@ impl SimFitnessEvaluator {
     }
 
     /// 运行一个级别下的全部局并聚合（纯计算，不改自身状态）。
+    ///
+    /// 布局基因改造后：每个个体只有一个布局（comp_counts），构建一副卡组，
+    /// 跑 `runs` 局取均值。不再按 build 分组建卡。
     fn run_level(
         &self,
         _key: u64,
         ov: &ParamOverride,
+        comp_counts: &[usize; 5],
         card_sel: &CardSelection,
         level: EvalLevel
     ) -> Result<(ScoreCard, Vec<Vec<String>>)> {
-        let (build_indices, runs, base_seed) = match level {
-            EvalLevel::Screen => (
-                &self.screen_build_indices,
-                self.params.screen_runs,
-                self.params.base_seed
-            ),
-            EvalLevel::Full => {
-                static ALL: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
-                let all = ALL.get_or_init(|| (0..self.builds.len()).collect());
-                (all, self.params.full_runs, self.params.base_seed)
-            }
-            EvalLevel::Holdout => {
-                static ALL: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
-                let all = ALL.get_or_init(|| (0..self.builds.len()).collect());
-                (all, self.params.holdout_runs, self.params.holdout_seed)
-            }
+        let (runs, base_seed) = match level {
+            EvalLevel::Screen => (self.params.screen_runs, self.params.base_seed),
+            EvalLevel::Full => (self.params.full_runs, self.params.base_seed),
+            EvalLevel::Holdout => (self.params.holdout_runs, self.params.holdout_seed)
         };
         let runs = runs.max(1);
 
-        // 按 card_sel + build counts 动态构建卡组
-        let decks: Vec<(String, [u32; 6])> = build_indices
-            .iter()
-            .map(|&b| {
-                let build = &self.builds[b];
-                let deck = card_sel.build_deck(&self.pool, &build.counts)?;
-                Ok((build.name.clone(), deck))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        // 按 comp_counts + card_sel 动态构建卡组
+        let deck = card_sel.build_deck(&self.pool, comp_counts)?;
+        let build_name = format_comp_name(comp_counts);
 
-        let jobs: Vec<(usize, usize)> = (0..decks.len())
-            .flat_map(|b| (0..runs).map(move |r| (b, r)))
-            .collect();
-        let outcomes: Vec<(usize, GameOutcome)> = jobs
+        let jobs: Vec<usize> = (0..runs).collect();
+        let outcomes: Vec<GameOutcome> = jobs
             .into_par_iter()
-            .map(|(b, r)| {
-                let (name, deck) = &decks[b];
+            .map(|r| {
                 let trainer = LoggingTrainer::new(
                     RecommendedRamenTrainer::with_overrides_for_rollout(ov),
                     0
                 );
-                let outcome = bench::run_seeded(
+                bench::run_seeded(
                     self.uma,
-                    deck,
+                    &deck,
                     &self.inherit,
                     base_seed,
                     r as u64,
                     &trainer
                 )
-                .with_context(|| format!("run_seeded 失败: build={name} run={r} level={level:?}"))?;
-                Ok((b, outcome))
+                .with_context(|| format!("run_seeded 失败: layout={build_name} run={r} level={level:?}"))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -698,8 +682,8 @@ impl SimFitnessEvaluator {
         let mut scenario_pt = [0.0f64; 3];
         let mut race_fails = 0.0f64;
         let mut rmj_ok_sum = 0.0f64;
-        for (b, outcome) in &outcomes {
-            rows.push(bench::outcome_to_row(decks[*b].0.as_str(), outcome));
+        for outcome in &outcomes {
+            rows.push(bench::outcome_to_row(&build_name, outcome));
             scores.push(outcome.score as f64);
             skill_pts.push(outcome.skill_pt as f64);
             for (y, v) in scenario_pt.iter_mut().enumerate() {
@@ -712,25 +696,9 @@ impl SimFitnessEvaluator {
         }
         let stats = bench::summarize(&scores);
         let n = scores.len() as f64;
-        // fitness = Σ_build [ mean(score)_b − λ_race × mean(!ok)_b ]
-        // 逐 build 聚合（λ_race 惩罚按 build 均值计）。
-        // 注：RMJ 缺年惩罚项已按 2026-09-15 用户指令移除；mean_rmj_ok 仅诊断。
-        let mut fitness = 0.0;
-        for b in 0..decks.len() {
-            let build_scores: Vec<f64> = outcomes
-                .iter()
-                .filter(|(bb, _)| *bb == b)
-                .map(|(_, o)| o.score as f64)
-                .collect();
-            let build_stats = bench::summarize(&build_scores);
-            let build_fails = outcomes
-                .iter()
-                .filter(|(bb, _)| *bb == b)
-                .filter(|(_, o)| !o.free_race_ok)
-                .count() as f64
-                / runs as f64;
-            fitness += build_stats.mean - self.params.lambda_race * build_fails;
-        }
+        // fitness = mean(score) − λ_race × race_fail_rate（单布局）
+        let race_fail_rate = race_fails / n;
+        let fitness = stats.mean - self.params.lambda_race * race_fail_rate;
         for v in scenario_pt.iter_mut() {
             *v /= n;
         }
@@ -741,9 +709,9 @@ impl SimFitnessEvaluator {
             score_std: stats.std,
             mean_skill_pt: skill_pts.iter().sum::<f64>() / n,
             mean_scenario_pt: scenario_pt,
-            race_fail_rate: race_fails / n,
+            race_fail_rate,
             mean_rmj_ok: rmj_ok_sum / n,
-            n_builds: decks.len(),
+            n_builds: 1,
             runs_per_build: runs
         };
         Ok((card, rows))
@@ -751,12 +719,12 @@ impl SimFitnessEvaluator {
 }
 
 impl FitnessEvaluator for SimFitnessEvaluator {
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
+    fn evaluate(&mut self, key: u64, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
         if let Some(card) = self.cache.get(&(key, level)) {
             self.counts.cache_hits += 1;
             return Ok(*card);
         }
-        let (card, rows) = self.run_level(key, ov, card_sel, level)?;
+        let (card, rows) = self.run_level(key, ov, comp_counts, card_sel, level)?;
         self.detail_rows.extend(rows.into_iter().map(|r| (level, key, card.fitness, r)));
         match level {
             EvalLevel::Screen => self.counts.screen_evals += 1,
@@ -846,12 +814,18 @@ impl Default for GaParams {
     }
 }
 
-/// 单个个体：基因组 + 配卡选择 + 解码后的覆盖层 + 两级评估缓存。
+/// 单个个体：基因组 + 布局 + 配卡选择 + 解码后的覆盖层 + 两级评估缓存。
+///
+/// 三维搜索空间：77 参数基因 × 101 布局 × 配卡选择。
 #[derive(Debug, Clone)]
 struct Individual {
     genome: GaGenome,
+    /// 布局索引（0..101），对应 `bench::all_compositions()` 中的一行。
+    comp_idx: usize,
+    /// 布局 counts 缓存（避免每次查表）。
+    comp_counts: [usize; 5],
     card_sel: CardSelection,
-    /// 组合键 = genome_hash ⊕ card_sel.hash_key()（适应度缓存键）。
+    /// 组合键 = genome_hash ⊕ comp_hash ⊕ card_sel.hash_key()（适应度缓存键）。
     key: u64,
     ov: ParamOverride,
     screen: Option<ScoreCard>,
@@ -910,6 +884,8 @@ pub struct GaGenRecord {
 pub struct GaReport {
     /// 全程最优基因组（精评口径）。
     pub best_genome: GaGenome,
+    /// 全程最优布局索引。
+    pub best_comp_idx: usize,
     /// 全程最优配卡选择。
     pub best_card_sel: CardSelection,
     /// 全程最优覆盖层（解码 + repair 后）。
@@ -967,24 +943,34 @@ impl GaOptimizer {
                     GaGenome(genes)
                 }
             };
+            // 布局基因：个体 0/1 用默认布局，其余随机
+            let comp_idx = if idx < 2 {
+                bench::DEFAULT_COMP_INDEX
+            } else {
+                rng.random_range(0..bench::COMPOSITION_COUNT)
+            };
             // 配卡选择：个体 0/1 用默认（池内首选），其余随机扰动一个属性
             let mut card_sel = CardSelection::default_top(pool);
             if idx >= 2 {
                 card_sel.mutate_one(pool, rng);
             }
-            pop.push(Self::make_individual(genome, card_sel));
+            pop.push(Self::make_individual(genome, comp_idx, card_sel));
         }
         pop
     }
 
-    /// 基因组 + 配卡选择 → 个体（解码 + repair + 组合哈希）。
-    fn make_individual(genome: GaGenome, card_sel: CardSelection) -> Individual {
+    /// 基因组 + 布局 + 配卡选择 → 个体（解码 + repair + 组合哈希）。
+    fn make_individual(genome: GaGenome, comp_idx: usize, card_sel: CardSelection) -> Individual {
         let gh = genome_hash(&genome);
-        let ch = card_sel.hash_key();
-        let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15);
+        let comp_counts = bench::all_compositions()[comp_idx];
+        let ch = comp_hash(comp_idx, &comp_counts);
+        let sh = card_sel.hash_key();
+        let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let ov = decode(&genome).expect("解码含 repair，合法基因组必成功");
         Individual {
             genome,
+            comp_idx,
+            comp_counts,
             card_sel,
             key,
             ov,
@@ -1065,6 +1051,24 @@ impl GaOptimizer {
         }
     }
 
+    /// 布局交叉：按概率从父本 A 或 B 继承 comp_idx。
+    fn crossover_comp(a_comp: usize, b_comp: usize, rng: &mut StdRng) -> usize {
+        if rng.random::<bool>() { b_comp } else { a_comp }
+    }
+
+    /// 布局变异：以概率 1/COMPOSITION_COUNT 随机换一个合法布局。
+    fn mutate_comp(comp_idx: usize, rng: &mut StdRng) -> usize {
+        if rng.random::<f64>() < 1.0 / bench::COMPOSITION_COUNT as f64 {
+            loop {
+                let new_idx = rng.random_range(0..bench::COMPOSITION_COUNT);
+                if new_idx != comp_idx {
+                    return new_idx;
+                }
+            }
+        }
+        comp_idx
+    }
+
     /// 当代变异 σ：线性衰减（0.15 → 0.03 ×区间宽），停滞触发的代回升到 σ0。
     fn sigma_for_gen(&self, generation_idx: usize, stagnation_reset: bool) -> f64 {
         if stagnation_reset {
@@ -1091,8 +1095,8 @@ impl GaOptimizer {
         let mut rng = StdRng::seed_from_u64(self.params.ga_seed);
         let mut pop = self.init_population(&mut rng, evaluator.pool());
         let mut history = Vec::with_capacity(self.params.gens);
-        // 全程最优（精评口径）：(fitness, genome, override, card)
-        let mut best: Option<(f64, GaGenome, CardSelection, ParamOverride, ScoreCard)> = None;
+        // 全程最优（精评口径）：(fitness, genome, comp_idx, card_sel, override, card)
+        let mut best: Option<(f64, GaGenome, usize, CardSelection, ParamOverride, ScoreCard)> = None;
         let mut stagnation_counter = 0usize;
         let mut stagnation_resets = 0usize;
 
@@ -1112,7 +1116,7 @@ impl GaOptimizer {
             // 1) 初筛：尚无任何评估值的个体全部过初筛
             for ind in pop.iter_mut() {
                 if ind.full.is_none() && ind.screen.is_none() {
-                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.ov, &ind.card_sel, EvalLevel::Screen)?);
+                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.ov, &ind.comp_counts, &ind.card_sel, EvalLevel::Screen)?);
                 }
             }
 
@@ -1131,7 +1135,7 @@ impl GaOptimizer {
             });
             for &i in order.iter().take(promotion_slots) {
                 if pop[i].full.is_none() {
-                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].ov, &pop[i].card_sel, EvalLevel::Full)?);
+                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].ov, &pop[i].comp_counts, &pop[i].card_sel, EvalLevel::Full)?);
                 }
             }
 
@@ -1151,16 +1155,16 @@ impl GaOptimizer {
             // 全程最优跟踪（仅精评口径入榜，跨代可比）
             if let Some(card) = best_ind.full.as_ref() {
                 let is_better = match &best {
-                    Some((bf, _, _, _, _)) => card.fitness > *bf,
+                    Some((bf, _, _, _, _, _)) => card.fitness > *bf,
                     None => true
                 };
                 if is_better {
-                    best = Some((card.fitness, best_ind.genome.clone(), best_ind.card_sel, best_ind.ov.clone(), *card));
+                    best = Some((card.fitness, best_ind.genome.clone(), best_ind.comp_idx, best_ind.card_sel, best_ind.ov.clone(), *card));
                 }
             }
 
             // 4) holdout 复验：本代冠军、不参与选择（缓存按 (key, level) 去重）
-            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.ov, &best_ind.card_sel, EvalLevel::Holdout)?;
+            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.ov, &best_ind.comp_counts, &best_ind.card_sel, EvalLevel::Holdout)?;
 
             // 5) 停滞计数：全程最优精评值严格高于代初快照才算提升
             let improved = match (best.as_ref().map(|b| b.0), prev_best_fitness) {
@@ -1197,25 +1201,34 @@ impl GaOptimizer {
                 while next.len() < self.params.pop {
                     let a = self.tournament(&pop, &mut rng);
                     let b = self.tournament(&pop, &mut rng);
-                    let mut child = self.crossover(&a.genome, &b.genome, &mut rng);
-                    self.mutate(&mut child, sigma, &mut rng);
+                    let mut child_genome = self.crossover(&a.genome, &b.genome, &mut rng);
+                    self.mutate(&mut child_genome, sigma, &mut rng);
+                    // 布局交叉 + 变异
+                    let mut child_comp = Self::crossover_comp(a.comp_idx, b.comp_idx, &mut rng);
+                    child_comp = Self::mutate_comp(child_comp, &mut rng);
+                    // 配卡交叉 + 变异
                     let mut child_card = CardSelection::crossover(&a.card_sel, &b.card_sel, &mut rng);
-                    // 配卡变异率 = 1/ATTR_COUNT（与参数基因 1/N 对齐）
                     if rng.random::<f64>() < 1.0 / crate::card_pool::ATTR_COUNT as f64 {
                         child_card.mutate_one(evaluator.pool(), &mut rng);
                     }
-                    next.push(Self::make_individual(child, child_card));
+                    next.push(Self::make_individual(child_genome, child_comp, child_card));
                 }
                 pop = next;
             }
         }
 
         // 收尾：全局最优的最终 holdout 复验（此前每代冠军已跑过，通常缓存命中）
-        let (best_fitness, best_genome, best_card_sel, best_override, best_card) = best
+        let (best_fitness, best_genome, best_comp_idx, best_card_sel, best_override, best_card) = best
             .ok_or_else(|| anyhow::anyhow!("GA 未产生任何精评个体"))?;
+        let best_comp_counts = bench::all_compositions()[best_comp_idx];
+        let gh = genome_hash(&best_genome);
+        let ch = comp_hash(best_comp_idx, &best_comp_counts);
+        let sh = best_card_sel.hash_key();
+        let final_key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let final_holdout = evaluator.evaluate(
-            genome_hash(&best_genome),
+            final_key,
             &best_override,
+            &best_comp_counts,
             &best_card_sel,
             EvalLevel::Holdout
         )?;
@@ -1224,6 +1237,7 @@ impl GaOptimizer {
 
         Ok(GaReport {
             best_genome,
+            best_comp_idx,
             best_card_sel,
             best_override,
             best_fitness,
@@ -1344,7 +1358,7 @@ mod tests {
     }
 
     impl FitnessEvaluator for MockEvaluator {
-        fn evaluate(&mut self, key: u64, _ov: &ParamOverride, _card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
+        fn evaluate(&mut self, key: u64, _ov: &ParamOverride, _comp_counts: &[usize; 5], _card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
             if let Some(card) = self.cache.get(&(key, level)) {
                 self.counts.cache_hits += 1;
                 return Ok(*card);
@@ -1676,11 +1690,16 @@ mod tests {
         );
         // 直接验证缓存语义：同 key 重复评估命中缓存
         let genome = GaGenome::all_none();
+        let comp_counts = bench::DEFAULT_COMP_COUNTS;
+        let comp_idx = bench::DEFAULT_COMP_INDEX;
         let card_sel = CardSelection { indices: [0; 5] };
-        let key = genome_hash(&genome) ^ card_sel.hash_key().wrapping_mul(0x9e3779b97f4a7c15);
+        let gh = genome_hash(&genome);
+        let ch = super::comp_hash(comp_idx, &comp_counts);
+        let sh = card_sel.hash_key();
+        let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let ov = decode(&genome)?;
         let hits_before = e.counts.cache_hits;
-        let _ = e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?;
+        let _ = e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
         c.check(e.counts.cache_hits == hits_before + 1, "重复 (key, level) 评估命中缓存");
 
         // 晋升语义：每代精评后至少 elitism 个个体持有精评卡（full_count 为累计持有数，
@@ -1713,11 +1732,16 @@ mod tests {
     fn ga_detail_rows_flow_with_mock() -> Result<()> {
         let mut e = MockEvaluator::new();
         let genome = GaGenome::all_none();
-        let key = genome_hash(&genome);
-        let ov = decode(&genome)?;
+        let comp_counts = bench::DEFAULT_COMP_COUNTS;
+        let comp_idx = bench::DEFAULT_COMP_INDEX;
         let card_sel = CardSelection { indices: [0; 5] };
-        e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?;
-        e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?; // 缓存命中，不产明细
+        let gh = genome_hash(&genome);
+        let ch = super::comp_hash(comp_idx, &comp_counts);
+        let sh = card_sel.hash_key();
+        let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
+        let ov = decode(&genome)?;
+        e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
+        e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?; // 缓存命中，不产明细
         let rows = e.take_detail_rows();
         let mut c = Checks::new();
         println!("明细行数 = {}", rows.len());
@@ -1943,10 +1967,8 @@ mod tests {
     #[test]
     fn ga_live_smoke_small() -> Result<()> {
         bootstrap()?;
-        let builds = bench::load_player_builds()?;
-        println!("玩家 build 数 = {}", builds.len());
-        let screen_names = select_screen_builds(&builds, 1);
-        println!("初筛代表 build = {screen_names:?}");
+        println!("布局全枚举 = {} 种", bench::COMPOSITION_COUNT);
+        println!("默认布局 = {:?} (idx={})", bench::DEFAULT_COMP_COUNTS, bench::DEFAULT_COMP_INDEX);
 
         let params = GaParams {
             pop: 3,
@@ -1963,7 +1985,7 @@ mod tests {
         };
         let pool = SsrPool::load()?;
         let mut evaluator =
-            SimFitnessEvaluator::new(UMA, FRIEND, INHERIT, &builds, &screen_names, params.clone(), pool)?;
+            SimFitnessEvaluator::new(UMA, FRIEND, INHERIT, params.clone(), pool)?;
         let report = GaOptimizer::new(params).run(&mut evaluator)?;
 
         let mut c = Checks::new();
@@ -1999,4 +2021,101 @@ mod tests {
         // 这里只验证有限性与自洽，不锁定具体分数）
         c.finish()
     }
+    /// 布局交叉/变异产物合法性：合计 5、单类 ≤ 3、索引 ∈ [0, 101)。
+    #[test]
+    fn ga_composition_operators_legal() -> Result<()> {
+        let mut rng = StdRng::seed_from_u64(777);
+        let table = bench::all_compositions();
+        let mut c = Checks::new();
+
+        // 交叉：100 次随机交叉，产物索引必在 [0, 101)
+        for _ in 0..100 {
+            let a = rng.random_range(0..bench::COMPOSITION_COUNT);
+            let b = rng.random_range(0..bench::COMPOSITION_COUNT);
+            let child = GaOptimizer::crossover_comp(a, b, &mut rng);
+            c.check(child < bench::COMPOSITION_COUNT, &format!("交叉产物 {child} < 101"));
+            let counts = table[child];
+            c.check(counts.iter().sum::<usize>() == 5, &format!("交叉产物合计 = 5"));
+            c.check(counts.iter().all(|&x| x <= 3), &format!("交叉产物单类 ≤ 3"));
+        }
+
+        // 变异：100 次随机变异，产物 ≠ 原值（变异发生时）且合法
+        for _ in 0..100 {
+            let orig = rng.random_range(0..bench::COMPOSITION_COUNT);
+            let mutated = GaOptimizer::mutate_comp(orig, &mut rng);
+            c.check(mutated < bench::COMPOSITION_COUNT, &format!("变异产物 {mutated} < 101"));
+            if mutated != orig {
+                let counts = table[mutated];
+                c.check(counts.iter().sum::<usize>() == 5, "变异产物合计 = 5");
+                c.check(counts.iter().all(|&x| x <= 3), "变异产物单类 ≤ 3");
+            }
+        }
+        c.finish()
+    }
+
+    /// 三维哈希区分：不同 (genome, comp, card_sel) → 不同 key。
+    #[test]
+    fn ga_three_dim_hash_distinct() -> Result<()> {
+        let genome_a = GaGenome::all_none();
+        let genome_b = GaGenome::all_preset();
+        let card_sel_a = CardSelection { indices: [0; 5] };
+        let card_sel_b = CardSelection { indices: [1, 0, 0, 0, 0] };
+        let comp_a = bench::DEFAULT_COMP_INDEX;
+        let comp_b = 0usize; // [0,0,0,2,3] or similar
+
+        let mut c = Checks::new();
+
+        // 只改 genome
+        let gh_a = genome_hash(&genome_a);
+        let gh_b = genome_hash(&genome_b);
+        c.check(gh_a != gh_b, "不同 genome → 不同 genome_hash");
+
+        // 只改 comp
+        let comp_counts_a = bench::all_compositions()[comp_a];
+        let comp_counts_b = bench::all_compositions()[comp_b];
+        let ch_a = comp_hash(comp_a, &comp_counts_a);
+        let ch_b = comp_hash(comp_b, &comp_counts_b);
+        c.check(ch_a != ch_b, "不同 comp → 不同 comp_hash");
+
+        // 只改 card_sel
+        c.check(card_sel_a.hash_key() != card_sel_b.hash_key(), "不同 card_sel → 不同 hash");
+
+        // 完整 key：改任一维度即不同
+        let sh = card_sel_a.hash_key();
+        let key_aaa = gh_a ^ ch_a.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
+        let key_baa = gh_b ^ ch_a.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
+        let key_aba = gh_a ^ ch_b.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
+        let sh_b = card_sel_b.hash_key();
+        let key_aab = gh_a ^ ch_a.wrapping_mul(0x9e3779b97f4a7c15) ^ sh_b.wrapping_mul(0x517cc1b727220a95);
+        c.check(key_aaa != key_baa, "改 genome → 不同 key");
+        c.check(key_aaa != key_aba, "改 comp → 不同 key");
+        c.check(key_aaa != key_aab, "改 card_sel → 不同 key");
+        c.finish()
+    }
+
+    /// 默认布局+默认配卡 → build_deck 产出与旧行为一致（6张不重复，末位友人）。
+    #[test]
+    fn ga_default_layout_default_cards_zero_diff() -> Result<()> {
+        bootstrap()?;
+        let pool = SsrPool::load()?;
+        let comp_counts = bench::DEFAULT_COMP_COUNTS; // [3, 1, 0, 0, 1]
+        let card_sel = CardSelection::default_top(&pool);
+        let deck = card_sel.build_deck(&pool, &comp_counts)?;
+
+        let mut c = Checks::new();
+        c.check(deck.len() == 6, "卡组 6 张");
+        c.check(deck[5] == crate::card_pool::FRIEND_IDRANK, "末位 = 友人 303054");
+        // 6 张卡 card_id 不重复
+        let mut ids: Vec<u32> = deck.iter().map(|&id| id / 10).collect();
+        let orig_len = ids.len();
+        ids.sort();
+        ids.dedup();
+        c.check(ids.len() == orig_len, "卡组无重复 card_id");
+        // 布局合法性
+        c.check(comp_counts.iter().sum::<usize>() == 5, "默认布局合计 = 5");
+        c.check(comp_counts.iter().all(|&x| x <= 3), "默认布局单类 ≤ 3");
+        println!("默认布局卡组: {:?}", deck);
+        c.finish()
+    }
+
 }
