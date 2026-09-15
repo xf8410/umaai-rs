@@ -954,15 +954,26 @@ impl GaOptimizer {
             if idx >= 2 {
                 card_sel.mutate_one(pool, rng);
             }
-            pop.push(Self::make_individual(genome, comp_idx, card_sel));
+            pop.push(Self::make_individual(genome, comp_idx, card_sel, pool));
         }
         pop
     }
 
     /// 基因组 + 布局 + 配卡选择 → 个体（解码 + repair + 组合哈希）。
-    fn make_individual(genome: GaGenome, comp_idx: usize, card_sel: CardSelection) -> Individual {
+    ///
+    /// **配卡 clamp**：`indices[attr]` 必须在 `[0, pool_size - count]` 范围内，
+    /// 否则 `build_deck` 中 `indices[attr] + j` 会越界。此处统一修复，
+    /// 上游 mutate/crossover 无需感知布局-配卡的耦合约束。
+    fn make_individual(genome: GaGenome, comp_idx: usize, mut card_sel: CardSelection, pool: &SsrPool) -> Individual {
         let gh = genome_hash(&genome);
         let comp_counts = bench::all_compositions()[comp_idx];
+        // Clamp: 确保 indices[attr] + counts[attr] - 1 < pool_size
+        for attr in 0..crate::card_pool::ATTR_COUNT {
+            let max_start = pool.pool_size(attr).saturating_sub(comp_counts[attr]);
+            if card_sel.indices[attr] > max_start {
+                card_sel.indices[attr] = max_start;
+            }
+        }
         let ch = comp_hash(comp_idx, &comp_counts);
         let sh = card_sel.hash_key();
         let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
@@ -1211,7 +1222,7 @@ impl GaOptimizer {
                     if rng.random::<f64>() < 1.0 / crate::card_pool::ATTR_COUNT as f64 {
                         child_card.mutate_one(evaluator.pool(), &mut rng);
                     }
-                    next.push(Self::make_individual(child_genome, child_comp, child_card));
+                    next.push(Self::make_individual(child_genome, child_comp, child_card, evaluator.pool()));
                 }
                 pop = next;
             }
