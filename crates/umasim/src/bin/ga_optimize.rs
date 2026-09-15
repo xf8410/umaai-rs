@@ -12,7 +12,7 @@
 //!
 //! 缺省参数 = design.md 定稿值（种群 60 / 40 代 / 精英 4 / 锦标赛 3 /
 //! 交叉 0.9 / σ 0.15→0.03 / 停滞 5 代 / 初筛 3build×20 局 / 精评 7build×60 局 /
-//! holdout 7build×40 局 / base_seed 42 / holdout_seed 43 / λ_race 800 / λ_rmj 150）。
+//! holdout 7build×40 局 / base_seed 42 / holdout_seed 43 / λ_race 800）。
 //! 马娘/友人/继承因子读取 workspace 根 `bench_config.toml`（与基线同源）。
 //!
 //! # 产出（默认 `ga_logs/`）
@@ -31,6 +31,7 @@ use anyhow::{Context, Result};
 use lexopt::Arg;
 use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
+use umasim::card_pool::SsrPool;
 use umasim::genetic_optimizer::{
     GENE_COUNT, GENE_SPECS, GaGenome, GaOptimizer, GaParams, FitnessEvaluator,
     SimFitnessEvaluator, select_screen_builds
@@ -129,9 +130,6 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             Arg::Long("lambda-race") => {
                 params.lambda_race = bench::parse_value(&mut parser, "lambda-race")?
             }
-            Arg::Long("lambda-rmj") => {
-                params.lambda_rmj = bench::parse_value(&mut parser, "lambda-rmj")?
-            }
             Arg::Long("none-ratio") => {
                 params.none_gene_ratio = bench::parse_value(&mut parser, "none-ratio")?
             }
@@ -145,7 +143,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                      \x20                 [--base-seed S] [--holdout-seed S]\n\
                      \x20                 [--screen-builds N] [--screen-runs N] [--full-builds N]\n\
                      \x20                 [--full-runs N] [--holdout-runs N]\n\
-                     \x20                 [--lambda-race F] [--lambda-rmj F] [--none-ratio F]\n\
+                     \x20                 [--lambda-race F] [--none-ratio F]\n\
                      \x20                 [--uma ID] [--friend ID] [--out DIR]\n\
                      缺省 = design.md 定稿协议；马娘/友人/继承因子读 bench_config.toml\n\
                      ⚠️ 全量协议每代约 5280 局、40 代约 21 万局，跑前确认预算"
@@ -396,8 +394,8 @@ fn main() -> Result<()> {
         params.screen_builds, params.screen_runs, params.base_seed,
         params.full_builds, params.full_runs, params.base_seed,
         params.holdout_runs, params.holdout_seed);
-    println!("λ_race={} λ_rmj={} ga_seed={} none_ratio={:.2} 基因数={}",
-        params.lambda_race, params.lambda_rmj, params.ga_seed, params.none_gene_ratio, GENE_COUNT);
+    println!("λ_race={} ga_seed={} none_ratio={:.2} 基因数={}",
+        params.lambda_race, params.ga_seed, params.none_gene_ratio, GENE_COUNT);
     println!("builds({})={} 初筛代表={:?}", builds.len(), full_names.join(","), screen_names);
     {
         let budget_per_gen = params.screen_builds as u64 * params.screen_runs as u64 * params.pop as u64
@@ -434,7 +432,13 @@ fn main() -> Result<()> {
     bench::write_csv(&out_dir.join("ga_detail.csv"), &detail_header, &[])?;
 
     // 构造评估器（卡组与 bench_base 同源同序：CardPickOpts::default() + make_deck）
-    let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, &builds, &screen_names, params.clone())
+    let pool = SsrPool::load().context("加载 SSR 卡池失败")?;
+    println!("SSR 卡池: {} 张（排除 {} 张未实装卡）",
+        pool.pools.iter().map(|p| p.len()).sum::<usize>(), pool.excluded.len());
+    for (i, name) in umasim::card_pool::ATTR_NAMES.iter().enumerate() {
+        println!("  {}{}: {} 张", name, umasim::card_pool::ATTR_NAMES_ZH[i], pool.pool_size(i));
+    }
+    let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, &builds, &screen_names, params.clone(), pool)
         .context("构造 SimFitnessEvaluator 失败")?;
 
     let report = GaOptimizer::new(params.clone()).run(&mut evaluator)?;
@@ -489,6 +493,7 @@ fn main() -> Result<()> {
         report.best_fitness,
         umasim::genetic_optimizer::genome_hash(&report.best_genome)
     );
+    println!("最优配卡选择: {:?}", report.best_card_sel.indices);
     print_card_summary("精评", &report.best_card);
     if let Some(h) = report.holdout_card.as_ref() {
         print_card_summary("holdout", h);

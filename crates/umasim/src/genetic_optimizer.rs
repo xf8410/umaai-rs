@@ -7,8 +7,8 @@
 //!   差异见 progress.md），f32 连续编码 ∈ [-1, 1]：`g < 0` = `None`（保留
 //!   preset，即现行为），`g >= 0` = `Some(lo + g × (hi − lo))`。全 None 基因组
 //!   ≡ 基线策略，是零差异验证的编码保障。
-//! - **适应度**（design.md §3.3）：`Σ_build mean(score) − λ_race × Σ mean(!free_race_ok)
-//!   − λ_rmj × Σ mean(3 − rmj_ok)`；`yearly_scenario_pt`（剧本 PT）与
+//! - **适应度**（design.md §3.3）：`Σ_build mean(score) − λ_race × Σ mean(!free_race_ok)`；
+//!   `yearly_scenario_pt`（剧本 PT）与
 //!   `skill_pt`（技能点）分列落盘为诊断列，**不进入适应度**（防牺牲技能点
 //!   换 PT 的伪增益）。
 //! - **两级评估**（design.md §3.2）：初筛（默认 3 build × 20 局）淘汰明显劣个体，
@@ -38,6 +38,7 @@ use rayon::prelude::*;
 use crate::bench::{self, GameOutcome};
 use crate::game::InheritInfo;
 use crate::trainer::local_ramen_trainer::ParamOverride;
+use crate::card_pool::{CardSelection, SsrPool};
 use crate::trainer::{LoggingTrainer, RecommendedRamenTrainer};
 
 /// preset 基线值（repair 与 preset 基因组锚点用）。
@@ -515,7 +516,7 @@ impl EvalLevel {
 pub struct ScoreCard {
     /// 评估级别。
     pub level: EvalLevel,
-    /// 适应度（Σ_build mean(score) − λ_race × Σ mean(!free_race_ok) − λ_rmj × Σ mean(3−rmj_ok)）。
+    /// 适应度（Σ_build mean(score) − λ_race × Σ mean(!free_race_ok)）。
     pub fitness: f64,
     /// 全部局数合并的结算评分均值（主指标诊断值）。
     pub mean_score: f64,
@@ -561,22 +562,30 @@ pub type DetailRow = (EvalLevel, u64, f64, Vec<String>);
 
 /// 适应度评估器抽象（GA 主循环只依赖本 trait；模拟评估与测试 mock 各有一实现）。
 pub trait FitnessEvaluator {
-    /// 评估指定基因组在指定级别下的适应度（内部按 (基因组哈希, 级别) 缓存去重）。
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, level: EvalLevel) -> Result<ScoreCard>;
+    /// 评估指定基因组+配卡选择在指定级别下的适应度（内部按 (组合键, 级别) 缓存去重）。
+    /// `key` = genome_hash ⊕ card_sel_hash（调用方组合）。
+    fn evaluate(&mut self, key: u64, ov: &ParamOverride, card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard>;
     /// 取走自上次调用以来积累的单局明细行（GA 逐代落盘后清空，防内存膨胀）。
     fn take_detail_rows(&mut self) -> Vec<DetailRow>;
     /// 累计评估计数。
     fn counts(&self) -> EvalCounts;
+    /// 获取 SSR 卡池引用（配卡基因初始化用；mock 实现返回空池）。
+    fn pool(&self) -> &SsrPool;
 }
 
 /// 模拟评估器：100% 复用 `bench::run_seeded`，rayon 按 (build, 局) 并行。
+///
+/// 配卡基因改造后，卡组由 CardSelection + pool + build counts 动态构建，
+/// 不再预计算固定卡组。缓存键 = genome_hash ⊕ card_sel_hash。
 pub struct SimFitnessEvaluator {
     uma: u32,
     inherit: InheritInfo,
-    /// (build 名, 卡组) 列表：初筛用子集。
-    screen_decks: Vec<(String, [u32; 6])>,
-    /// (build 名, 卡组) 列表：精评/holdout 用全集。
-    full_decks: Vec<(String, [u32; 6])>,
+    /// SSR 卡池（按属性分组，降序排列）。
+    pool: SsrPool,
+    /// 全部 build 布局（含 counts）。
+    builds: Vec<bench::DeckComposition>,
+    /// 初筛 build 名（子集索引到 builds）。
+    screen_build_indices: Vec<usize>,
     params: GaParams,
     cache: HashMap<(u64, EvalLevel), ScoreCard>,
     counts: EvalCounts,
@@ -591,34 +600,30 @@ impl SimFitnessEvaluator {
     /// 与 bench_base 同源同序。
     pub fn new(
         uma: u32,
-        friend: u32,
+        _friend: u32,
         inherit: InheritInfo,
         builds: &[bench::DeckComposition],
         screen_build_names: &[String],
-        params: GaParams
+        params: GaParams,
+        pool: SsrPool,
     ) -> Result<Self> {
-        let opts = bench::CardPickOpts::default();
-        let full_decks = builds
-            .iter()
-            .map(|b| Ok((b.name.clone(), b.make_deck(&opts, friend)?)))
-            .collect::<Result<Vec<_>>>()?;
-        let screen_decks = screen_build_names
+        let screen_build_indices = screen_build_names
             .iter()
             .map(|name| {
-                full_decks
+                builds
                     .iter()
-                    .find(|(n, _)| n == name)
-                    .cloned()
+                    .position(|b| &b.name == name)
                     .ok_or_else(|| anyhow::anyhow!("初筛 build {name} 不在全集内"))
             })
             .collect::<Result<Vec<_>>>()?;
-        ensure!(!screen_decks.is_empty(), "初筛 build 子集不能为空");
-        ensure!(!full_decks.is_empty(), "精评 build 全集不能为空");
+        ensure!(!screen_build_indices.is_empty(), "初筛 build 子集不能为空");
+        ensure!(!builds.is_empty(), "精评 build 全集不能为空");
         Ok(Self {
             uma,
             inherit,
-            screen_decks,
-            full_decks,
+            pool,
+            builds: builds.to_vec(),
+            screen_build_indices,
             params,
             cache: HashMap::new(),
             counts: EvalCounts::default(),
@@ -631,22 +636,38 @@ impl SimFitnessEvaluator {
         &self,
         _key: u64,
         ov: &ParamOverride,
+        card_sel: &CardSelection,
         level: EvalLevel
     ) -> Result<(ScoreCard, Vec<Vec<String>>)> {
-        let (decks, runs, base_seed) = match level {
+        let (build_indices, runs, base_seed) = match level {
             EvalLevel::Screen => (
-                &self.screen_decks,
+                &self.screen_build_indices,
                 self.params.screen_runs,
                 self.params.base_seed
             ),
-            EvalLevel::Full => (&self.full_decks, self.params.full_runs, self.params.base_seed),
-            EvalLevel::Holdout => (
-                &self.full_decks,
-                self.params.holdout_runs,
-                self.params.holdout_seed
-            )
+            EvalLevel::Full => {
+                static ALL: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+                let all = ALL.get_or_init(|| (0..self.builds.len()).collect());
+                (all, self.params.full_runs, self.params.base_seed)
+            }
+            EvalLevel::Holdout => {
+                static ALL: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+                let all = ALL.get_or_init(|| (0..self.builds.len()).collect());
+                (all, self.params.holdout_runs, self.params.holdout_seed)
+            }
         };
         let runs = runs.max(1);
+
+        // 按 card_sel + build counts 动态构建卡组
+        let decks: Vec<(String, [u32; 6])> = build_indices
+            .iter()
+            .map(|&b| {
+                let build = &self.builds[b];
+                let deck = card_sel.build_deck(&self.pool, &build.counts)?;
+                Ok((build.name.clone(), deck))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let jobs: Vec<(usize, usize)> = (0..decks.len())
             .flat_map(|b| (0..runs).map(move |r| (b, r)))
             .collect();
@@ -691,8 +712,9 @@ impl SimFitnessEvaluator {
         }
         let stats = bench::summarize(&scores);
         let n = scores.len() as f64;
-        // fitness = Σ_build [ mean(score)_b − λ_race × mean(!ok)_b − λ_rmj × mean(3−rmj_ok)_b ]
-        // 逐 build 聚合（与 design 公式一致；λ 惩罚按 build 均值计）。
+        // fitness = Σ_build [ mean(score)_b − λ_race × mean(!ok)_b ]
+        // 逐 build 聚合（λ_race 惩罚按 build 均值计）。
+        // 注：RMJ 缺年惩罚项已按 2026-09-15 用户指令移除；mean_rmj_ok 仅诊断。
         let mut fitness = 0.0;
         for b in 0..decks.len() {
             let build_scores: Vec<f64> = outcomes
@@ -707,15 +729,7 @@ impl SimFitnessEvaluator {
                 .filter(|(_, o)| !o.free_race_ok)
                 .count() as f64
                 / runs as f64;
-            let build_rmj_miss = outcomes
-                .iter()
-                .filter(|(bb, _)| *bb == b)
-                .map(|(_, o)| (3 - o.rmj_ok) as f64)
-                .sum::<f64>()
-                / runs as f64;
-            fitness += build_stats.mean
-                - self.params.lambda_race * build_fails
-                - self.params.lambda_rmj * build_rmj_miss;
+            fitness += build_stats.mean - self.params.lambda_race * build_fails;
         }
         for v in scenario_pt.iter_mut() {
             *v /= n;
@@ -737,12 +751,12 @@ impl SimFitnessEvaluator {
 }
 
 impl FitnessEvaluator for SimFitnessEvaluator {
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, level: EvalLevel) -> Result<ScoreCard> {
+    fn evaluate(&mut self, key: u64, ov: &ParamOverride, card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
         if let Some(card) = self.cache.get(&(key, level)) {
             self.counts.cache_hits += 1;
             return Ok(*card);
         }
-        let (card, rows) = self.run_level(key, ov, level)?;
+        let (card, rows) = self.run_level(key, ov, card_sel, level)?;
         self.detail_rows.extend(rows.into_iter().map(|r| (level, key, card.fitness, r)));
         match level {
             EvalLevel::Screen => self.counts.screen_evals += 1,
@@ -759,6 +773,10 @@ impl FitnessEvaluator for SimFitnessEvaluator {
 
     fn counts(&self) -> EvalCounts {
         self.counts
+    }
+
+    fn pool(&self) -> &SsrPool {
+        &self.pool
     }
 }
 
@@ -797,8 +815,6 @@ pub struct GaParams {
     pub holdout_seed: u64,
     /// 自选比赛不达标惩罚系数（design 占位 800/局，实现期以基线跑批校准）。
     pub lambda_race: f64,
-    /// RMJ 缺年惩罚系数（design 占位 150/年，实现期以基线跑批校准）。
-    pub lambda_rmj: f64,
     /// GA 自身随机种子（与评估种子分离）。
     pub ga_seed: u64,
     /// 初始化时基因取 None 的比例（design 未定，取 0.3 保证 None 语义可被搜索）。
@@ -824,17 +840,18 @@ impl Default for GaParams {
             base_seed: 42,
             holdout_seed: 43,
             lambda_race: 800.0,
-            lambda_rmj: 150.0,
             ga_seed: 42,
             none_gene_ratio: 0.3
         }
     }
 }
 
-/// 单个个体：基因组 + 解码后的覆盖层 + 两级评估缓存。
+/// 单个个体：基因组 + 配卡选择 + 解码后的覆盖层 + 两级评估缓存。
 #[derive(Debug, Clone)]
 struct Individual {
     genome: GaGenome,
+    card_sel: CardSelection,
+    /// 组合键 = genome_hash ⊕ card_sel.hash_key()（适应度缓存键）。
     key: u64,
     ov: ParamOverride,
     screen: Option<ScoreCard>,
@@ -893,6 +910,8 @@ pub struct GaGenRecord {
 pub struct GaReport {
     /// 全程最优基因组（精评口径）。
     pub best_genome: GaGenome,
+    /// 全程最优配卡选择。
+    pub best_card_sel: CardSelection,
     /// 全程最优覆盖层（解码 + repair 后）。
     pub best_override: ParamOverride,
     /// 全程最优适应度（精评口径）。
@@ -929,7 +948,7 @@ impl GaOptimizer {
 
     /// 初始种群：个体 0 = 全 None（基线冠军）、个体 1 = 全 preset、其余随机
     /// （每基因以 `none_gene_ratio` 概率取 None，否则 Some 区间均匀）。
-    fn init_population(&self, rng: &mut StdRng) -> Vec<Individual> {
+    fn init_population(&self, rng: &mut StdRng, pool: &SsrPool) -> Vec<Individual> {
         let mut pop = Vec::with_capacity(self.params.pop);
         for idx in 0..self.params.pop {
             let genome = match idx {
@@ -948,17 +967,25 @@ impl GaOptimizer {
                     GaGenome(genes)
                 }
             };
-            pop.push(Self::make_individual(genome));
+            // 配卡选择：个体 0/1 用默认（池内首选），其余随机扰动一个属性
+            let mut card_sel = CardSelection::default_top(pool);
+            if idx >= 2 {
+                card_sel.mutate_one(pool, rng);
+            }
+            pop.push(Self::make_individual(genome, card_sel));
         }
         pop
     }
 
-    /// 基因组 → 个体（解码 + repair + 哈希）。
-    fn make_individual(genome: GaGenome) -> Individual {
-        let key = genome_hash(&genome);
+    /// 基因组 + 配卡选择 → 个体（解码 + repair + 组合哈希）。
+    fn make_individual(genome: GaGenome, card_sel: CardSelection) -> Individual {
+        let gh = genome_hash(&genome);
+        let ch = card_sel.hash_key();
+        let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15);
         let ov = decode(&genome).expect("解码含 repair，合法基因组必成功");
         Individual {
             genome,
+            card_sel,
             key,
             ov,
             screen: None,
@@ -1062,10 +1089,10 @@ impl GaOptimizer {
     pub fn run(&self, evaluator: &mut dyn FitnessEvaluator) -> Result<GaReport> {
         let start = Instant::now();
         let mut rng = StdRng::seed_from_u64(self.params.ga_seed);
-        let mut pop = self.init_population(&mut rng);
+        let mut pop = self.init_population(&mut rng, evaluator.pool());
         let mut history = Vec::with_capacity(self.params.gens);
         // 全程最优（精评口径）：(fitness, genome, override, card)
-        let mut best: Option<(f64, GaGenome, ParamOverride, ScoreCard)> = None;
+        let mut best: Option<(f64, GaGenome, CardSelection, ParamOverride, ScoreCard)> = None;
         let mut stagnation_counter = 0usize;
         let mut stagnation_resets = 0usize;
 
@@ -1085,7 +1112,7 @@ impl GaOptimizer {
             // 1) 初筛：尚无任何评估值的个体全部过初筛
             for ind in pop.iter_mut() {
                 if ind.full.is_none() && ind.screen.is_none() {
-                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.ov, EvalLevel::Screen)?);
+                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.ov, &ind.card_sel, EvalLevel::Screen)?);
                 }
             }
 
@@ -1104,7 +1131,7 @@ impl GaOptimizer {
             });
             for &i in order.iter().take(promotion_slots) {
                 if pop[i].full.is_none() {
-                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].ov, EvalLevel::Full)?);
+                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].ov, &pop[i].card_sel, EvalLevel::Full)?);
                 }
             }
 
@@ -1124,16 +1151,16 @@ impl GaOptimizer {
             // 全程最优跟踪（仅精评口径入榜，跨代可比）
             if let Some(card) = best_ind.full.as_ref() {
                 let is_better = match &best {
-                    Some((bf, _, _, _)) => card.fitness > *bf,
+                    Some((bf, _, _, _, _)) => card.fitness > *bf,
                     None => true
                 };
                 if is_better {
-                    best = Some((card.fitness, best_ind.genome.clone(), best_ind.ov.clone(), *card));
+                    best = Some((card.fitness, best_ind.genome.clone(), best_ind.card_sel, best_ind.ov.clone(), *card));
                 }
             }
 
             // 4) holdout 复验：本代冠军、不参与选择（缓存按 (key, level) 去重）
-            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.ov, EvalLevel::Holdout)?;
+            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.ov, &best_ind.card_sel, EvalLevel::Holdout)?;
 
             // 5) 停滞计数：全程最优精评值严格高于代初快照才算提升
             let improved = match (best.as_ref().map(|b| b.0), prev_best_fitness) {
@@ -1172,18 +1199,24 @@ impl GaOptimizer {
                     let b = self.tournament(&pop, &mut rng);
                     let mut child = self.crossover(&a.genome, &b.genome, &mut rng);
                     self.mutate(&mut child, sigma, &mut rng);
-                    next.push(Self::make_individual(child));
+                    let mut child_card = CardSelection::crossover(&a.card_sel, &b.card_sel, &mut rng);
+                    // 配卡变异率 = 1/ATTR_COUNT（与参数基因 1/N 对齐）
+                    if rng.random::<f64>() < 1.0 / crate::card_pool::ATTR_COUNT as f64 {
+                        child_card.mutate_one(evaluator.pool(), &mut rng);
+                    }
+                    next.push(Self::make_individual(child, child_card));
                 }
                 pop = next;
             }
         }
 
         // 收尾：全局最优的最终 holdout 复验（此前每代冠军已跑过，通常缓存命中）
-        let (best_fitness, best_genome, best_override, best_card) = best
+        let (best_fitness, best_genome, best_card_sel, best_override, best_card) = best
             .ok_or_else(|| anyhow::anyhow!("GA 未产生任何精评个体"))?;
         let final_holdout = evaluator.evaluate(
             genome_hash(&best_genome),
             &best_override,
+            &best_card_sel,
             EvalLevel::Holdout
         )?;
         let holdout_card = Some(final_holdout);
@@ -1191,6 +1224,7 @@ impl GaOptimizer {
 
         Ok(GaReport {
             best_genome,
+            best_card_sel,
             best_override,
             best_fitness,
             best_card,
@@ -1310,7 +1344,7 @@ mod tests {
     }
 
     impl FitnessEvaluator for MockEvaluator {
-        fn evaluate(&mut self, key: u64, _ov: &ParamOverride, level: EvalLevel) -> Result<ScoreCard> {
+        fn evaluate(&mut self, key: u64, _ov: &ParamOverride, _card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
             if let Some(card) = self.cache.get(&(key, level)) {
                 self.counts.cache_hits += 1;
                 return Ok(*card);
@@ -1334,6 +1368,15 @@ mod tests {
 
         fn counts(&self) -> EvalCounts {
             self.counts
+        }
+
+        fn pool(&self) -> &SsrPool {
+            // mock 用空池（测试不涉及真实卡组构建）
+            static EMPTY: std::sync::OnceLock<SsrPool> = std::sync::OnceLock::new();
+            EMPTY.get_or_init(|| SsrPool {
+                pools: std::array::from_fn(|_| Vec::new()),
+                excluded: Vec::new(),
+            })
         }
     }
 
@@ -1633,10 +1676,11 @@ mod tests {
         );
         // 直接验证缓存语义：同 key 重复评估命中缓存
         let genome = GaGenome::all_none();
-        let key = genome_hash(&genome);
+        let card_sel = CardSelection { indices: [0; 5] };
+        let key = genome_hash(&genome) ^ card_sel.hash_key().wrapping_mul(0x9e3779b97f4a7c15);
         let ov = decode(&genome)?;
         let hits_before = e.counts.cache_hits;
-        let _ = e.evaluate(key, &ov, EvalLevel::Screen)?;
+        let _ = e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?;
         c.check(e.counts.cache_hits == hits_before + 1, "重复 (key, level) 评估命中缓存");
 
         // 晋升语义：每代精评后至少 elitism 个个体持有精评卡（full_count 为累计持有数，
@@ -1671,8 +1715,9 @@ mod tests {
         let genome = GaGenome::all_none();
         let key = genome_hash(&genome);
         let ov = decode(&genome)?;
-        e.evaluate(key, &ov, EvalLevel::Screen)?;
-        e.evaluate(key, &ov, EvalLevel::Screen)?; // 缓存命中，不产明细
+        let card_sel = CardSelection { indices: [0; 5] };
+        e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?;
+        e.evaluate(key, &ov, &card_sel, EvalLevel::Screen)?; // 缓存命中，不产明细
         let rows = e.take_detail_rows();
         let mut c = Checks::new();
         println!("明细行数 = {}", rows.len());
@@ -1916,8 +1961,9 @@ mod tests {
             ga_seed: 42,
             ..GaParams::default()
         };
+        let pool = SsrPool::load()?;
         let mut evaluator =
-            SimFitnessEvaluator::new(UMA, FRIEND, INHERIT, &builds, &screen_names, params.clone())?;
+            SimFitnessEvaluator::new(UMA, FRIEND, INHERIT, &builds, &screen_names, params.clone(), pool)?;
         let report = GaOptimizer::new(params).run(&mut evaluator)?;
 
         let mut c = Checks::new();

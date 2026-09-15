@@ -1,0 +1,2309 @@
+{
+  "source": "master.mdb (rarity=3, command_id!=0)",
+  "total_cards": 285,
+  "pool": {
+    "speed": [
+      {
+        "card_id": 30302,
+        "idrank": 303024,
+        "name": "[速]里见光钻",
+        "full_name": "[永恒的誓言，永恒的光辉]里见光钻",
+        "chara_id": 1067,
+        "card_type": 0
+      },
+      {
+        "card_id": 30298,
+        "idrank": 302984,
+        "name": "[速]跳舞城",
+        "full_name": "[刀光迸发Clash！]跳舞城",
+        "chara_id": 1107,
+        "card_type": 0
+      },
+      {
+        "card_id": 30292,
+        "idrank": 302924,
+        "name": "[速]洛林军歌",
+        "full_name": "[响彻吧，两人的凯歌]洛林军歌",
+        "chara_id": 1140,
+        "card_type": 0
+      },
+      {
+        "card_id": 30291,
+        "idrank": 302914,
+        "name": "[速]比萨胜驹",
+        "full_name": "[Let's Go Together!]比萨胜驹",
+        "chara_id": 1143,
+        "card_type": 0
+      },
+      {
+        "card_id": 30286,
+        "idrank": 302864,
+        "name": "[速]待兼福来",
+        "full_name": "[吉兆招福巧克力来福]待兼福来",
+        "chara_id": 1056,
+        "card_type": 0
+      },
+      {
+        "card_id": 30282,
+        "idrank": 302824,
+        "name": "[速]气槽",
+        "full_name": "[铭记于心，京之华]气槽",
+        "chara_id": 1018,
+        "card_type": 0
+      },
+      {
+        "card_id": 30275,
+        "idrank": 302754,
+        "name": "[速]东海帝王",
+        "full_name": "[天才的乌托邦]东海帝王",
+        "chara_id": 1003,
+        "card_type": 0
+      },
+      {
+        "card_id": 30272,
+        "idrank": 302724,
+        "name": "[速]荣进闪耀",
+        "full_name": "[Zirkus der Träume]荣进闪耀",
+        "chara_id": 1037,
+        "card_type": 0
+      },
+      {
+        "card_id": 30269,
+        "idrank": 302694,
+        "name": "[速]烈焰快驹",
+        "full_name": "[因为今天很开心，]烈焰快驹",
+        "chara_id": 1092,
+        "card_type": 0
+      },
+      {
+        "card_id": 30267,
+        "idrank": 302674,
+        "name": "[速]金镇之光",
+        "full_name": "[金镇之光，是猫]金镇之光",
+        "chara_id": 1120,
+        "card_type": 0
+      },
+      {
+        "card_id": 30265,
+        "idrank": 302654,
+        "name": "[速]爱慕律动",
+        "full_name": "[冰结晶的静域]爱慕律动",
+        "chara_id": 1118,
+        "card_type": 0
+      },
+      {
+        "card_id": 30260,
+        "idrank": 302604,
+        "name": "[速]目白麦昆",
+        "full_name": "[微灰PARTY☆]目白麦昆",
+        "chara_id": 1013,
+        "card_type": 0
+      },
+      {
+        "card_id": 30259,
+        "idrank": 302594,
+        "name": "[速]房一潘多拉",
+        "full_name": "[绝对☆天才传说]房一潘多拉",
+        "chara_id": 1113,
+        "card_type": 0
+      },
+      {
+        "card_id": 30253,
+        "idrank": 302534,
+        "name": "[速]莱茵力量",
+        "full_name": "[Unveiled Dream]莱茵力量",
+        "chara_id": 1109,
+        "card_type": 0
+      },
+      {
+        "card_id": 30247,
+        "idrank": 302474,
+        "name": "[速]吉兆",
+        "full_name": "[Operation: Escort]吉兆",
+        "chara_id": 1083,
+        "card_type": 0
+      },
+      {
+        "card_id": 30246,
+        "idrank": 302464,
+        "name": "[速]梦之旅",
+        "full_name": "[诱入梦境]梦之旅",
+        "chara_id": 1119,
+        "card_type": 0
+      },
+      {
+        "card_id": 30242,
+        "idrank": 302424,
+        "name": "[速]杏目",
+        "full_name": "[改变世界的目光]杏目",
+        "chara_id": 1129,
+        "card_type": 0
+      },
+      {
+        "card_id": 30236,
+        "idrank": 302364,
+        "name": "[速]采珠",
+        "full_name": "[起飞的维纳斯]采珠",
+        "chara_id": 1042,
+        "card_type": 0
+      },
+      {
+        "card_id": 30235,
+        "idrank": 302354,
+        "name": "[速]丸善斯基",
+        "full_name": "[回首见天花微笑]丸善斯基",
+        "chara_id": 1004,
+        "card_type": 0
+      },
+      {
+        "card_id": 30230,
+        "idrank": 302304,
+        "name": "[速]名将怒涛",
+        "full_name": "[不屈的狼嚎]名将怒涛",
+        "chara_id": 1058,
+        "card_type": 0
+      },
+      {
+        "card_id": 30224,
+        "idrank": 302244,
+        "name": "[速]成田白仁",
+        "full_name": "[咆哮的靠弦]成田白仁",
+        "chara_id": 1016,
+        "card_type": 0
+      },
+      {
+        "card_id": 30215,
+        "idrank": 302154,
+        "name": "[速]爱如往昔",
+        "full_name": "[Devilish Whispers]爱如往昔",
+        "chara_id": 1097,
+        "card_type": 0
+      },
+      {
+        "card_id": 30213,
+        "idrank": 302134,
+        "name": "[速]东海帝王",
+        "full_name": "[开幕☆喧闹GP！]东海帝王",
+        "chara_id": 1003,
+        "card_type": 0
+      },
+      {
+        "card_id": 30210,
+        "idrank": 302104,
+        "name": "[速]醒目飞鹰",
+        "full_name": "[碧波间的幕后花絮]醒目飞鹰",
+        "chara_id": 1046,
+        "card_type": 0
+      },
+      {
+        "card_id": 30206,
+        "idrank": 302064,
+        "name": "[速]强击",
+        "full_name": "[六出花之梦]强击",
+        "chara_id": 1091,
+        "card_type": 0
+      },
+      {
+        "card_id": 30205,
+        "idrank": 302054,
+        "name": "[速]极峰",
+        "full_name": "[绀碧的加冕仪式]极峰",
+        "chara_id": 1090,
+        "card_type": 0
+      },
+      {
+        "card_id": 30196,
+        "idrank": 301964,
+        "name": "[速]也文摄辉",
+        "full_name": "[浚风]也文摄辉",
+        "chara_id": 1078,
+        "card_type": 0
+      },
+      {
+        "card_id": 30192,
+        "idrank": 301924,
+        "name": "[速]强击",
+        "full_name": "[珍藏的谢幕礼]强击",
+        "chara_id": 1091,
+        "card_type": 0
+      },
+      {
+        "card_id": 30186,
+        "idrank": 301864,
+        "name": "[速]贵妇人",
+        "full_name": "[Balliamo?]贵妇人",
+        "chara_id": 1116,
+        "card_type": 0
+      },
+      {
+        "card_id": 30184,
+        "idrank": 301844,
+        "name": "[速]樱花进王",
+        "full_name": "[感谢感谢！樱花吹雪！！]樱花进王",
+        "chara_id": 1041,
+        "card_type": 0
+      },
+      {
+        "card_id": 30178,
+        "idrank": 301784,
+        "name": "[速]大鸣大放",
+        "full_name": "[血脉的初现]大鸣大放",
+        "chara_id": 1108,
+        "card_type": 0
+      },
+      {
+        "card_id": 30174,
+        "idrank": 301744,
+        "name": "[速]目白多伯",
+        "full_name": "[在圣夜，为了改变]目白多伯",
+        "chara_id": 1059,
+        "card_type": 0
+      },
+      {
+        "card_id": 30168,
+        "idrank": 301684,
+        "name": "[速]黄金船",
+        "full_name": "[乘风破浪]黄金船",
+        "chara_id": 1007,
+        "card_type": 0
+      },
+      {
+        "card_id": 30167,
+        "idrank": 301674,
+        "name": "[速]美妙姿势",
+        "full_name": "[Hello my clover]美妙姿势",
+        "chara_id": 1022,
+        "card_type": 0
+      },
+      {
+        "card_id": 30161,
+        "idrank": 301614,
+        "name": "[速]神鹰",
+        "full_name": "[宏愿振翅]神鹰",
+        "chara_id": 1014,
+        "card_type": 0
+      },
+      {
+        "card_id": 30159,
+        "idrank": 301594,
+        "name": "[速]气槽",
+        "full_name": "[Seaside Bloom]气槽",
+        "chara_id": 1018,
+        "card_type": 0
+      },
+      {
+        "card_id": 30154,
+        "idrank": 301544,
+        "name": "[速]目白善信",
+        "full_name": "[如海鸥一般]目白善信",
+        "chara_id": 1064,
+        "card_type": 0
+      },
+      {
+        "card_id": 30147,
+        "idrank": 301474,
+        "name": "[速]森林宝穴",
+        "full_name": "[The frontier]森林宝穴",
+        "chara_id": 1094,
+        "card_type": 0
+      },
+      {
+        "card_id": 30140,
+        "idrank": 301404,
+        "name": "[速]东海帝王",
+        "full_name": "[比翼华尔兹]东海帝王",
+        "chara_id": 1003,
+        "card_type": 0
+      },
+      {
+        "card_id": 30135,
+        "idrank": 301354,
+        "name": "[速]葛城王牌",
+        "full_name": "[揭竿而起，让灯火熊熊燃烧]葛城王牌",
+        "chara_id": 1104,
+        "card_type": 0
+      },
+      {
+        "card_id": 30131,
+        "idrank": 301314,
+        "name": "[速]美丽周日",
+        "full_name": "[Marvelous☆巧克力SHOW]美丽周日",
+        "chara_id": 1055,
+        "card_type": 0
+      },
+      {
+        "card_id": 30122,
+        "idrank": 301224,
+        "name": "[速]荣进闪耀",
+        "full_name": "[Danke schön]荣进闪耀",
+        "chara_id": 1037,
+        "card_type": 0
+      },
+      {
+        "card_id": 30121,
+        "idrank": 301214,
+        "name": "[速]美浦波旁",
+        "full_name": "[U & Me]美浦波旁",
+        "chara_id": 1026,
+        "card_type": 0
+      },
+      {
+        "card_id": 30119,
+        "idrank": 301194,
+        "name": "[速]目白阿尔丹",
+        "full_name": "[舞于夜风的祈愿之花]目白阿尔丹",
+        "chara_id": 1071,
+        "card_type": 0
+      },
+      {
+        "card_id": 30116,
+        "idrank": 301164,
+        "name": "[速]大拓太阳神",
+        "full_name": "[日下的小天使♪]大拓太阳神",
+        "chara_id": 1065,
+        "card_type": 0
+      },
+      {
+        "card_id": 30107,
+        "idrank": 301074,
+        "name": "[速]丸善斯基",
+        "full_name": "[感伤预警♪]丸善斯基",
+        "chara_id": 1004,
+        "card_type": 0
+      },
+      {
+        "card_id": 30101,
+        "idrank": 301014,
+        "name": "[速]爱丽速子",
+        "full_name": "[Q≠0]爱丽速子",
+        "chara_id": 1032,
+        "card_type": 0
+      },
+      {
+        "card_id": 30095,
+        "idrank": 300954,
+        "name": "[速]采珠",
+        "full_name": "[那声喝彩改变了世界]采珠",
+        "chara_id": 1042,
+        "card_type": 0
+      },
+      {
+        "card_id": 30092,
+        "idrank": 300924,
+        "name": "[速]空中神宫",
+        "full_name": "[mag!c number]空中神宫",
+        "chara_id": 1036,
+        "card_type": 0
+      },
+      {
+        "card_id": 30086,
+        "idrank": 300864,
+        "name": "[速]成田路",
+        "full_name": "[桃色音爆]成田路",
+        "chara_id": 1077,
+        "card_type": 0
+      },
+      {
+        "card_id": 30084,
+        "idrank": 300844,
+        "name": "[速]东瀛佐敦",
+        "full_name": "[In my way]东瀛佐敦",
+        "chara_id": 1048,
+        "card_type": 0
+      },
+      {
+        "card_id": 30078,
+        "idrank": 300784,
+        "name": "[速]待兼福来",
+        "full_name": "[相逢就会幸福♪]待兼福来",
+        "chara_id": 1056,
+        "card_type": 0
+      },
+      {
+        "card_id": 30076,
+        "idrank": 300764,
+        "name": "[速]无声铃鹿",
+        "full_name": "[追寻未曾见过的风景]无声铃鹿",
+        "chara_id": 1002,
+        "card_type": 0
+      },
+      {
+        "card_id": 30072,
+        "idrank": 300724,
+        "name": "[速]摩耶重炮",
+        "full_name": "[编队：PARTY]摩耶重炮",
+        "chara_id": 1024,
+        "card_type": 0
+      },
+      {
+        "card_id": 30065,
+        "idrank": 300654,
+        "name": "[速]荒漠英雄",
+        "full_name": "[被授予魔力的英雄]荒漠英雄",
+        "chara_id": 1047,
+        "card_type": 0
+      },
+      {
+        "card_id": 30057,
+        "idrank": 300574,
+        "name": "[速]黄金船",
+        "full_name": "[马王传说・成为最强者]黄金船",
+        "chara_id": 1007,
+        "card_type": 0
+      },
+      {
+        "card_id": 30053,
+        "idrank": 300534,
+        "name": "[速]大树快车",
+        "full_name": "[Hands up, crook!]大树快车",
+        "chara_id": 1010,
+        "card_type": 0
+      },
+      {
+        "card_id": 30045,
+        "idrank": 300454,
+        "name": "[速]东商变革",
+        "full_name": "[冰冷的独占？]东商变革",
+        "chara_id": 1044,
+        "card_type": 0
+      },
+      {
+        "card_id": 30044,
+        "idrank": 300444,
+        "name": "[速]成田白仁",
+        "full_name": "[Two Pieces]成田白仁",
+        "chara_id": 1016,
+        "card_type": 0
+      },
+      {
+        "card_id": 30039,
+        "idrank": 300394,
+        "name": "[速]川上公主",
+        "full_name": "[作为新娘！！]川上公主",
+        "chara_id": 1039,
+        "card_type": 0
+      },
+      {
+        "card_id": 30028,
+        "idrank": 300284,
+        "name": "[速]北部玄驹",
+        "full_name": "[在热量逼近的推动下]北部玄驹",
+        "chara_id": 1068,
+        "card_type": 0
+      },
+      {
+        "card_id": 30026,
+        "idrank": 300264,
+        "name": "[速]双涡轮",
+        "full_name": "[涡轮发动机全开宣言！]双涡轮",
+        "chara_id": 1066,
+        "card_type": 0
+      },
+      {
+        "card_id": 30025,
+        "idrank": 300254,
+        "name": "[速]特别周",
+        "full_name": "[晚霞是令人向往的颜色]特别周",
+        "chara_id": 1001,
+        "card_type": 0
+      },
+      {
+        "card_id": 30020,
+        "idrank": 300204,
+        "name": "[速]微光飞驹",
+        "full_name": "[必杀！W胡萝卜拳！]微光飞驹",
+        "chara_id": 1054,
+        "card_type": 0
+      },
+      {
+        "card_id": 30018,
+        "idrank": 300184,
+        "name": "[速]西野花",
+        "full_name": "[即使还是很小的花蕾]西野花",
+        "chara_id": 1051,
+        "card_type": 0
+      },
+      {
+        "card_id": 30015,
+        "idrank": 300154,
+        "name": "[速]樱花进王",
+        "full_name": "[快点！好吃！快点！]樱花进王",
+        "chara_id": 1041,
+        "card_type": 0
+      },
+      {
+        "card_id": 30014,
+        "idrank": 300144,
+        "name": "[速]黄金城市",
+        "full_name": "[Run(my)way]黄金城市",
+        "chara_id": 1040,
+        "card_type": 0
+      },
+      {
+        "card_id": 30003,
+        "idrank": 300034,
+        "name": "[速]东海帝王",
+        "full_name": "[梦想就是要展示的！]东海帝王",
+        "chara_id": 1003,
+        "card_type": 0
+      },
+      {
+        "card_id": 30002,
+        "idrank": 300024,
+        "name": "[速]无声铃鹿",
+        "full_name": "[闪耀的景色，在那前方]无声铃鹿",
+        "chara_id": 1002,
+        "card_type": 0
+      }
+    ],
+    "stamina": [
+      {
+        "card_id": 30304,
+        "idrank": 303044,
+        "name": "[耐]名将怒涛",
+        "full_name": "[其执念如怒涛般汹涌]名将怒涛",
+        "chara_id": 1058,
+        "card_type": 1
+      },
+      {
+        "card_id": 30303,
+        "idrank": 303034,
+        "name": "[耐]防爆装束",
+        "full_name": "[『要一直在一起哦——！』]防爆装束",
+        "chara_id": 1128,
+        "card_type": 1
+      },
+      {
+        "card_id": 30300,
+        "idrank": 303004,
+        "name": "[耐]樱花千代王",
+        "full_name": "[载着热闹的未来奔驰吧！]樱花千代王",
+        "chara_id": 1069,
+        "card_type": 1
+      },
+      {
+        "card_id": 30281,
+        "idrank": 302814,
+        "name": "[耐]稻荷一",
+        "full_name": "[衣锦还乡咯！]稻荷一",
+        "chara_id": 1034,
+        "card_type": 1
+      },
+      {
+        "card_id": 30280,
+        "idrank": 302804,
+        "name": "[耐]黄金巨匠",
+        "full_name": "[沉溺于黄金之梦吧]黄金巨匠",
+        "chara_id": 1115,
+        "card_type": 1
+      },
+      {
+        "card_id": 30279,
+        "idrank": 302794,
+        "name": "[耐]超常骏骥",
+        "full_name": "[温暖的诺埃尔]超常骏骥",
+        "chara_id": 1127,
+        "card_type": 1
+      },
+      {
+        "card_id": 30278,
+        "idrank": 302784,
+        "name": "[耐]黄金船",
+        "full_name": "[激录！爆走驯鹿事件]黄金船",
+        "chara_id": 1007,
+        "card_type": 1
+      },
+      {
+        "card_id": 30274,
+        "idrank": 302744,
+        "name": "[耐]机伶金花",
+        "full_name": "[决意的花神]机伶金花",
+        "chara_id": 1134,
+        "card_type": 1
+      },
+      {
+        "card_id": 30262,
+        "idrank": 302624,
+        "name": "[耐]大鸣大放",
+        "full_name": "[Tranquillo]大鸣大放",
+        "chara_id": 1108,
+        "card_type": 1
+      },
+      {
+        "card_id": 30258,
+        "idrank": 302584,
+        "name": "[耐]目白赖恩",
+        "full_name": "[眼中满载斗志，胸中怀抱胜利的渴望]目白赖恩",
+        "chara_id": 1027,
+        "card_type": 1
+      },
+      {
+        "card_id": 30244,
+        "idrank": 302444,
+        "name": "[耐]目白光明",
+        "full_name": "[春天，来临]目白光明",
+        "chara_id": 1074,
+        "card_type": 1
+      },
+      {
+        "card_id": 30240,
+        "idrank": 302404,
+        "name": "[耐]森林宝穴",
+        "full_name": "[『最强是我！！』]森林宝穴",
+        "chara_id": 1094,
+        "card_type": 1
+      },
+      {
+        "card_id": 30239,
+        "idrank": 302394,
+        "name": "[耐]优秀素质",
+        "full_name": "[仅此一次，特别服务哦？]优秀素质",
+        "chara_id": 1060,
+        "card_type": 1
+      },
+      {
+        "card_id": 30226,
+        "idrank": 302264,
+        "name": "[耐]空中神宫",
+        "full_name": "[Cocoon]空中神宫",
+        "chara_id": 1036,
+        "card_type": 1
+      },
+      {
+        "card_id": 30221,
+        "idrank": 302214,
+        "name": "[耐]里见光钻",
+        "full_name": "[今天也要愉快地享用美食。]里见光钻",
+        "chara_id": 1067,
+        "card_type": 1
+      },
+      {
+        "card_id": 30212,
+        "idrank": 302124,
+        "name": "[耐]奇锐骏",
+        "full_name": "[那个夏天的剪切线]奇锐骏",
+        "chara_id": 1100,
+        "card_type": 1
+      },
+      {
+        "card_id": 30209,
+        "idrank": 302094,
+        "name": "[耐]烈焰快驹",
+        "full_name": "[随后拉开了帷幕]烈焰快驹",
+        "chara_id": 1092,
+        "card_type": 1
+      },
+      {
+        "card_id": 30199,
+        "idrank": 301994,
+        "name": "[耐]菱钻奇宝",
+        "full_name": "[Work・a・Miracle！]菱钻奇宝",
+        "chara_id": 1106,
+        "card_type": 1
+      },
+      {
+        "card_id": 30193,
+        "idrank": 301934,
+        "name": "[耐]高尚骏逸",
+        "full_name": "[Over the Ocean]高尚骏逸",
+        "chara_id": 1089,
+        "card_type": 1
+      },
+      {
+        "card_id": 30190,
+        "idrank": 301904,
+        "name": "[耐]大鸣大放",
+        "full_name": "[激情的皮茨卡]大鸣大放",
+        "chara_id": 1108,
+        "card_type": 1
+      },
+      {
+        "card_id": 30182,
+        "idrank": 301824,
+        "name": "[耐]北港火山",
+        "full_name": "[白鸟振翅归来]北港火山",
+        "chara_id": 1099,
+        "card_type": 1
+      },
+      {
+        "card_id": 30181,
+        "idrank": 301814,
+        "name": "[耐]双涡轮",
+        "full_name": "[大家一起唱]双涡轮",
+        "chara_id": 1066,
+        "card_type": 1
+      },
+      {
+        "card_id": 30173,
+        "idrank": 301734,
+        "name": "[耐]万籁争鸣",
+        "full_name": "[大地与我们的合奏]万籁争鸣",
+        "chara_id": 1102,
+        "card_type": 1
+      },
+      {
+        "card_id": 30165,
+        "idrank": 301654,
+        "name": "[耐]谷野美酒",
+        "full_name": "[福尔图娜的喝彩]谷野美酒",
+        "chara_id": 1084,
+        "card_type": 1
+      },
+      {
+        "card_id": 30162,
+        "idrank": 301624,
+        "name": "[耐]爱慕织姬",
+        "full_name": "[Precious☆Moments]爱慕织姬",
+        "chara_id": 1033,
+        "card_type": 1
+      },
+      {
+        "card_id": 30150,
+        "idrank": 301504,
+        "name": "[耐]伏特加",
+        "full_name": "[Heart・Ignition！！]伏特加",
+        "chara_id": 1008,
+        "card_type": 1
+      },
+      {
+        "card_id": 30142,
+        "idrank": 301424,
+        "name": "[耐]樱花桂冠",
+        "full_name": "[刻下，樱花烂漫]樱花桂冠",
+        "chara_id": 1076,
+        "card_type": 1
+      },
+      {
+        "card_id": 30139,
+        "idrank": 301394,
+        "name": "[耐]目白麦昆",
+        "full_name": "[心，随晚风远行]目白麦昆",
+        "chara_id": 1013,
+        "card_type": 1
+      },
+      {
+        "card_id": 30127,
+        "idrank": 301274,
+        "name": "[耐]特别周",
+        "full_name": "[击羽祈福画墨驱魔]特别周",
+        "chara_id": 1001,
+        "card_type": 1
+      },
+      {
+        "card_id": 30125,
+        "idrank": 301254,
+        "name": "[耐]樱花桂冠",
+        "full_name": "[从这里开始Don't stop!]樱花桂冠",
+        "chara_id": 1076,
+        "card_type": 1
+      },
+      {
+        "card_id": 30118,
+        "idrank": 301184,
+        "name": "[耐]吉兆",
+        "full_name": "[A Win Foreshadowed]吉兆",
+        "chara_id": 1083,
+        "card_type": 1
+      },
+      {
+        "card_id": 30115,
+        "idrank": 301154,
+        "name": "[耐]目白善信",
+        "full_name": "[月下的小恶魔♪]目白善信",
+        "chara_id": 1064,
+        "card_type": 1
+      },
+      {
+        "card_id": 30113,
+        "idrank": 301134,
+        "name": "[耐]琵琶晨光",
+        "full_name": "[Uchronia・Architect]琵琶晨光",
+        "chara_id": 1023,
+        "card_type": 1
+      },
+      {
+        "card_id": 30110,
+        "idrank": 301104,
+        "name": "[耐]曼城茶座",
+        "full_name": "[It's on the house.]曼城茶座",
+        "chara_id": 1025,
+        "card_type": 1
+      },
+      {
+        "card_id": 30104,
+        "idrank": 301044,
+        "name": "[耐]荒漠英雄",
+        "full_name": "[『蔷薇辉石与梦之石』]荒漠英雄",
+        "chara_id": 1047,
+        "card_type": 1
+      },
+      {
+        "card_id": 30099,
+        "idrank": 300994,
+        "name": "[耐]生野狄杜斯",
+        "full_name": "[珍爱之至契若金兰]生野狄杜斯",
+        "chara_id": 1063,
+        "card_type": 1
+      },
+      {
+        "card_id": 30090,
+        "idrank": 300904,
+        "name": "[耐]鲁道夫象征",
+        "full_name": "[Enchaînement]鲁道夫象征",
+        "chara_id": 1017,
+        "card_type": 1
+      },
+      {
+        "card_id": 30087,
+        "idrank": 300874,
+        "name": "[耐]目白光明",
+        "full_name": "[Little・By・Little]目白光明",
+        "chara_id": 1074,
+        "card_type": 1
+      },
+      {
+        "card_id": 30079,
+        "idrank": 300794,
+        "name": "[耐]名将怒涛",
+        "full_name": "[想飞奔出去的心情]名将怒涛",
+        "chara_id": 1058,
+        "card_type": 1
+      },
+      {
+        "card_id": 30075,
+        "idrank": 300754,
+        "name": "[耐]曼城茶座",
+        "full_name": "[独奏・螺旋追走曲]曼城茶座",
+        "chara_id": 1025,
+        "card_type": 1
+      },
+      {
+        "card_id": 30069,
+        "idrank": 300694,
+        "name": "[耐]成田白仁",
+        "full_name": "[嗤笑于天的箭矢]成田白仁",
+        "chara_id": 1016,
+        "card_type": 1
+      },
+      {
+        "card_id": 30062,
+        "idrank": 300624,
+        "name": "[耐]无声铃鹿",
+        "full_name": "[WINNING DREAM]无声铃鹿",
+        "chara_id": 1002,
+        "card_type": 1
+      },
+      {
+        "card_id": 30059,
+        "idrank": 300594,
+        "name": "[耐]美浦波旁",
+        "full_name": "[祝福即为赋格]美浦波旁",
+        "chara_id": 1026,
+        "card_type": 1
+      },
+      {
+        "card_id": 30046,
+        "idrank": 300464,
+        "name": "[耐]胜利奖券",
+        "full_name": "[全力！Tantrum！]胜利奖券",
+        "chara_id": 1035,
+        "card_type": 1
+      },
+      {
+        "card_id": 30043,
+        "idrank": 300434,
+        "name": "[耐]中山庆典",
+        "full_name": "[43、8、1]中山庆典",
+        "chara_id": 1049,
+        "card_type": 1
+      },
+      {
+        "card_id": 30038,
+        "idrank": 300384,
+        "name": "[耐]樱花千代王",
+        "full_name": "[正是樱花盛开时]樱花千代王",
+        "chara_id": 1069,
+        "card_type": 1
+      },
+      {
+        "card_id": 30029,
+        "idrank": 300294,
+        "name": "[耐]里见光钻",
+        "full_name": "[越过那个背影]里见光钻",
+        "chara_id": 1067,
+        "card_type": 1
+      },
+      {
+        "card_id": 30023,
+        "idrank": 300234,
+        "name": "[耐] 米浴",
+        "full_name": "[『幸福』飞舞之时] 米浴",
+        "chara_id": 1030,
+        "card_type": 1
+      },
+      {
+        "card_id": 30022,
+        "idrank": 300224,
+        "name": "[耐]目白麦昆",
+        "full_name": "[作为『王牌』]目白麦昆",
+        "chara_id": 1013,
+        "card_type": 1
+      },
+      {
+        "card_id": 30016,
+        "idrank": 300164,
+        "name": "[耐]超级溪流",
+        "full_name": "[一粒的安宁]超级溪流",
+        "chara_id": 1045,
+        "card_type": 1
+      },
+      {
+        "card_id": 30009,
+        "idrank": 300094,
+        "name": "[耐]玉藻十字",
+        "full_name": "[撕裂天空的闪电娘！]玉藻十字",
+        "chara_id": 1021,
+        "card_type": 1
+      },
+      {
+        "card_id": 30008,
+        "idrank": 300084,
+        "name": "[耐]青云天空",
+        "full_name": "[期望已久的大谋略]青云天空",
+        "chara_id": 1020,
+        "card_type": 1
+      },
+      {
+        "card_id": 30004,
+        "idrank": 300044,
+        "name": "[耐]黄金船",
+        "full_name": "[不沉舰的进击]黄金船",
+        "chara_id": 1007,
+        "card_type": 1
+      }
+    ],
+    "power": [
+      {
+        "card_id": 30301,
+        "idrank": 303014,
+        "name": "[力]放声欢呼",
+        "full_name": "[Smile·Ever After]放声欢呼",
+        "chara_id": 1131,
+        "card_type": 2
+      },
+      {
+        "card_id": 30297,
+        "idrank": 302974,
+        "name": "[力]爱丽数码",
+        "full_name": "[挑战一切的勇者]爱丽数码",
+        "chara_id": 1019,
+        "card_type": 2
+      },
+      {
+        "card_id": 30295,
+        "idrank": 302954,
+        "name": "[力]机伶金花",
+        "full_name": "[繁花聚集成束]机伶金花",
+        "chara_id": 1134,
+        "card_type": 2
+      },
+      {
+        "card_id": 30287,
+        "idrank": 302874,
+        "name": "[力]新宇宙",
+        "full_name": "[跨越星辰的讯息]新宇宙",
+        "chara_id": 1105,
+        "card_type": 2
+      },
+      {
+        "card_id": 30283,
+        "idrank": 302834,
+        "name": "[力]美妙姿势",
+        "full_name": "[优雅，闪耀的旅途]美妙姿势",
+        "chara_id": 1022,
+        "card_type": 2
+      },
+      {
+        "card_id": 30277,
+        "idrank": 302774,
+        "name": "[力]美浦波旁",
+        "full_name": "[无机的斗志]美浦波旁",
+        "chara_id": 1026,
+        "card_type": 2
+      },
+      {
+        "card_id": 30273,
+        "idrank": 302734,
+        "name": "[力]东瀛佐敦",
+        "full_name": "[All-Out Brilliance]东瀛佐敦",
+        "chara_id": 1048,
+        "card_type": 2
+      },
+      {
+        "card_id": 30263,
+        "idrank": 302634,
+        "name": "[力]强击",
+        "full_name": "[极品微笑发～射♪]强击",
+        "chara_id": 1091,
+        "card_type": 2
+      },
+      {
+        "card_id": 30256,
+        "idrank": 302564,
+        "name": "[力]玉藻十字",
+        "full_name": "[宛如白色闪电]玉藻十字",
+        "chara_id": 1021,
+        "card_type": 2
+      },
+      {
+        "card_id": 30250,
+        "idrank": 302504,
+        "name": "[力]迷人景致",
+        "full_name": "[Luz de ensueño]迷人景致",
+        "chara_id": 1114,
+        "card_type": 2
+      },
+      {
+        "card_id": 30245,
+        "idrank": 302454,
+        "name": "[力]伏特加",
+        "full_name": "[Ballroom Tempest]伏特加",
+        "chara_id": 1008,
+        "card_type": 2
+      },
+      {
+        "card_id": 30243,
+        "idrank": 302434,
+        "name": "[力]放声欢呼",
+        "full_name": "[NEW TALES AWAIT]放声欢呼",
+        "chara_id": 1131,
+        "card_type": 2
+      },
+      {
+        "card_id": 30234,
+        "idrank": 302344,
+        "name": "[力]目白阿尔丹",
+        "full_name": "[致深闺少女]目白阿尔丹",
+        "chara_id": 1071,
+        "card_type": 2
+      },
+      {
+        "card_id": 30231,
+        "idrank": 302314,
+        "name": "[力]好歌剧",
+        "full_name": "[统御诸王称霸者]好歌剧",
+        "chara_id": 1015,
+        "card_type": 2
+      },
+      {
+        "card_id": 30228,
+        "idrank": 302284,
+        "name": "[力]吉兆",
+        "full_name": "[COOL⇔CRAZY/Buddy]吉兆",
+        "chara_id": 1083,
+        "card_type": 2
+      },
+      {
+        "card_id": 30222,
+        "idrank": 302224,
+        "name": "[力]希望之城",
+        "full_name": "[KNOCK 'EM DOWN!]希望之城",
+        "chara_id": 1081,
+        "card_type": 2
+      },
+      {
+        "card_id": 30208,
+        "idrank": 302084,
+        "name": "[力]西野花",
+        "full_name": "[在朝霞下的草莓地里]西野花",
+        "chara_id": 1051,
+        "card_type": 2
+      },
+      {
+        "card_id": 30204,
+        "idrank": 302044,
+        "name": "[力]青云天空",
+        "full_name": "[闻着幸福的味道小睡]青云天空",
+        "chara_id": 1020,
+        "card_type": 2
+      },
+      {
+        "card_id": 30203,
+        "idrank": 302034,
+        "name": "[力]森林宝穴",
+        "full_name": "[开辟新时代的人]森林宝穴",
+        "chara_id": 1094,
+        "card_type": 2
+      },
+      {
+        "card_id": 30197,
+        "idrank": 301974,
+        "name": "[力]青竹回忆",
+        "full_name": "[Burning!!]青竹回忆",
+        "chara_id": 1053,
+        "card_type": 2
+      },
+      {
+        "card_id": 30195,
+        "idrank": 301954,
+        "name": "[力]凯斯奇迹",
+        "full_name": "[白鸟的阿拉贝斯克]凯斯奇迹",
+        "chara_id": 1093,
+        "card_type": 2
+      },
+      {
+        "card_id": 30191,
+        "idrank": 301914,
+        "name": "[力]万籁争鸣",
+        "full_name": "[同你共奏华丽旋律]万籁争鸣",
+        "chara_id": 1102,
+        "card_type": 2
+      },
+      {
+        "card_id": 30183,
+        "idrank": 301834,
+        "name": "[力]胜利奖券",
+        "full_name": "[小小的笑容，两份]胜利奖券",
+        "chara_id": 1035,
+        "card_type": 2
+      },
+      {
+        "card_id": 30175,
+        "idrank": 301754,
+        "name": "[力]目白高峰",
+        "full_name": "[融化冬日的烈火]目白高峰",
+        "chara_id": 1086,
+        "card_type": 2
+      },
+      {
+        "card_id": 30171,
+        "idrank": 301714,
+        "name": "[力]春丽",
+        "full_name": "[哈哈，好开心，好开心！]春丽",
+        "chara_id": 1052,
+        "card_type": 2
+      },
+      {
+        "card_id": 30169,
+        "idrank": 301694,
+        "name": "[力]鹤丸刚志",
+        "full_name": "[天赐之笑]鹤丸刚志",
+        "chara_id": 1073,
+        "card_type": 2
+      },
+      {
+        "card_id": 30164,
+        "idrank": 301644,
+        "name": "[力]菱亚马逊",
+        "full_name": "[胸怀炽热斗志]菱亚马逊",
+        "chara_id": 1012,
+        "card_type": 2
+      },
+      {
+        "card_id": 30156,
+        "idrank": 301564,
+        "name": "[力]奇锐骏",
+        "full_name": "[毕生的奇迹]奇锐骏",
+        "chara_id": 1100,
+        "card_type": 2
+      },
+      {
+        "card_id": 30151,
+        "idrank": 301514,
+        "name": "[力]摩耶重炮",
+        "full_name": "[Chill chill night*]摩耶重炮",
+        "chara_id": 1024,
+        "card_type": 2
+      },
+      {
+        "card_id": 30145,
+        "idrank": 301454,
+        "name": "[力]谷野美酒",
+        "full_name": "[Welcome to Umayuru]谷野美酒",
+        "chara_id": 1084,
+        "card_type": 2
+      },
+      {
+        "card_id": 30143,
+        "idrank": 301434,
+        "name": "[力]生野狄杜斯",
+        "full_name": "[终能见证的景色]生野狄杜斯",
+        "chara_id": 1063,
+        "card_type": 2
+      },
+      {
+        "card_id": 30138,
+        "idrank": 301384,
+        "name": "[力]优秀素质",
+        "full_name": "[此刻不要闭上双眼]优秀素质",
+        "chara_id": 1060,
+        "card_type": 2
+      },
+      {
+        "card_id": 30132,
+        "idrank": 301324,
+        "name": "[力]微光飞驹",
+        "full_name": "[变身！侍应生形态！]微光飞驹",
+        "chara_id": 1054,
+        "card_type": 2
+      },
+      {
+        "card_id": 30129,
+        "idrank": 301294,
+        "name": "[力]草上飞",
+        "full_name": "[江水东逝冬夏青青]草上飞",
+        "chara_id": 1011,
+        "card_type": 2
+      },
+      {
+        "card_id": 30123,
+        "idrank": 301234,
+        "name": "[力]成田白仁",
+        "full_name": "[GLAD TIDINGS]成田白仁",
+        "chara_id": 1016,
+        "card_type": 2
+      },
+      {
+        "card_id": 30114,
+        "idrank": 301144,
+        "name": "[力]第一红宝石",
+        "full_name": "[啊，华丽一族]第一红宝石",
+        "chara_id": 1085,
+        "card_type": 2
+      },
+      {
+        "card_id": 30106,
+        "idrank": 301064,
+        "name": "[力]气槽",
+        "full_name": "[奔向理想的熏风]气槽",
+        "chara_id": 1018,
+        "card_type": 2
+      },
+      {
+        "card_id": 30098,
+        "idrank": 300984,
+        "name": "[力]春丽",
+        "full_name": "[乌拉拉之歌・Passion♪]春丽",
+        "chara_id": 1052,
+        "card_type": 2
+      },
+      {
+        "card_id": 30096,
+        "idrank": 300964,
+        "name": "[力]川上公主",
+        "full_name": "[加油加油☆公主！]川上公主",
+        "chara_id": 1039,
+        "card_type": 2
+      },
+      {
+        "card_id": 30093,
+        "idrank": 300934,
+        "name": "[力]大和赤骥",
+        "full_name": "[Outfit as No.1]大和赤骥",
+        "chara_id": 1009,
+        "card_type": 2
+      },
+      {
+        "card_id": 30085,
+        "idrank": 300854,
+        "name": "[力]爱丽数码",
+        "full_name": "[在那里“存在”的幸福]爱丽数码",
+        "chara_id": 1019,
+        "card_type": 2
+      },
+      {
+        "card_id": 30077,
+        "idrank": 300774,
+        "name": "[力]爱慕织姬",
+        "full_name": "[夜将拂晓，天见瑞星]爱慕织姬",
+        "chara_id": 1033,
+        "card_type": 2
+      },
+      {
+        "card_id": 30074,
+        "idrank": 300744,
+        "name": "[力]美丽周日",
+        "full_name": "[雪花水晶之日]美丽周日",
+        "chara_id": 1055,
+        "card_type": 2
+      },
+      {
+        "card_id": 30071,
+        "idrank": 300714,
+        "name": "[力]大拓太阳神",
+        "full_name": "[跳起来・燥起来・FES起来！]大拓太阳神",
+        "chara_id": 1065,
+        "card_type": 2
+      },
+      {
+        "card_id": 30064,
+        "idrank": 300644,
+        "name": "[力]玉藻十字",
+        "full_name": "[上吧万圣之夜！]玉藻十字",
+        "chara_id": 1021,
+        "card_type": 2
+      },
+      {
+        "card_id": 30058,
+        "idrank": 300584,
+        "name": "[力]东海帝王",
+        "full_name": "[两道崇高之光]东海帝王",
+        "chara_id": 1003,
+        "card_type": 2
+      },
+      {
+        "card_id": 30056,
+        "idrank": 300564,
+        "name": "[力]圣王光环",
+        "full_name": "[今宵，起舞于圆舞曲吧]圣王光环",
+        "chara_id": 1061,
+        "card_type": 2
+      },
+      {
+        "card_id": 30047,
+        "idrank": 300474,
+        "name": "[力]大和赤骥",
+        "full_name": "[TRIFLE☆VACATION]大和赤骥",
+        "chara_id": 1009,
+        "card_type": 2
+      },
+      {
+        "card_id": 30042,
+        "idrank": 300424,
+        "name": "[力]青竹回忆",
+        "full_name": "[Head-on fight！]青竹回忆",
+        "chara_id": 1053,
+        "card_type": 2
+      },
+      {
+        "card_id": 30034,
+        "idrank": 300344,
+        "name": "[力]米浴",
+        "full_name": "[幸福就在转角的前方]米浴",
+        "chara_id": 1030,
+        "card_type": 2
+      },
+      {
+        "card_id": 30033,
+        "idrank": 300334,
+        "name": "[力]胜利奖券",
+        "full_name": "[梦想是会真正实现的！]胜利奖券",
+        "chara_id": 1035,
+        "card_type": 2
+      },
+      {
+        "card_id": 30032,
+        "idrank": 300324,
+        "name": "[力]八重无敌",
+        "full_name": "[按捺着燃烧之物]八重无敌",
+        "chara_id": 1072,
+        "card_type": 2
+      },
+      {
+        "card_id": 30024,
+        "idrank": 300244,
+        "name": "[力]小栗帽",
+        "full_name": "[『要得到爱哟』]小栗帽",
+        "chara_id": 1006,
+        "card_type": 2
+      },
+      {
+        "card_id": 30017,
+        "idrank": 300174,
+        "name": "[力]醒目飞鹰",
+        "full_name": "[这就是我的赛马娘偶像道☆]醒目飞鹰",
+        "chara_id": 1046,
+        "card_type": 2
+      },
+      {
+        "card_id": 30007,
+        "idrank": 300074,
+        "name": "[力]神鹰",
+        "full_name": "[热情卫冕者！]神鹰",
+        "chara_id": 1014,
+        "card_type": 2
+      },
+      {
+        "card_id": 30005,
+        "idrank": 300054,
+        "name": "[力]伏特加",
+        "full_name": "[伏特加・之・道]伏特加",
+        "chara_id": 1008,
+        "card_type": 2
+      }
+    ],
+    "guts": [
+      {
+        "card_id": 30299,
+        "idrank": 302994,
+        "name": "[根]爱丽速子",
+        "full_name": "[无边际实验室]爱丽速子",
+        "chara_id": 1032,
+        "card_type": 3
+      },
+      {
+        "card_id": 30296,
+        "idrank": 302964,
+        "name": "[根]真弓快车",
+        "full_name": "[定焦捕捉中]真弓快车",
+        "chara_id": 1087,
+        "card_type": 3
+      },
+      {
+        "card_id": 30294,
+        "idrank": 302944,
+        "name": "[根]勇敢之心",
+        "full_name": "[直达白色的觉悟]勇敢之心",
+        "chara_id": 1112,
+        "card_type": 3
+      },
+      {
+        "card_id": 30293,
+        "idrank": 302934,
+        "name": "[根]谋勇兼备",
+        "full_name": "[直达白色的纯真]谋勇兼备",
+        "chara_id": 1075,
+        "card_type": 3
+      },
+      {
+        "card_id": 30285,
+        "idrank": 302854,
+        "name": "[根]圣王光环",
+        "full_name": "[为了我的购物]圣王光环",
+        "chara_id": 1061,
+        "card_type": 3
+      },
+      {
+        "card_id": 30284,
+        "idrank": 302844,
+        "name": "[根]吹波糖",
+        "full_name": "[拨动琴弦，风光无限]吹波糖",
+        "chara_id": 1124,
+        "card_type": 3
+      },
+      {
+        "card_id": 30271,
+        "idrank": 302714,
+        "name": "[根]富士奇石",
+        "full_name": "[从台上倾注魔法]富士奇石",
+        "chara_id": 1005,
+        "card_type": 3
+      },
+      {
+        "card_id": 30270,
+        "idrank": 302704,
+        "name": "[根]第一红宝",
+        "full_name": "[Inseparable]第一红宝",
+        "chara_id": 1085,
+        "card_type": 3
+      },
+      {
+        "card_id": 30264,
+        "idrank": 302644,
+        "name": "[根]黄金旅程",
+        "full_name": "[随性渡行流星]黄金旅程",
+        "chara_id": 1135,
+        "card_type": 3
+      },
+      {
+        "card_id": 30252,
+        "idrank": 302524,
+        "name": "[根]无声铃鹿",
+        "full_name": "[My Beloved Scenery]无声铃鹿",
+        "chara_id": 1002,
+        "card_type": 3
+      },
+      {
+        "card_id": 30251,
+        "idrank": 302514,
+        "name": "[根]希望之城",
+        "full_name": "[约定的glitter]希望之城",
+        "chara_id": 1081,
+        "card_type": 3
+      },
+      {
+        "card_id": 30249,
+        "idrank": 302494,
+        "name": "[根]创升",
+        "full_name": "[相连的游行・音符♪]创升",
+        "chara_id": 1080,
+        "card_type": 3
+      },
+      {
+        "card_id": 30237,
+        "idrank": 302374,
+        "name": "[根]真机伶",
+        "full_name": "[Cutest in Ur ♡]真机伶",
+        "chara_id": 1038,
+        "card_type": 3
+      },
+      {
+        "card_id": 30232,
+        "idrank": 302324,
+        "name": "[根]防爆装束",
+        "full_name": "[Blast Off!]防爆装束",
+        "chara_id": 1128,
+        "card_type": 3
+      },
+      {
+        "card_id": 30225,
+        "idrank": 302254,
+        "name": "[根]待兼福来",
+        "full_name": "[扮装强力三重奏]待兼福来",
+        "chara_id": 1056,
+        "card_type": 3
+      },
+      {
+        "card_id": 30223,
+        "idrank": 302234,
+        "name": "[根]菱亚马逊",
+        "full_name": "[露出獠牙，演奏副歌]菱亚马逊",
+        "chara_id": 1012,
+        "card_type": 3
+      },
+      {
+        "card_id": 30219,
+        "idrank": 302194,
+        "name": "[根]富士奇石",
+        "full_name": "[有烦恼吗？小马驹]富士奇石",
+        "chara_id": 1005,
+        "card_type": 3
+      },
+      {
+        "card_id": 30216,
+        "idrank": 302164,
+        "name": "[根]迷人景致",
+        "full_name": "[将爱意献给我们的学园]迷人景致",
+        "chara_id": 1114,
+        "card_type": 3
+      },
+      {
+        "card_id": 30214,
+        "idrank": 302144,
+        "name": "[根]美妙姿势",
+        "full_name": "[历史与美食一样不落]美妙姿势",
+        "chara_id": 1022,
+        "card_type": 3
+      },
+      {
+        "card_id": 30202,
+        "idrank": 302024,
+        "name": "[根]伏特加",
+        "full_name": "[明天的Ride・On]伏特加",
+        "chara_id": 1008,
+        "card_type": 3
+      },
+      {
+        "card_id": 30200,
+        "idrank": 302004,
+        "name": "[根]莫名其妙",
+        "full_name": "[大胆无畏的将士啊]莫名其妙",
+        "chara_id": 1096,
+        "card_type": 3
+      },
+      {
+        "card_id": 30194,
+        "idrank": 301944,
+        "name": "[根]莱茵力量",
+        "full_name": "[皇冠描绘的境界线]莱茵力量",
+        "chara_id": 1109,
+        "card_type": 3
+      },
+      {
+        "card_id": 30189,
+        "idrank": 301894,
+        "name": "[根]北部玄驹",
+        "full_name": "[二人的跳步・滑步]北部玄驹",
+        "chara_id": 1068,
+        "card_type": 3
+      },
+      {
+        "card_id": 30187,
+        "idrank": 301874,
+        "name": "[根]黄金巨匠",
+        "full_name": "[唯吾，称霸。]黄金巨匠",
+        "chara_id": 1115,
+        "card_type": 3
+      },
+      {
+        "card_id": 30177,
+        "idrank": 301774,
+        "name": "[根]强击",
+        "full_name": "[得意的胜利笑容]强击",
+        "chara_id": 1091,
+        "card_type": 3
+      },
+      {
+        "card_id": 30176,
+        "idrank": 301764,
+        "name": "[根]目白赖恩",
+        "full_name": "[左挑右选，融入心意]目白赖恩",
+        "chara_id": 1027,
+        "card_type": 3
+      },
+      {
+        "card_id": 30170,
+        "idrank": 301704,
+        "name": "[根]圣王光环",
+        "full_name": "[吾之舞，巡回往复]圣王光环",
+        "chara_id": 1061,
+        "card_type": 3
+      },
+      {
+        "card_id": 30166,
+        "idrank": 301664,
+        "name": "[根]跳舞城",
+        "full_name": "[高昂地YO-HO!]跳舞城",
+        "chara_id": 1107,
+        "card_type": 3
+      },
+      {
+        "card_id": 30158,
+        "idrank": 301584,
+        "name": "[根]森林宝穴",
+        "full_name": "[飞驰吧盛夏！]森林宝穴",
+        "chara_id": 1094,
+        "card_type": 3
+      },
+      {
+        "card_id": 30153,
+        "idrank": 301534,
+        "name": "[根]黄金城市",
+        "full_name": "[温柔的月光]黄金城市",
+        "chara_id": 1040,
+        "card_type": 3
+      },
+      {
+        "card_id": 30148,
+        "idrank": 301484,
+        "name": "[根]大和赤骥",
+        "full_name": "[Something Blue]大和赤骥",
+        "chara_id": 1009,
+        "card_type": 3
+      },
+      {
+        "card_id": 30136,
+        "idrank": 301364,
+        "name": "[根]吉兆",
+        "full_name": "[Unyielding resolve]吉兆",
+        "chara_id": 1083,
+        "card_type": 3
+      },
+      {
+        "card_id": 30130,
+        "idrank": 301304,
+        "name": "[根]凯斯奇迹",
+        "full_name": "[To you]凯斯奇迹",
+        "chara_id": 1093,
+        "card_type": 3
+      },
+      {
+        "card_id": 30126,
+        "idrank": 301264,
+        "name": "[根]也文摄辉",
+        "full_name": "[迎着无人知晓的风]也文摄辉",
+        "chara_id": 1078,
+        "card_type": 3
+      },
+      {
+        "card_id": 30120,
+        "idrank": 301204,
+        "name": "[根]八重无敌",
+        "full_name": "[燃至苍穹的祈福之火]八重无敌",
+        "chara_id": 1072,
+        "card_type": 3
+      },
+      {
+        "card_id": 30117,
+        "idrank": 301174,
+        "name": "[根]新光风",
+        "full_name": "[出击！恐怖的魔王军]新光风",
+        "chara_id": 1043,
+        "card_type": 3
+      },
+      {
+        "card_id": 30112,
+        "idrank": 301124,
+        "name": "[根]双涡轮",
+        "full_name": "[TT Ignition!]双涡轮",
+        "chara_id": 1066,
+        "card_type": 3
+      },
+      {
+        "card_id": 30109,
+        "idrank": 301094,
+        "name": "[根]樱花千代王",
+        "full_name": "[有超赞心情的话心灵就能盛开]樱花千代王",
+        "chara_id": 1069,
+        "card_type": 3
+      },
+      {
+        "card_id": 30105,
+        "idrank": 301054,
+        "name": "[根]特别周",
+        "full_name": "[我们一起，去抓住梦想吧！]特别周",
+        "chara_id": 1001,
+        "card_type": 3
+      },
+      {
+        "card_id": 30102,
+        "idrank": 301024,
+        "name": "[根]神鹰",
+        "full_name": "[闪亮 × ∞]神鹰",
+        "chara_id": 1014,
+        "card_type": 3
+      },
+      {
+        "card_id": 30094,
+        "idrank": 300944,
+        "name": "[根]青竹回忆",
+        "full_name": "[传达吧，这份思念！]青竹回忆",
+        "chara_id": 1053,
+        "card_type": 3
+      },
+      {
+        "card_id": 30089,
+        "idrank": 300894,
+        "name": "[根]美丽周日",
+        "full_name": "[世界上更多的☆Marvelous]美丽周日",
+        "chara_id": 1055,
+        "card_type": 3
+      },
+      {
+        "card_id": 30083,
+        "idrank": 300834,
+        "name": "[根]樱花进王",
+        "full_name": "[爆速！最速！花之风暴！]樱花进王",
+        "chara_id": 1041,
+        "card_type": 3
+      },
+      {
+        "card_id": 30070,
+        "idrank": 300704,
+        "name": "[根]雪之美人",
+        "full_name": "[照亮初更的奉纳舞]雪之美人",
+        "chara_id": 1029,
+        "card_type": 3
+      },
+      {
+        "card_id": 30063,
+        "idrank": 300634,
+        "name": "[根]生野狄杜斯",
+        "full_name": "[心和脚边同样温暖]生野狄杜斯",
+        "chara_id": 1063,
+        "card_type": 3
+      },
+      {
+        "card_id": 30060,
+        "idrank": 300604,
+        "name": "[根]双涡轮",
+        "full_name": "[汇集吧，星群]双涡轮",
+        "chara_id": 1066,
+        "card_type": 3
+      },
+      {
+        "card_id": 30048,
+        "idrank": 300484,
+        "name": "[根]目白赖恩",
+        "full_name": "[爽快！Winning Shot！]目白赖恩",
+        "chara_id": 1027,
+        "card_type": 3
+      },
+      {
+        "card_id": 30040,
+        "idrank": 300404,
+        "name": "[根]菱曙",
+        "full_name": "[请咬第一口！]菱曙",
+        "chara_id": 1028,
+        "card_type": 3
+      },
+      {
+        "card_id": 30037,
+        "idrank": 300374,
+        "name": "[根]鲁道夫象征",
+        "full_name": "[绝对皇帝]鲁道夫象征",
+        "chara_id": 1017,
+        "card_type": 3
+      },
+      {
+        "card_id": 30030,
+        "idrank": 300304,
+        "name": "[根]待兼诗歌剧",
+        "full_name": "[Just keep going.]待兼诗歌剧",
+        "chara_id": 1062,
+        "card_type": 3
+      },
+      {
+        "card_id": 30027,
+        "idrank": 300274,
+        "name": "[根]目白善信",
+        "full_name": "[和傻瓜一起笑]目白善信",
+        "chara_id": 1064,
+        "card_type": 3
+      },
+      {
+        "card_id": 30019,
+        "idrank": 300194,
+        "name": "[根]春丽",
+        "full_name": "[乌拉拉～样的休息日]春丽",
+        "chara_id": 1052,
+        "card_type": 3
+      },
+      {
+        "card_id": 30012,
+        "idrank": 300124,
+        "name": "[根]胜利奖券",
+        "full_name": "[B・N・Winner!!]胜利奖券",
+        "chara_id": 1035,
+        "card_type": 3
+      },
+      {
+        "card_id": 30011,
+        "idrank": 300114,
+        "name": "[根]艾尼斯风神",
+        "full_name": "[起飞吧，闪耀吧]艾尼斯风神",
+        "chara_id": 1031,
+        "card_type": 3
+      },
+      {
+        "card_id": 30006,
+        "idrank": 300064,
+        "name": "[根]草上飞",
+        "full_name": "[千紫万红中一凛]草上飞",
+        "chara_id": 1011,
+        "card_type": 3
+      },
+      {
+        "card_id": 30001,
+        "idrank": 300014,
+        "name": "[根]特别周",
+        "full_name": "[在日本第一的舞台]特别周",
+        "chara_id": 1001,
+        "card_type": 3
+      }
+    ],
+    "wisdom": [
+      {
+        "card_id": 30306,
+        "idrank": 303064,
+        "name": "[智]优秀素质",
+        "full_name": "[双手满载，小仓之爱]优秀素质",
+        "chara_id": 1060,
+        "card_type": 4
+      },
+      {
+        "card_id": 30289,
+        "idrank": 302894,
+        "name": "[智]青春永驻",
+        "full_name": "[Innovator]青春永驻",
+        "chara_id": 1138,
+        "card_type": 4
+      },
+      {
+        "card_id": 30288,
+        "idrank": 302884,
+        "name": "[智]无声铃鹿",
+        "full_name": "[抱紧紧，我的朋友]无声铃鹿",
+        "chara_id": 1002,
+        "card_type": 4
+      },
+      {
+        "card_id": 30268,
+        "idrank": 302684,
+        "name": "[智]多旺达",
+        "full_name": "[今宵，为了我的君王]多旺达",
+        "chara_id": 1121,
+        "card_type": 4
+      },
+      {
+        "card_id": 30266,
+        "idrank": 302664,
+        "name": "[智]创世驹",
+        "full_name": "[在未来的前路]创世驹",
+        "chara_id": 1133,
+        "card_type": 4
+      },
+      {
+        "card_id": 30261,
+        "idrank": 302614,
+        "name": "[智]凯旋芭蕾",
+        "full_name": "[水面的主角]凯旋芭蕾",
+        "chara_id": 1117,
+        "card_type": 4
+      },
+      {
+        "card_id": 30255,
+        "idrank": 302554,
+        "name": "[智]空中救世主",
+        "full_name": "[终将渐深的若草]空中救世主",
+        "chara_id": 1111,
+        "card_type": 4
+      },
+      {
+        "card_id": 30254,
+        "idrank": 302544,
+        "name": "[智]勇敢之心",
+        "full_name": "[Blooming Buds]勇敢之心",
+        "chara_id": 1112,
+        "card_type": 4
+      },
+      {
+        "card_id": 30248,
+        "idrank": 302484,
+        "name": "[智]谋勇兼备",
+        "full_name": "[无垢之白]谋勇兼备",
+        "chara_id": 1075,
+        "card_type": 4
+      },
+      {
+        "card_id": 30238,
+        "idrank": 302384,
+        "name": "[智]生野狄杜斯",
+        "full_name": "[钢铁少女亦会微笑]生野狄杜斯",
+        "chara_id": 1063,
+        "card_type": 4
+      },
+      {
+        "card_id": 30233,
+        "idrank": 302334,
+        "name": "[智]鲁道夫象征",
+        "full_name": "[云烟飞动]鲁道夫象征",
+        "chara_id": 1017,
+        "card_type": 4
+      },
+      {
+        "card_id": 30229,
+        "idrank": 302294,
+        "name": "[智]爱丽数码",
+        "full_name": "[【通知】有新刊哦！]爱丽数码",
+        "chara_id": 1019,
+        "card_type": 4
+      },
+      {
+        "card_id": 30227,
+        "idrank": 302274,
+        "name": "[智]大和赤骥",
+        "full_name": "[微风拂向绯红的你]大和赤骥",
+        "chara_id": 1009,
+        "card_type": 4
+      },
+      {
+        "card_id": 30220,
+        "idrank": 302204,
+        "name": "[智]吉兆",
+        "full_name": "[Rewarding Job]吉兆",
+        "chara_id": 1083,
+        "card_type": 4
+      },
+      {
+        "card_id": 30218,
+        "idrank": 302184,
+        "name": "[智]大树快车",
+        "full_name": "[月下的Sunshine]大树快车",
+        "chara_id": 1010,
+        "card_type": 4
+      },
+      {
+        "card_id": 30217,
+        "idrank": 302174,
+        "name": "[智]西沙里奥",
+        "full_name": "[仁爱的Mother Sea]西沙里奥",
+        "chara_id": 1110,
+        "card_type": 4
+      },
+      {
+        "card_id": 30211,
+        "idrank": 302114,
+        "name": "[智]小林历奇",
+        "full_name": "[Lucky☆Summertime]小林历奇",
+        "chara_id": 1098,
+        "card_type": 4
+      },
+      {
+        "card_id": 30201,
+        "idrank": 302014,
+        "name": "[智]成田大进",
+        "full_name": "[Take Them Down!]成田大进",
+        "chara_id": 1050,
+        "card_type": 4
+      },
+      {
+        "card_id": 30198,
+        "idrank": 301984,
+        "name": "[智]新宇宙",
+        "full_name": "[致V.E.R.2285的你]新宇宙",
+        "chara_id": 1105,
+        "card_type": 4
+      },
+      {
+        "card_id": 30185,
+        "idrank": 301854,
+        "name": "[智]北方飞翔",
+        "full_name": "[Go・Fashionista！]北方飞翔",
+        "chara_id": 1082,
+        "card_type": 4
+      },
+      {
+        "card_id": 30179,
+        "idrank": 301794,
+        "name": "[智]里见光钻",
+        "full_name": "[百花之愿存于心间]里见光钻",
+        "chara_id": 1067,
+        "card_type": 4
+      },
+      {
+        "card_id": 30172,
+        "idrank": 301724,
+        "name": "[智]目白麦昆",
+        "full_name": "[打飞它吧！Desuwa！？]目白麦昆",
+        "chara_id": 1013,
+        "card_type": 4
+      },
+      {
+        "card_id": 30163,
+        "idrank": 301634,
+        "name": "[智]中山庆典",
+        "full_name": "[傲放于赌场的堇色兰]中山庆典",
+        "chara_id": 1049,
+        "card_type": 4
+      },
+      {
+        "card_id": 30157,
+        "idrank": 301574,
+        "name": "[智]曼城茶座",
+        "full_name": "[与你共见的泡沫]曼城茶座",
+        "chara_id": 1025,
+        "card_type": 4
+      },
+      {
+        "card_id": 30155,
+        "idrank": 301554,
+        "name": "[智]大拓太阳神",
+        "full_name": "[#夏 #崭新的自我]大拓太阳神",
+        "chara_id": 1065,
+        "card_type": 4
+      },
+      {
+        "card_id": 30152,
+        "idrank": 301524,
+        "name": "[智]好歌剧",
+        "full_name": "[All'alba vincerò!]好歌剧",
+        "chara_id": 1015,
+        "card_type": 4
+      },
+      {
+        "card_id": 30149,
+        "idrank": 301494,
+        "name": "[智]真弓快车",
+        "full_name": "[Haute Couture・Memory]真弓快车",
+        "chara_id": 1087,
+        "card_type": 4
+      },
+      {
+        "card_id": 30146,
+        "idrank": 301464,
+        "name": "[智]小栗帽",
+        "full_name": "[疾驰啊、疾驰啊、疾驰啊！！]小栗帽",
+        "chara_id": 1006,
+        "card_type": 4
+      },
+      {
+        "card_id": 30141,
+        "idrank": 301414,
+        "name": "[智]美浦波旁",
+        "full_name": "[Mission『心灵的营养补给』]美浦波旁",
+        "chara_id": 1026,
+        "card_type": 4
+      },
+      {
+        "card_id": 30134,
+        "idrank": 301344,
+        "name": "[智]目白高峰",
+        "full_name": "[灿烂]目白高峰",
+        "chara_id": 1086,
+        "card_type": 4
+      },
+      {
+        "card_id": 30133,
+        "idrank": 301334,
+        "name": "[智]菱曙",
+        "full_name": "[黑巧微笑]菱曙",
+        "chara_id": 1028,
+        "card_type": 4
+      },
+      {
+        "card_id": 30128,
+        "idrank": 301284,
+        "name": "[智]东商变革",
+        "full_name": "[任性的美丽]东商变革",
+        "chara_id": 1044,
+        "card_type": 4
+      },
+      {
+        "card_id": 30124,
+        "idrank": 301244,
+        "name": "[智]气槽",
+        "full_name": "[Are you merry?]气槽",
+        "chara_id": 1018,
+        "card_type": 4
+      },
+      {
+        "card_id": 30111,
+        "idrank": 301114,
+        "name": "[智]东海帝王",
+        "full_name": "[Teio・O・O！！！]东海帝王",
+        "chara_id": 1003,
+        "card_type": 4
+      },
+      {
+        "card_id": 30108,
+        "idrank": 301084,
+        "name": "[智]中山庆典",
+        "full_name": "[委身于骰子]中山庆典",
+        "chara_id": 1049,
+        "card_type": 4
+      },
+      {
+        "card_id": 30103,
+        "idrank": 301034,
+        "name": "[智]待兼诗歌剧",
+        "full_name": "[诗歌剧☆大冒险]待兼诗歌剧",
+        "chara_id": 1062,
+        "card_type": 4
+      },
+      {
+        "card_id": 30100,
+        "idrank": 301004,
+        "name": "[智]米浴",
+        "full_name": "[憧憬的景色]米浴",
+        "chara_id": 1030,
+        "card_type": 4
+      },
+      {
+        "card_id": 30097,
+        "idrank": 300974,
+        "name": "[智]千明代表",
+        "full_name": "[Dear Mr. C.B.]千明代表",
+        "chara_id": 1057,
+        "card_type": 4
+      },
+      {
+        "card_id": 30091,
+        "idrank": 300914,
+        "name": "[智]天狼星象征",
+        "full_name": "[Escorte étoile]天狼星象征",
+        "chara_id": 1070,
+        "card_type": 4
+      },
+      {
+        "card_id": 30088,
+        "idrank": 300884,
+        "name": "[智]里见光钻",
+        "full_name": "[SPECIAL DREAMERS!!]里见光钻",
+        "chara_id": 1067,
+        "card_type": 4
+      },
+      {
+        "card_id": 30082,
+        "idrank": 300824,
+        "name": "[智]西野花",
+        "full_name": "[在小小的杯蛋糕中盛满思念]西野花",
+        "chara_id": 1051,
+        "card_type": 4
+      },
+      {
+        "card_id": 30073,
+        "idrank": 300734,
+        "name": "[智]成田大进",
+        "full_name": "[固执的圣诞集市]成田大进",
+        "chara_id": 1050,
+        "card_type": 4
+      },
+      {
+        "card_id": 30068,
+        "idrank": 300684,
+        "name": "[智]真机伶",
+        "full_name": "[可爱的你，华丽的你]真机伶",
+        "chara_id": 1038,
+        "card_type": 4
+      },
+      {
+        "card_id": 30066,
+        "idrank": 300664,
+        "name": "[智]美浦波旁",
+        "full_name": "[幽灵小姐与万圣魔法]美浦波旁",
+        "chara_id": 1026,
+        "card_type": 4
+      },
+      {
+        "card_id": 30061,
+        "idrank": 300614,
+        "name": "[智]琵琶晨光",
+        "full_name": "[共鸣的旋律]琵琶晨光",
+        "chara_id": 1023,
+        "card_type": 4
+      },
+      {
+        "card_id": 30055,
+        "idrank": 300554,
+        "name": "[智]青云天空",
+        "full_name": "[明天全国都会是红色吧♪]青云天空",
+        "chara_id": 1020,
+        "card_type": 4
+      },
+      {
+        "card_id": 30054,
+        "idrank": 300544,
+        "name": "[智]优秀素质",
+        "full_name": "[直至愿望实现不曾拭去]优秀素质",
+        "chara_id": 1060,
+        "card_type": 4
+      },
+      {
+        "card_id": 30041,
+        "idrank": 300414,
+        "name": "[智]目白多伯",
+        "full_name": "[思念，祈愿]目白多伯",
+        "chara_id": 1059,
+        "card_type": 4
+      },
+      {
+        "card_id": 30031,
+        "idrank": 300314,
+        "name": "[智]雪之美人",
+        "full_name": "[老家直送声援！]雪之美人",
+        "chara_id": 1029,
+        "card_type": 4
+      },
+      {
+        "card_id": 30013,
+        "idrank": 300134,
+        "name": "[智]空中神宫",
+        "full_name": "[到7厘米的前方去]空中神宫",
+        "chara_id": 1036,
+        "card_type": 4
+      },
+      {
+        "card_id": 30010,
+        "idrank": 300104,
+        "name": "[智]美妙姿势",
+        "full_name": "[连指尖都饱含感激]美妙姿势",
+        "chara_id": 1022,
+        "card_type": 4
+      }
+    ]
+  },
+  "excluded_from_card_db": [
+    30307,
+    30308,
+    30309,
+    30310,
+    30311,
+    30312,
+    30313,
+    30314,
+    30315,
+    30316,
+    30317
+  ]
+}

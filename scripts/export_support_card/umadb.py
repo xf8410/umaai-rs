@@ -384,8 +384,10 @@ class Umadb:
         elif card.support_card_type == 3:
             return SupportCardType.Team
         else:
-            # unknown
-            return SupportCardType.Speed
+            raise ValueError(
+                f"Unknown support_card_type={card.support_card_type} command_id={card.command_id}"
+                f" for card id={card.id}"
+            )
     
     def _get_effect_row_dict(self, effects:list[_SupportCardEffectTable])->dict[SupportCardEffectType,EffectRow]:
         ret = {}

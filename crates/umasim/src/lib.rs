@@ -1,3 +1,4 @@
+pub mod card_pool;
 pub mod bench;
 pub mod collector;
 pub mod explain;
