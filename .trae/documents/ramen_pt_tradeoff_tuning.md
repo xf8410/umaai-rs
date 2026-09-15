@@ -1,8 +1,8 @@
-# 拉面手写策略：评分换 PT 调优（overflow / 已满位训练）
+# 拉面评分换 PT 调优：手写策略 + MCTS 双路径定案
 
-> 2026-09-14 系列实验与实现记录。目标：解决"主属性已满的训练位只剩 PT 收益，策略
-> 估值畸高（pt_rate=64 vs 终局 2.0）导致终盘贪练满位"的系统性偏差。
-> 本文档记录机制发现、参数设计、标定数据、配置用法与后续方向，便于重测与演进。
+> 2026-09-14 系列实验与实现记录。
+> **当前状态**：手写策略最优档已固化进 preset，MCTS 评分换 PT 走 `pt_favor_rate` 旋钮。
+> 本文档记录机制发现、参数设计、标定数据、最终决策与复现方式。
 
 ## 1. 背景：三类修复全部降分 → 根因不是"惩罚过严"
 
@@ -48,40 +48,21 @@ PT 上限 100→350）。实证（90 个候选，seed 61444 前 3 局）：
 `pt_rate` 影响三处（训练未满位 / 比赛 / 事件），只改它是**负收益**（实测 -145）——
 因为未满位训练的 PT 追求路径本身是好的，不该打折。
 
-## 4. 参数设计（已实现）
+## 4. 手写策略：已满位 PT 定价（pt_tradeoff）
 
-### 4.1 底层参数（`RamenPolicyConfig`）
-| 字段 | 语义 | token |
-|---|---|---|
-| `pt_tradeoff` | 已满位 + **无彩圈** 训练候选的 PT 定价 | `trdN`（N/100） |
-| `pt_tradeoff_shining` | 已满位 + **有彩圈** 训练候选的 PT 定价（0=跟随 trd） | `trdshN` |
-| `pt_tradeoff_super` | 超级拉面期间已满位训练候选的 PT 定价（0=关闭） | `trdsN` |
+### 4.1 机制
 
-打分点：`score_train_action_eval` 中，`main_full = inc_main>0 && cap_left==0` 时
-PT 按 `eff_pt_rate` 折算，否则仍 `pt_rate`。彩圈分级理由：0 彩圈已满位（PT≈40）应
-重压，有彩圈已满位（PT 267-340）是唯一值得权衡的纯 PT 来源。
+`score_train_action_eval` 中，`main_full = inc_main>0 && cap_left==0` 时
+PT 按 `eff_pt_rate` 折算（而非 `pt_rate`），避免终盘贪练已满位。
 
-### 4.2 玩家配置（`game_config.toml` 顶层）
-```toml
-# 为多拿总 PT 最多愿意牺牲的总评分（默认 0 = 评分优先）
-ramen_pt_sacrifice_score = 0
-```
-映射（内部换算 `pt_tradeoff_shining`，无彩圈固定 16）：
+根据彩圈数分级定价：
+- 无彩圈已满位（PT≈40 且属性 0）：最差选择，用低价**重压**
+- 有彩圈已满位（PT 267-340）：唯一值得权衡的纯 PT 来源
 
-| 本值 | 内部定价 | 实测评分 | 实际牺牲 | skill_pt |
-|---|---:|---:|---:|---:|
-| 0（默认） | 36 | 65266 | 0（基准） | 8600 |
-| ≤60 | 44 | 65214 | 52 | 8625 |
-| ≤160 | 52 | 65210 | 56 | 8650 |
-| ≤550 | 64 | 64733 | 533 | 8690（PT 峰值） |
+### 4.2 标定（seed 61444，7 build × 100 局）
 
-> 区间解析：超过 64 的定价会让策略误选已满位 → 评分与 PT 双降，故内部封顶 64。
-> 标定基于 seed 61444、7 build × 100 局，是经验近似不是理论保证。
-
-## 5. 实测标定曲线（seed 61444，7 build × 100 局）
-
-| 档位 | 评分 | Δ分 | skill_pt | Δpt | 评价 |
-|---|---:|---:|---:|---:|---|
+| 有彩圈定价 | 评分 | Δ分 | skill_pt | Δpt | 评价 |
+|---:|---:|---:|---:|---:|
 | 16 | 64785 | +52 | 8449 | -241 | 过度回避满位 |
 | 24 | 65089 | +356 | 8536 | -154 | 偏评分 |
 | **36** | **65266** | **+533** | 8600 | -90 | **评分峰值** |
@@ -93,39 +74,68 @@ ramen_pt_sacrifice_score = 0
 | 80 | 63254 | -1478 | 8688 | -2 | **双降（被支配）** |
 | 96 | 62440 | -2293 | 8665 | -25 | 双降 |
 
-被支配区：trd<24（评分/PT 同时差于 24）、trd>64（同时差于 64）。有效前沿
-≈ [24, 64]，即"评分换 PT 汇率"约 1~15 分/PT（在有限作用面内，翻转 ~5% 的
-Train 决策）。
+### 4.3 最优档固化
 
-## 6. 结论与推荐
+| 参数 | 值 | 说明 |
+|---|---|---|
+| `pt_tradeoff_shining` | 36 | 有彩圈已满位 PT 定价，评分峰值 |
+| `pt_tradeoff` | 16 | 无彩圈已满位，恒重压 |
 
-- **默认档 `ramen_pt_sacrifice_score = 0`（有彩圈定价 36）已写入推荐 preset**：
-  7 build 平均 +533 分（speed +995 / wisdom +823 增益最大），仅少拿 90 skill_pt，
-  RMJ 不变；power_wisdom 微降 -135 属已知弱卡组。
-- 玩家想要更多 PT 时调大 `ramen_pt_sacrifice_score`（≤60 档 / ≤160 档 / 550 档），
-  是"用总评分换总 PT"的语义化旋钮；想回到旧行为设 550+。
-- **要大幅提高 PT 总量需换杠杆**：tradeoff 只影响已满位训练的 ~5% 决策，PT 上限
-  ≈8690 由结构（吃面次数/超拉面三次训练/事件选择）决定，调权重无法突破。
+已硬编码进 `RecommendedRamenTrainer::new()` preset，不再暴露为可配参数。
+`ramen_pt_sacrifice_score`（玩家 knob）及 `trd`/`trdsh`/`trds`/`ptrate` token 已移除。
 
-## 7. 复现命令
+## 5. MCTS：评分换 PT 走 `pt_favor_rate`
 
-```bash
-# 默认（评分优先）
-./target/release/bench_base --trainer handwritten --runs 100 --seed 61444 --out logs/bench-default
+### 5.1 动机
 
-# 变体对比（token 双入口：with_tokens / matrix_variant）
-./target/release/bench_base --trainer handwritten --tokens trd1600-trdsh3600 --runs 100 --seed 61444 --out logs/bench-trd36
-./target/release/bench_base --trainer handwritten --tokens trd1600-trdsh6400 --runs 100 --seed 61444 --out logs/bench-trd64
+手写策略 pt_tradeoff 只影响 ~5% 训练决策（已满位），PT 上限 ≈8690 由结构决定。
+要大幅换 PT 须走 MCTS 终局估值。
 
-# 玩家配置覆盖：在 game_config.toml 顶层设 ramen_pt_sacrifice_score 后直接跑默认档
+### 5.2 公式
+
+`RamenGame::search_score()` 覆盖 trait 默认：
+
+```
+score    = calc_score()                                                    ← 正常评分（始终不变）
+score_pt = skill_score + skill_pt × pt_score_rate(2.0) × pt_favor_rate + five_status_scores
 ```
 
-## 8. 后续方向（未实施）
+- `pt_favor_rate = 1.0` 时 `score_pt == calc_score()`，零偏好
+- 不乘 ×0.37 缩放——MCTS 只比相对大小，线性变换不改变排序
+- `pt_favor_rate` 是唯一旋钮
 
-1. **彩圈分级的进一步细分**：按彩圈 0/1/2/3 独立分档（当前 0 vs ≥1 两档），看
-   1 圈与 2-3 圈是否该不同定价；
-2. **超拉面期间训练位分配**：超拉面三次训练应优先"彩圈多 + 未满"位（双丰收），
-   当前策略对已满位高彩圈的估值已接近，可再验证是否还有"属性优先 vs PT 优先"
-   的更优组合（`trds` 独立档已实现未深度扫描）；
-3. **总 PT 结构杠杆**：吃面节奏 / 超拉面训练位选择 / 事件选择对 PT 上限的影响，
-   若玩家强调总 PT 需要从这些杠杆入手。
+### 5.3 配置
+
+```toml
+# game_config.toml → [config_override]
+pt_favor_rate = 1.0   # 默认中性（= calc_score）；>1.0 = 倾向换 PT
+```
+
+`pt_favor_rate` 代码默认与 `default_config.toml` 均已 1.0（历史 onsen 用 8.0，已修正）。
+
+### 5.4 架构
+
+- `RamenGame::search_score()` 覆盖 trait 默认（OnsenGame 仍用旧 `calc_score_with_pt_favor`）
+- MCTS 动作选择统一走 `best_action_pt_idx()`（读 `score_pt`）
+- `RamenSelection`（Score/Pt）枚举从 ramen 侧完全移除，`bench_base --search-selection` 已删
+- Rollout 策略仍为 `RecommendedRamenTrainer`（手写策略最优 preset）
+
+**注意**：`pt_favor_rate = 8.0` 会让 MCTS 在 PT×16 目标下狂出行（搜索发现"出行→吃面→训练加成"的 PT 链在终局估值里碾压直接训练）。
+故 `default_config.toml` 已从 8.0 改为 1.0，onsen 如需 8.0 需在 onsen 侧显式覆盖。
+
+## 6. 扫参标定（待完成）
+
+MCTS `pt_favor_rate` 扫参：1.0 / 2.0 / 4.0 / 8.0 / 12.0 / 16.0。
+命令：
+
+```bash
+# 在 game_config.toml 的 [config_override] 中设 pt_favor_rate = X，然后：
+./target/release/bench_base --trainer mcts --search-n 1024 --runs 100 --seed 61444
+```
+
+## 7. 后续方向
+
+1. **MCTS pt_favor_rate 标定**：产出「设 X → 评分 −Y，技能点 +Z」映射表
+2. **彩圈分级的进一步细分**：按彩圈 0/1/2/3 独立分档（当前 0 vs ≥1 两档）
+3. **超拉面期间训练位分配**：`pt_tradeoff_super` 独立档已实现但未深度扫描；确认属性 vs PT 优先的更优组合
+4. **总 PT 结构杠杆**：吃面节奏 / 超拉面训练位选择 / 事件选择对 PT 上限的影响

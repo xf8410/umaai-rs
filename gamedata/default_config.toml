@@ -47,7 +47,7 @@ mcts_selection = "score"
 # 蒙特卡洛每回合期望得分加成（搜索启发式参数）
 mcts_turn_bonus = 70
 
-# PT 偏好评分倍率（ramen MCTS 用：1.0=中性、>1.0=倾向PT；onsen 需 8.0 时由 onsen 侧显式覆盖）
+# PT 偏好评分倍率（与 mcts_selection 联用）
 pt_favor_rate = 1.0
 
 # 比赛等级表（72 项，回合 0-71；URA 回合 72-77 固定 G1 不在此表）
@@ -67,7 +67,6 @@ ramen_region_fixed = [[11, 14, 15]]
 # 向多拿 PT。内部映射（7 build×100 局实测标定，seed 61444）：
 #   0 → 定价 36（评分峰值 65266）；≤60 → 44；≤160 → 52；其余 → 64（PT 峰值 8690）
 # 超过 64 会误选已满位导致评分与 PT 双降，故内部封顶 64。
-ramen_pt_sacrifice_score = 0
 
 # ---------- output ----------
 log_level = "info"

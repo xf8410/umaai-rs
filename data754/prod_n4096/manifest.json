@@ -1,0 +1,578 @@
+{
+  "format_version": 1,
+  "input_dim": 754,
+  "policy_dim": 234,
+  "premises": {
+    "record_ordered_rollouts": true,
+    "use_ucb": false,
+    "radical_factor_max": 1.4,
+    "ramen_region_strategy": "all"
+  },
+  "search_n": 4096,
+  "index_start": 9200000,
+  "index_end": 9201550,
+  "next_index": 9201550,
+  "sampler": {
+    "epsilon": 0.15,
+    "min_actions": 2,
+    "inherit": {
+      "blue_count": [
+        15,
+        0,
+        0,
+        0,
+        3
+      ],
+      "extra_count": [
+        10,
+        10,
+        20,
+        20,
+        20,
+        40
+      ]
+    },
+    "max_turn": 77,
+    "seed_base": 88241484357425,
+    "region_quota_permille": [
+      20,
+      30
+    ]
+  },
+  "shard_size": 32,
+  "parts": [
+    {
+      "name": "part_000000.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000000.bin",
+        "size": 10258000,
+        "modified_unix": 1788987343,
+        "hash_fnv1a64": "5e7c2d8500003d23"
+      }
+    },
+    {
+      "name": "part_000001.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000001.bin",
+        "size": 6762048,
+        "modified_unix": 1788987867,
+        "hash_fnv1a64": "49b4b7046d50ba66"
+      }
+    },
+    {
+      "name": "part_000002.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000002.bin",
+        "size": 6372152,
+        "modified_unix": 1788988307,
+        "hash_fnv1a64": "5ae99ec2667a1f4e"
+      }
+    },
+    {
+      "name": "part_000003.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000003.bin",
+        "size": 6423168,
+        "modified_unix": 1788988702,
+        "hash_fnv1a64": "09850149afd865f7"
+      }
+    },
+    {
+      "name": "part_000004.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000004.bin",
+        "size": 6830016,
+        "modified_unix": 1788989211,
+        "hash_fnv1a64": "2c9beb8a2714e2f4"
+      }
+    },
+    {
+      "name": "part_000005.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000005.bin",
+        "size": 5727976,
+        "modified_unix": 1788989557,
+        "hash_fnv1a64": "3387988f1bebffdb"
+      }
+    },
+    {
+      "name": "part_000006.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000006.bin",
+        "size": 6745256,
+        "modified_unix": 1788990011,
+        "hash_fnv1a64": "775ea05c9d2e59f5"
+      }
+    },
+    {
+      "name": "part_000007.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000007.bin",
+        "size": 5454824,
+        "modified_unix": 1788990408,
+        "hash_fnv1a64": "c75b84c9518ed875"
+      }
+    },
+    {
+      "name": "part_000008.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000008.bin",
+        "size": 6117712,
+        "modified_unix": 1788990786,
+        "hash_fnv1a64": "6c9d8714f01c18bf"
+      }
+    },
+    {
+      "name": "part_000009.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000009.bin",
+        "size": 6609480,
+        "modified_unix": 1788991290,
+        "hash_fnv1a64": "97fa3023344e0e52"
+      }
+    },
+    {
+      "name": "part_000010.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000010.bin",
+        "size": 4369896,
+        "modified_unix": 1788991686,
+        "hash_fnv1a64": "c07417bbd91b5c84"
+      }
+    },
+    {
+      "name": "part_000011.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000011.bin",
+        "size": 5234608,
+        "modified_unix": 1788991982,
+        "hash_fnv1a64": "ba289c71d6d94bee"
+      }
+    },
+    {
+      "name": "part_000012.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000012.bin",
+        "size": 7372160,
+        "modified_unix": 1788992395,
+        "hash_fnv1a64": "34a93360b6b402e7"
+      }
+    },
+    {
+      "name": "part_000013.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000013.bin",
+        "size": 8798048,
+        "modified_unix": 1788992946,
+        "hash_fnv1a64": "cfa4dbfa2af089cb"
+      }
+    },
+    {
+      "name": "part_000014.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000014.bin",
+        "size": 8222000,
+        "modified_unix": 1788993470,
+        "hash_fnv1a64": "7c5f10591eca078c"
+      }
+    },
+    {
+      "name": "part_000015.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000015.bin",
+        "size": 5319368,
+        "modified_unix": 1788993844,
+        "hash_fnv1a64": "2e81541168841670"
+      }
+    },
+    {
+      "name": "part_000016.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000016.bin",
+        "size": 4929152,
+        "modified_unix": 1788994097,
+        "hash_fnv1a64": "9f19de05f44c3396"
+      }
+    },
+    {
+      "name": "part_000017.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000017.bin",
+        "size": 7832104,
+        "modified_unix": 1788994669,
+        "hash_fnv1a64": "e173ead29d700204"
+      }
+    },
+    {
+      "name": "part_000018.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000018.bin",
+        "size": 9442224,
+        "modified_unix": 1788995175,
+        "hash_fnv1a64": "91102ee9de995e96"
+      }
+    },
+    {
+      "name": "part_000019.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000019.bin",
+        "size": 9427352,
+        "modified_unix": 1788995757,
+        "hash_fnv1a64": "f5de1dff1f23555b"
+      }
+    },
+    {
+      "name": "part_000020.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000020.bin",
+        "size": 8899760,
+        "modified_unix": 1788996319,
+        "hash_fnv1a64": "fd682d3162037198"
+      }
+    },
+    {
+      "name": "part_000021.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000021.bin",
+        "size": 5844720,
+        "modified_unix": 1788996653,
+        "hash_fnv1a64": "761ad3a9360063b5"
+      }
+    },
+    {
+      "name": "part_000022.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000022.bin",
+        "size": 7101088,
+        "modified_unix": 1788997116,
+        "hash_fnv1a64": "d6adc10561dbebb0"
+      }
+    },
+    {
+      "name": "part_000023.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000023.bin",
+        "size": 5573488,
+        "modified_unix": 1788997599,
+        "hash_fnv1a64": "e5bda06a8a0cf6ab"
+      }
+    },
+    {
+      "name": "part_000024.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000024.bin",
+        "size": 5997448,
+        "modified_unix": 1788997991,
+        "hash_fnv1a64": "eed38e653111ad27"
+      }
+    },
+    {
+      "name": "part_000025.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000025.bin",
+        "size": 5660168,
+        "modified_unix": 1788998335,
+        "hash_fnv1a64": "3a35ca944a127a2b"
+      }
+    },
+    {
+      "name": "part_000026.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000026.bin",
+        "size": 4488400,
+        "modified_unix": 1788998692,
+        "hash_fnv1a64": "b394adcc4dbb29f6"
+      }
+    },
+    {
+      "name": "part_000027.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000027.bin",
+        "size": 8137080,
+        "modified_unix": 1788999240,
+        "hash_fnv1a64": "3e0efd473feb1bfe"
+      }
+    },
+    {
+      "name": "part_000028.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000028.bin",
+        "size": 6083808,
+        "modified_unix": 1788999694,
+        "hash_fnv1a64": "110e4b73bdd64600"
+      }
+    },
+    {
+      "name": "part_000029.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000029.bin",
+        "size": 4996960,
+        "modified_unix": 1789000169,
+        "hash_fnv1a64": "20a18ab2c43e8d52"
+      }
+    },
+    {
+      "name": "part_000030.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000030.bin",
+        "size": 4573160,
+        "modified_unix": 1789000535,
+        "hash_fnv1a64": "17e9ae3c6721587b"
+      }
+    },
+    {
+      "name": "part_000031.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000031.bin",
+        "size": 6151616,
+        "modified_unix": 1789000970,
+        "hash_fnv1a64": "b803a8513e0404ff"
+      }
+    },
+    {
+      "name": "part_000032.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000032.bin",
+        "size": 8611576,
+        "modified_unix": 1789001487,
+        "hash_fnv1a64": "f679d35f12832068"
+      }
+    },
+    {
+      "name": "part_000033.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000033.bin",
+        "size": 6982264,
+        "modified_unix": 1789001929,
+        "hash_fnv1a64": "0bbdb2f203aa5096"
+      }
+    },
+    {
+      "name": "part_000034.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000034.bin",
+        "size": 5914288,
+        "modified_unix": 1789002258,
+        "hash_fnv1a64": "e16f57b6829a5013"
+      }
+    },
+    {
+      "name": "part_000035.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000035.bin",
+        "size": 8882968,
+        "modified_unix": 1789002861,
+        "hash_fnv1a64": "3d691f4d7e0973de"
+      }
+    },
+    {
+      "name": "part_000036.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000036.bin",
+        "size": 4929152,
+        "modified_unix": 1789003181,
+        "hash_fnv1a64": "d2eef6822f0cff2d"
+      }
+    },
+    {
+      "name": "part_000037.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000037.bin",
+        "size": 4963376,
+        "modified_unix": 1789003520,
+        "hash_fnv1a64": "97def9811aacb2fe"
+      }
+    },
+    {
+      "name": "part_000038.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000038.bin",
+        "size": 9442384,
+        "modified_unix": 1789004218,
+        "hash_fnv1a64": "4dde6a07b298bdf0"
+      }
+    },
+    {
+      "name": "part_000039.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000039.bin",
+        "size": 7849056,
+        "modified_unix": 1789004651,
+        "hash_fnv1a64": "52104130184f7935"
+      }
+    },
+    {
+      "name": "part_000040.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000040.bin",
+        "size": 6355200,
+        "modified_unix": 1789005099,
+        "hash_fnv1a64": "62a0b9ba87845b09"
+      }
+    },
+    {
+      "name": "part_000041.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000041.bin",
+        "size": 8815320,
+        "modified_unix": 1789005613,
+        "hash_fnv1a64": "78de9268c3246238"
+      }
+    },
+    {
+      "name": "part_000042.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000042.bin",
+        "size": 5505520,
+        "modified_unix": 1789005977,
+        "hash_fnv1a64": "69e1acb00ae7bd39"
+      }
+    },
+    {
+      "name": "part_000043.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000043.bin",
+        "size": 4454656,
+        "modified_unix": 1789006251,
+        "hash_fnv1a64": "868379e062a57789"
+      }
+    },
+    {
+      "name": "part_000044.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000044.bin",
+        "size": 6219424,
+        "modified_unix": 1789006708,
+        "hash_fnv1a64": "25bf965e85786f37"
+      }
+    },
+    {
+      "name": "part_000045.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000045.bin",
+        "size": 6812744,
+        "modified_unix": 1789007158,
+        "hash_fnv1a64": "5ec4ddea47646b33"
+      }
+    },
+    {
+      "name": "part_000046.bin",
+      "samples": 32,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000046.bin",
+        "size": 8543928,
+        "modified_unix": 1789007627,
+        "hash_fnv1a64": "f13ea21c5793547b"
+      }
+    },
+    {
+      "name": "part_000047.bin",
+      "samples": 23,
+      "signature": {
+        "path": "training_data/prod_n4096_p0/part_000047.bin",
+        "size": 3511575,
+        "modified_unix": 1789007858,
+        "hash_fnv1a64": "34d5fba40ad6f66e"
+      }
+    }
+  ],
+  "started_at": "2026-09-09T20:44:49.990866678+00:00",
+  "updated_at": "2026-09-10T02:37:38.701081452+00:00",
+  "finished_at": "2026-09-10T02:37:38.701081452+00:00",
+  "skipped_uncaptured": 23,
+  "accepted": 1527,
+  "git_commit": "37a8da218ebec92e431de7e14dedd30c34dfcb09",
+  "gamedata_sig": [
+    {
+      "path": "gamedata/constants.json",
+      "size": 22747,
+      "modified_unix": 1788474667,
+      "hash_fnv1a64": "b2825b470aff75c9"
+    },
+    {
+      "path": "gamedata/events.json",
+      "size": 24444,
+      "modified_unix": 1788474670,
+      "hash_fnv1a64": "77baa0f5eb3f55b5"
+    },
+    {
+      "path": "gamedata/umaDB.json",
+      "size": 135439,
+      "modified_unix": 1788982172,
+      "hash_fnv1a64": "f090c21b2802c308"
+    },
+    {
+      "path": "gamedata/cardDB.json",
+      "size": 1698788,
+      "modified_unix": 1788982172,
+      "hash_fnv1a64": "3049dc4f3b581216"
+    },
+    {
+      "path": "gamedata/scenario_ramen.json",
+      "size": 18467,
+      "modified_unix": 1788474666,
+      "hash_fnv1a64": "9040526a0e9e60b4"
+    },
+    {
+      "path": "gamedata/default_config.toml",
+      "size": 6137,
+      "modified_unix": 1788982172,
+      "hash_fnv1a64": "e66c0dfb71800847"
+    },
+    {
+      "path": "game_config.toml",
+      "size": 2107,
+      "modified_unix": 1788982172,
+      "hash_fnv1a64": "2a4b360b25ffe6e8"
+    }
+  ],
+  "sampling_space_hash": "6c30529e9333fb94",
+  "rollin": "nn:9c476953f01b6118",
+  "recipe_hash_fnv1a64": "7d03757c985a51b8"
+}

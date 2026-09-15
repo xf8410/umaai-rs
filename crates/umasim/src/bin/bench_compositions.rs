@@ -27,7 +27,9 @@ use umasim::{
     game::{InheritInfo, Trainer, ramen::RamenGame},
     gamedata::{GAMEDATA, init_global_with_config},
     global,
-    trainer::{LoggingTrainer, RamenHandwrittenTrainer, RandomTrainer},
+    trainer::{
+        LoggingTrainer, RamenHandwrittenTrainer, RandomTrainer, RecommendedRamenTrainer
+    },
     utils::{get_workspace_root, load_game_config}
 };
 
@@ -52,6 +54,15 @@ struct Config {
     friend: u32,
     /// 训练员名称。
     trainer: String,
+    /// handwritten（正式推荐 preset）专用：地区弱位覆盖权重三态
+    /// （None=preset 默认按智卡数查表；负=显式关闭；正=固定值实验）。
+    region_weak_cover: Option<f32>,
+    /// recommended 专用：地区 youqing 权重覆盖（None=preset 值）。
+    region_youqing_weight: Option<f32>,
+    /// recommended 专用：地区无卡位惩罚覆盖（None=preset 值）。
+    region_waste_penalty: Option<f32>,
+    /// recommended 专用：主训位翻倍加分（C2，None=preset 0.0 关闭）。
+    region_main_bias_bonus: Option<f32>,
     /// 汇总 CSV 输出路径。
     out: String,
     /// 代表卡选择参数（pool_size/min_panel/pick 均可由 CLI 覆盖）。
@@ -67,6 +78,10 @@ impl Default for Config {
             seed: 42,
             friend: DEFAULT_FRIEND,
             trainer: "handwritten".to_string(),
+            region_weak_cover: None,
+            region_youqing_weight: None,
+            region_waste_penalty: None,
+            region_main_bias_bonus: None,
             out: "logs/bench_compositions.csv".to_string(),
             pick: CardPickOpts::default(),
             cards_file: None
@@ -131,6 +146,19 @@ fn parse_args() -> Result<Config> {
             Arg::Long("seed") => cfg.seed = bench::parse_value(&mut parser, "seed")?,
             Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
             Arg::Long("trainer") => cfg.trainer = bench::parse_value(&mut parser, "trainer")?,
+            Arg::Long("region-weak-cover") => {
+                // 三态：0/负/正，原样写入 with_experiment_overrides
+                cfg.region_weak_cover = Some(bench::parse_value(&mut parser, "region-weak-cover")?)
+            }
+            Arg::Long("region-youqing-weight") => {
+                cfg.region_youqing_weight = Some(bench::parse_value(&mut parser, "region-youqing-weight")?)
+            }
+            Arg::Long("region-waste-penalty") => {
+                cfg.region_waste_penalty = Some(bench::parse_value(&mut parser, "region-waste-penalty")?)
+            }
+            Arg::Long("region-main-bias") => {
+                cfg.region_main_bias_bonus = Some(bench::parse_value(&mut parser, "region-main-bias")?)
+            }
             Arg::Long("out") => cfg.out = bench::parse_value(&mut parser, "out")?,
             Arg::Long("min-panel") => cfg.pick.min_panel = bench::parse_value(&mut parser, "min-panel")?,
             Arg::Long("pool-size") => cfg.pick.pool_size = bench::parse_value(&mut parser, "pool-size")?,
@@ -139,7 +167,9 @@ fn parse_args() -> Result<Config> {
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: bench_compositions [--runs N] [--seed S] [--friend IDRANK] \
-                     [--trainer random|handwritten] [--min-panel N] [--pool-size N] [--pick N] \
+                     [--trainer random|handwritten|recommended] [--min-panel N] [--pool-size N] [--pick N] \
+                     [--region-weak-cover F]（recommended 专用：三态 0=按智卡数查表/负=关/正=固定值） \
+                     [--region-youqing-weight F] [--region-waste-penalty F] [--region-main-bias F] \
                      [--cards-file FILE] [--out FILE]"
                 );
                 std::process::exit(0);
@@ -149,8 +179,8 @@ fn parse_args() -> Result<Config> {
     }
     ensure!(cfg.runs > 0, "--runs 必须大于 0");
     ensure!(
-        matches!(cfg.trainer.as_str(), "random" | "handwritten"),
-        "--trainer 只能为 random 或 handwritten"
+        matches!(cfg.trainer.as_str(), "random" | "handwritten" | "recommended"),
+        "--trainer 只能为 random / handwritten / recommended"
     );
     Ok(cfg)
 }
@@ -305,6 +335,32 @@ fn run_all(
 ) -> Result<Vec<Summary>> {
     let random = |seed: u64| LoggingTrainer::new(RandomTrainer, seed);
     let handwritten = |seed: u64| LoggingTrainer::new(RamenHandwrittenTrainer::new(), seed);
+    // 正式推荐 preset（三年分治 + 全机制）。`region_weak_cover` 为 None 时用 preset 默认
+    // （= 方案Ⅰ 按智卡数查表）；显式给值时用实验覆盖入口，其余 10 项保持 preset 精确值。
+    let recommended = |seed: u64| match cfg.region_weak_cover {
+        None => {
+            // preset 默认（弱位覆盖走 §方案Ⅰ 查表），再叠加 youqing / waste / main_bias 覆盖
+            let trainer = RecommendedRamenTrainer::new().with_region_weights(
+                cfg.region_youqing_weight,
+                cfg.region_waste_penalty,
+                None,
+                cfg.region_main_bias_bonus
+            );
+            LoggingTrainer::new(trainer, seed)
+        }
+        Some(w) => {
+            let trainer = RecommendedRamenTrainer::with_experiment_overrides(
+                [16.0, 64.0, 64.0], 0.5, 0.5, 140.0, 0.10, 40.0, 8.0, 6.0, 0.0, w, true
+            )
+            .with_region_weights(
+                cfg.region_youqing_weight,
+                cfg.region_waste_penalty,
+                None,
+                cfg.region_main_bias_bonus
+            );
+            LoggingTrainer::new(trainer, seed)
+        }
+    };
     let mut summaries = Vec::with_capacity(compositions.len());
     for (idx, composition) in compositions.iter().enumerate() {
         let deck = composition.build_deck(representatives, cfg.friend)?;
@@ -318,6 +374,7 @@ fn run_all(
         let summary = match cfg.trainer.as_str() {
             "random" => run_composition(cfg, composition, deck, &random),
             "handwritten" => run_composition(cfg, composition, deck, &handwritten),
+            "recommended" => run_composition(cfg, composition, deck, &recommended),
             _ => unreachable!("训练员已在参数解析时校验")
         };
         summaries.push(summary);

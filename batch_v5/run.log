@@ -1,0 +1,24 @@
+===== ga_optimize: uma=111101 [Inherited Hope]空中救世主 pop=50 gens=100 elitism=6 k=3 cx=0.90 σ 0.15→0.02 停滞=8 =====
+评估协议: 初筛 3build×40runs(seed=42) → 精评 7build×80runs(seed=42) | holdout 60runs(seed=45)
+λ_race=800 ga_seed=42 none_ratio=0.30 基因数=77
+builds(7)=speed,stamina,power_wisdom,speed_wisdom,wisdom,sta0_wis2,spd2_gut0 初筛代表=["speed", "stamina", "power_wisdom"]
+预算提示: 满额每代 ≈ 9780 局 × 100 代 ≈ 978000 局（缓存命中会低于此值）
+[卡池过滤] 已剔除 1 张本体卡（chara_id=1111）: [30255]
+[卡池过滤] 已剔除 5 张本体卡（chara_id=1026）: [30121, 30059, 30277, 30141, 30066]
+[卡池过滤] 全量 296 张 → 过滤后 290 张（剔除 6 张）
+SSR 卡池: 290 张（排除 0 张未实装卡；按 chara_id 剔除 [1026, 1111]）
+  speed速: 71 张
+  stamina耐: 54 张
+  power力: 56 张
+  guts根: 59 张
+  wisdom智: 50 张
+===== GA 完成 =====
+耗时 726310ms | 评估计数 EvalCounts { screen_evals: 4285, full_evals: 453, holdout_evals: 40, cache_hits: 194 }
+最优（精评）fitness=68218.5 基因组哈希 d856db250bb6a688
+最优配卡选择: [0, 4, 19, 30, 2]
+  [精评] fitness=68218.5 mean_score=68218.5±2654.1 skill_pt=8890.5 scenario_pt=["2987", "5490", "7809"] race_fail=0.000 rmj_ok=3.00/3 (1build×80runs)
+  [holdout] fitness=68135.2 mean_score=68135.2±2676.2 skill_pt=8868.3 scenario_pt=["2992", "5540", "7812"] race_fail=0.000 rmj_ok=3.00/3 (1build×60runs)
+过拟合哨兵（精评 − holdout）= 83.3（持续为正且增大即提示 seed 过拟合）
+σ 受控重启次数 = 8 | 逐代摘要见 batch_v5/
+末 5 代最优: gen95=68253 gen96=68253 gen97=68253 gen98=68253 gen99=68253
+产物: batch_v5//ga_generations.csv, batch_v5//ga_detail.csv, batch_v5//best_genome.toml, batch_v5//preset_baseline.toml

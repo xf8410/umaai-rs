@@ -1,0 +1,12 @@
+r3roll_s01_p0 start 9500000 next 9501550 end 9501550 accepted 1533 skipped 17 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+r3roll_s01_p1 start 9501550 next 9503100 end 9503100 accepted 1528 skipped 22 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+r3roll_s02_p0 start 9503100 next 9504650 end 9504650 accepted 1525 skipped 25 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+r3roll_s02_p1 start 9504650 next 9506200 end 9506200 accepted 1536 skipped 14 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+r3roll_s03_p0 start 9506200 next 9507750 end 9507750 accepted 1535 skipped 15 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+r3roll_s03_p1 start 9507750 next 9509300 end 9509300 accepted 1529 skipped 21 parts 49 finished True rollin nn:8e2ed1874cf5a3ba search_n 1024 tmp_files []
+accepted 9186 skipped 114
+log index lines 9186 unique 9186 repeated 0
+RamenSelect n 5786 p50 6 mean 9.03 max 28
+Train n 2739 p50 8 mean 8.07 max 10
+RegionSelect n 620 p50 120 mean 66.77 max 120
+SuperRamenSelect n 41 p50 3 mean 3.0 max 3

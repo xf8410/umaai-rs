@@ -87,8 +87,15 @@ struct BenchConfig {
     /// handwritten 专用：策略变体 token 串（`RecommendedRamenTrainer::with_tokens`），
     /// 如 `rgn1`（reserve 截断增量）/ `rgn2`（满位豁免）/ `reserve20`（调低预留）。
     /// 空 = 正式 preset。实验用，防止把手写参数混入 preset。
+    /// 与 `region_weak_cover` 互斥。
     #[serde(default)]
     tokens: String,
+    /// handwritten 专用：地区弱位覆盖加分权重（`RamenPolicyConfig::region_weak_cover_weight`），
+    /// 走 `RecommendedRamenTrainer::with_experiment_overrides` 只覆盖该参数，其余 10 个
+    /// 实验参数取正式 preset 精确值，保证与 `new()` 的唯一差异就是本权重。
+    /// `None` = 正式 preset（0.0，弱位覆盖不加分）。与 `tokens` 互斥。
+    #[serde(default)]
+    region_weak_cover: Option<f32>,
     /// mcts 专用：激进度上限
     ///
     /// 缺省 **0.0**（取普通均值）而非 `SearchConfig::default()` 的 50.0：
@@ -137,6 +144,7 @@ impl Default for BenchConfig {
             search_stages: default_search_stages(),
             search_ucb: default_search_ucb(),
             tokens: String::new(),
+            region_weak_cover: None,
             radical_factor_max: 0.0
         }
     }
@@ -159,11 +167,15 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
                 cfg.radical_factor_max = bench::parse_value(&mut parser, "radical-factor")?
             }
             Arg::Long("tokens") => cfg.tokens = bench::parse_value(&mut parser, "tokens")?,
+            Arg::Long("region-weak-cover") => {
+                cfg.region_weak_cover = Some(bench::parse_value(&mut parser, "region-weak-cover")?)
+            }
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: bench_base [--runs N] [--seed S] [--log] [--out DIR]
 \n                     	[--trainer random|handwritten|mcts]
 \n                     	handwritten 专用: [--tokens TOKEN串]（如 --tokens rgn1 / rgn2 / reserve20）
+\n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
 \n                     	           [--radical-factor F] [--search-ucb true|false]\n\
                      缺省参数读取 workspace 根 bench_config.toml"
@@ -303,7 +315,21 @@ fn main() -> Result<()> {
                     (outcome, trainer.take_records())
                 }
                 "handwritten" => {
-                    let trainer = if cfg.tokens.is_empty() {
+                    if !cfg.tokens.is_empty() && cfg.region_weak_cover.is_some() {
+                        anyhow::bail!("--tokens 与 --region-weak-cover 互斥，不能同时指定");
+                    }
+                    let trainer = if let Some(w) = cfg.region_weak_cover {
+                        // 只覆盖地区弱位加分权重，其余 10 个实验参数取正式 preset 精确值：
+                        // pt_rates=[16,64,64] / gap=0.5 / overflow=0.5 / max_sacrifice=140 /
+                        // ramen_window=0.10 / reserve_max=40 / early_bond=8 / hint_bonus=6 /
+                        // weakboost=0（走查找表） / eat_requires_covered_train=true。
+                        LoggingTrainer::new(
+                            RecommendedRamenTrainer::with_experiment_overrides(
+                                [16.0, 64.0, 64.0], 0.5, 0.5, 140.0, 0.10, 40.0, 8.0, 6.0, 0.0, w, true
+                            ),
+                            log_seed
+                        )
+                    } else if cfg.tokens.is_empty() {
                         LoggingTrainer::new(RecommendedRamenTrainer::new(), log_seed)
                     } else {
                         LoggingTrainer::new(RecommendedRamenTrainer::with_tokens(&cfg.tokens)?, log_seed)

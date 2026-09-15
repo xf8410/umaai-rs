@@ -2,6 +2,14 @@
 
 本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
 
+## 2026-09-15
+- **地区弱位覆盖按智卡数查表（方案Ⅰ 固化）**：`region_weak_cover_weight` 改三态（0=按智卡数查表 智≤1→12/智≥2→0、<0=关闭、>0=固定值实验），与弱位训练偏好查表配套；全 101 种构成配对验证智≥2 零变化、智≤1 加权 +220
+- **地区无卡位惩罚参数化**：`score_region` 硬编码 -10 提为 `region_waste_penalty`（默认 10 行为不变），扫描 5/15/20/30 均负收益，确认 10 为平衡点
+- **地区 youqing 权重复核**：1.0~3.0 间为公共线性缩放无区分度（逐位不变），0.5 仅扰动 7 构成且方向不可靠，维持 1.5
+- **主训位翻倍加分实验（未采纳）**：`region_main_bias_bonus` 让地区覆盖 build 卡最多位时 bias_sum 再 + 该位卡数，全 101 构成验证全档大负（3speed 类受伤最重），维持线性 bias_sum，字段保留可配
+- **地区打分移除恒量项**：`score_region` 删 pt_bonus/hint_count 项（同年候选间恒定，不改变 argmax，验证逐位不变），删除孤儿字段 `region_pt_weight`；`region_hint_weight` 保留供吃面选择路径
+- **地区权重扫描入口**：`bench_compositions` 新增 recommended 档（正式推荐 preset）与 `--region-weak-cover / --region-youqing-weight / --region-waste-penalty / --region-main-bias` 参数；`RecommendedRamenTrainer::with_region_weights` 覆盖入口
+
 ## 2026-09-14
 - **拉面手写策略评分换PT参数**：新增可调已满位训练 PT 折算价（`pt_tradeoff` 普通档 / `pt_tradeoff_shining` 有彩圈分级 / `pt_tradeoff_super` 超拉面档）——训练位主属性已满时属性收益为 0、只剩 PT，策略按独立价重估该训练候选，避免按 `pt_rate` 高估后终盘贪练已满位
 - **评分换PT玩家配置**：新增顶层可调字段 `ramen_pt_sacrifice_score`（为多拿总 PT 最多愿意牺牲的总评分，默认 0 = 评分优先），按实测标定分段映射到已满位有彩圈定价（0→36/≤60→44/≤160→52/其余→64），`default_config.toml` 注明范围与对照表、`game_config.toml` 顶层可覆盖

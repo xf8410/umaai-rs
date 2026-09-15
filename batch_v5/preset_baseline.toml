@@ -1,0 +1,85 @@
+# GA 基因表 preset 锚点快照（自动生成）
+# 来源：RecommendedRamenTrainer::new() 正式 preset
+# 值为 none 表示该参数的 preset 状态不可用单一数值表示（覆盖层保持 None 即保留 preset）
+
+[policy]
+vital_rest = 40
+vital_rest_eating_y1 = 40
+vital_rest_eating_y2 = 40
+vital_rest_eating_y3 = 0
+wisdom_vital_floor = "none"
+motivation_outing = 3
+status_rate = 1
+pt_rate_y1 = 16
+pt_rate_y2 = 64
+pt_rate_y3 = 64
+pt_tradeoff = 16
+pt_tradeoff_shining = "none"
+pt_tradeoff_super = 0
+cap_discount_weight = 1
+failure_penalty = 60
+effective_ramen_failure = false
+shining_bonus = 60
+train_vital_value = 1.8
+rest_base = 20
+rest_vital_value = 2.5
+rest_target_vital = 55
+race_panel_discount = 0.3
+race_free_urgency_weight = 2000
+race_gate_slack = 1
+outing_base = 15
+friend_outing_bonus = 45
+ramen_pt_weight = 2
+ramen_effect_weight = 3
+ramen_special_cost = 12
+ramen_stock_cost = 0.4
+region_xunlian_weight = 40
+region_pt_weight = 30
+region_hint_weight = 15
+region_youqing_weight = 1.5
+region_weak_cover_weight = 0
+event_vital_weight = 2.2
+event_motivation_weight = 40
+event_bad_flag_penalty = 300
+
+[local]
+early_bond_value = 8
+hint_bonus = 6
+first_friend_click_value = 75
+low_friend_bond_value = 35
+active_friend_value = 8
+feeling_overflow_threshold = 8
+overflow_value = 8
+max_base_score_sacrifice = 140
+status_reserve_max = 40
+dynamic_status_balance = true
+status_gap_strength = 0.5
+status_overflow_strength = 0.5
+dynamic_vital = true
+probabilistic_hint = true
+expected_fail = true
+checkpoint_scale = 0
+rmj_cross_bonus = 0
+great_cross_bonus = 0
+ramen_window_weight = 0.1
+ramen_train_coupling_weight = 2
+ramen_weak_train_boost = 0
+friend_hidden_starve_weight = 300
+friend_future_hidden_weight = 0
+friend_proactive_weight = 150
+eat_guarantee_weight = 3
+cook2_stock_weight = 40
+eat_requires_training = true
+eat_requires_covered_train = true
+y3_pre_train_vital_target = 25
+y3_post_train_vital_target = 0
+y3_vital_shortfall_weight = 0.5
+y3_post_train_hard_floor = 15
+y3_recovery_horizon = true
+friend_outing_replaces_rest = true
+friend_outing3_recovery_vital = 0
+friend_outing_cumulative_caps_y1 = 0
+friend_outing_cumulative_caps_y2 = 2
+friend_outing_cumulative_caps_y3 = 5
+dynamic_special_targets = true
+

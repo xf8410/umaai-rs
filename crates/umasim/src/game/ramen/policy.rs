@@ -161,11 +161,13 @@ pub struct RamenPolicyConfig {
     /// 普通诀窍机会成本权重（吃面消耗 5 诀窍的折算）
     pub ramen_stock_cost: f32,
     // ===== RegionSelect（年度选面）=====
-    /// 地区 xunlian 加成→分数折算
+    /// 地区 xunlian 加成→分数折算（仅第 1 年地区有 xunlian；按 bias_sum 缩放）
     pub region_xunlian_weight: f32,
-    /// 地区 pt_bonus→分数折算
-    pub region_pt_weight: f32,
-    /// 地区 hint_count→分数折算
+    /// 地区 hint_count 加成→分数折算
+    ///
+    /// **地区选择路径已不使用**（同年各地区 hint_count 恒定，常量项不改变 argmax，
+    /// 已从 `score_region` 移除）。保留仅因吃面选择 `score_ramen_action` 仍按
+    /// `hint_count` 折算地区效果（该路径 hint 项有区分度）。
     pub region_hint_weight: f32,
     /// 地区 youqing 加成→分数折算（与 `region_xunlian_weight` 同族，作用于不同年份）
     ///
@@ -185,8 +187,28 @@ pub struct RamenPolicyConfig {
     /// （`card_type_count[t] == 1`，即"带卡少但不是没有"）的地区加分，让年度
     /// 选区同步偏向副属性，使弱位偏好有兑现空间。
     ///
-    /// `0.0` 关闭；量级与 `region_youqing_weight` 同族（扫描定，初始 20-40）。
+    /// **三态语义**（与 [`crate::trainer::LocalRamenTrainer::effective_weak_boost`]
+    /// 对称，默认 `0.0` 按 build 自适应查表）：
+    /// - `> 0.0`：固定值（实验 override，所有 build 用该值）
+    /// - `= 0.0`：按智卡数查表（方案 Ⅰ 固化：智≤1 → 12，智≥2 → 0，见
+    ///   [`RamenPolicy::effective_region_weak_cover`]）
+    /// - `< 0.0`：显式关闭（= 旧行为，无弱位覆盖加分）
     pub region_weak_cover_weight: f32,
+    /// 地区覆盖"卡组无卡位"的每个位的惩罚（每覆盖 1 个 build 无卡位 -N 分）
+    ///
+    /// 与 `bias_sum` 配对使用：`bias_sum` 奖励"覆盖 build 有卡的位"，
+    /// 本项惩罚"覆盖 build 没有卡的位"（覆盖广但无卡位利用价值的反例地区，
+    /// 如第 2 年 id 5 中山-全）。历史值 `10.0` 是 2026-08-25 修正公式的定档
+    /// （令 id 5 含 2 无卡位时显著低于 id 9 智单点），本次参数化以便重扫。
+    pub region_waste_penalty: f32,
+    /// 地区覆盖"build 主训位（卡最多位）"的额外分量加成（C2 候选）
+    ///
+    /// `0.0` = 关闭（`bias_sum` 纯线性累加卡数，历史行为）；
+    /// `1.0` = 该地区覆盖 count 最大的训练位时，`bias_sum` 再 + 1 倍该位卡数
+    /// （主训位翻倍：速3卡的 build 覆盖速位 → bias_sum 3 → 6），强化"覆盖
+    /// 主训位"的地区相对"覆盖广但主位分量低"地区的优势。
+    /// 实验扫描定档，未固化前 preset 保持 0.0。
+    pub region_main_bias_bonus: f32,
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
@@ -227,10 +249,11 @@ impl Default for RamenPolicyConfig {
             ramen_special_cost: 12.0,
             ramen_stock_cost: 0.4,
             region_xunlian_weight: 40.0,
-            region_pt_weight: 30.0,
             region_hint_weight: 15.0,
             region_youqing_weight: 1.5,
             region_weak_cover_weight: 0.0,
+            region_waste_penalty: 10.0,
+            region_main_bias_bonus: 0.0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
@@ -996,6 +1019,24 @@ impl RamenPolicy {
 
     // ========== RegionSelect 单地区价值 ==========
 
+    /// 地区弱位覆盖加分权重（三态，见 [`RamenPolicyConfig::region_weak_cover_weight`]）
+    ///
+    /// - `config > 0`：固定值（实验 override）
+    /// - `config == 0`：按智卡数查表（推荐 preset 默认）——智卡 ≤1 给 12（speed/stamina
+    ///   类 build 弱位覆盖与弱位 boost 5.0 配套，2026-09-15 全 101 种×7build 扫描定档），
+    ///   智卡 ≥2 给 0（弱位 boost 查表对智=2 关闭、智≥3 微调，弱位覆盖同步关闭）。
+    /// - `config < 0`：显式关闭（旧行为）
+    fn effective_region_weak_cover(game: &RamenGame, config: f32) -> f32 {
+        if config > 0.0 {
+            config
+        } else if config < 0.0 {
+            0.0
+        } else {
+            let w = game.card_type_count[4];
+            if w <= 1 { 12.0 } else { 0.0 }
+        }
+    }
+
     /// 单个地区的静态价值（`bias_sum × youqing` + 无卡位惩罚）
     ///
     /// 语义：`region.youqing` 在 `at_trains` 内每个训练位**独立生效**——
@@ -1019,6 +1060,7 @@ impl RamenPolicy {
             .ok_or_else(|| anyhow::anyhow!("地区效果缺失: region_id={region_id}"))?;
         // 该地区覆盖的训练位在卡组里的分量；无卡位贡献 0
         let mut bias_sum = 0.0f32;
+        let mut max_count = 0u32;
         let mut n_waste = 0u32;
         // 弱位覆盖数：at_trains 里"带卡少但不是没有"（card_type_count == 1）的位
         // —— 与弱位训练偏好（ramen_weak_train_boost）对应：这些位吃面后训练收益被放大，
@@ -1030,6 +1072,7 @@ impl RamenPolicy {
                 let count = game.card_type_count[t];
                 if count > 0 {
                     bias_sum += count as f32;
+                    max_count = max_count.max(count as u32);
                     if count == 1 {
                         n_weak_cover += 1;
                     }
@@ -1038,16 +1081,23 @@ impl RamenPolicy {
                 }
             }
         }
+        // C2 主训位翻倍：地区覆盖 build 卡最多的训练位时，bias_sum 再 + 该位卡数 × bonus
+        // （bonus=1.0 时主位分量翻倍），强化"覆盖主训位"地区相对"覆盖广但主位分量低"的优势。
+        if self.config.region_main_bias_bonus > 0.0 && max_count > 0 {
+            bias_sum += max_count as f32 * self.config.region_main_bias_bonus;
+        }
         // xunlian（第 1 年）与 youqing（第 2/3 年）都按 bias_sum 缩放：
         // 第 2/3 年地区的 xunlian 恒为 0，若只算 xunlian 则同年所有候选同分、
         // argmax 恒取第一个，卡组构成完全不参与决策。
+        // 注：pt_bonus 与 hint_count 不在本公式内——同年内各地区这两项恒定
+        // （第 2 年 pt_bonus=0、第 3 年 pt_bonus=50；hint_count 各年恒定），
+        // 常量项不改变 argmax，已从地区选择打分移除（D 清理，行为逐位不变；
+        // hint 项在吃面选择 `score_ramen_action` 中仍有区分度，走降级路径）。
         Ok(bias_sum
             * (region.xunlian as f32 * self.config.region_xunlian_weight
                 + region.youqing as f32 * self.config.region_youqing_weight)
-            + region.pt_bonus as f32 * self.config.region_pt_weight
-            + region.hint_count as f32 * self.config.region_hint_weight
-            + n_weak_cover as f32 * self.config.region_weak_cover_weight
-            - n_waste as f32 * 10.0) // 每个无卡位 -10
+            + n_weak_cover as f32 * Self::effective_region_weak_cover(game, self.config.region_weak_cover_weight)
+            - n_waste as f32 * self.config.region_waste_penalty)
     }
 
     // ========== Event 打分 ==========
