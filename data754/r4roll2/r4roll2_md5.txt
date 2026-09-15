@@ -1,0 +1,2 @@
+32e784abae9ba5cf6d2f76f2f04da4f7  r4roll2_data.tar.gz
+0f30c15eec129f832c632df83ed78b33  r4roll2_logs_gamedata.tar.gz

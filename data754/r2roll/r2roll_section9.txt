@@ -1,0 +1,22 @@
+r2roll_s01_p0 start 9400000 next 9401550 end 9401550 accepted 1527 skipped 23 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s01_p1 start 9401550 next 9403100 end 9403100 accepted 1525 skipped 25 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s02_p0 start 9403100 next 9404650 end 9404650 accepted 1523 skipped 27 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s02_p1 start 9404650 next 9406200 end 9406200 accepted 1528 skipped 22 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s03_p0 start 9406200 next 9407750 end 9407750 accepted 1530 skipped 20 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s03_p1 start 9407750 next 9409300 end 9409300 accepted 1525 skipped 25 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s04_p0 start 9409300 next 9410850 end 9410850 accepted 1536 skipped 14 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s04_p1 start 9410850 next 9412400 end 9412400 accepted 1519 skipped 31 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s05_p0 start 9412400 next 9413950 end 9413950 accepted 1525 skipped 25 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s05_p1 start 9413950 next 9415500 end 9415500 accepted 1534 skipped 16 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s06_p0 start 9415500 next 9417050 end 9417050 accepted 1516 skipped 34 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s07_p0 start 9418600 next 9420150 end 9420150 accepted 1526 skipped 24 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s06_p1 start 9417050 next 9418600 end 9418600 accepted 1526 skipped 24 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s07_p1 start 9420150 next 9421700 end 9421700 accepted 1524 skipped 26 parts 49 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s08_p0 start 9421700 next 9422980 end 9422980 accepted 1268 skipped 12 parts 40 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+r2roll_s08_p1 start 9423250 next 9424146 end 9424146 accepted 890 skipped 6 parts 28 finished True rollin nn:c03b36aed301fceb search_n 1024 tmp_files []
+accepted 23522 skipped 354
+log index lines 23522 unique 23522 repeated 0
+RamenSelect n 15061 p50 6 mean 8.96 max 28
+Train n 6890 p50 8 mean 8.03 max 10
+RegionSelect n 1473 p50 10 mean 64.74 max 120
+SuperRamenSelect n 98 p50 3 mean 3.0 max 3

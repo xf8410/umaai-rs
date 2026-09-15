@@ -1,0 +1,74 @@
+name: data754-convert
+
+# 754 维教师数据 → npy 矩阵分发
+#
+# 数据分支: data754（每套数据一个子目录 data754/<dataset>/，内含 tar.gz 分卷）
+# 每个矩阵 job:
+#   1. 拼接该数据集的分卷 → 解包 → 递归找 part_*.bin
+#   2. cargo run convert754 转成 features/legal_mask/score_mean/score_n 四个 npy
+#      + meta.jsonl（逐样本元信息）+ summary.json（数据集成绩单：平均分等）
+#   3. 上传 artifact data754-<dataset>
+#
+# 矩阵分批: max-parallel 2，5 个数据集跑完两个再起两个，防 GitHub 资源竞争取消 CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [data754]
+
+concurrency:
+  group: data754-convert
+  cancel-in-progress: false
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        dataset: [r2roll, r3roll, r4roll, r4roll2, prod_n4096]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 拉取数据分支中本数据集的目录
+        uses: actions/checkout@v4
+        with:
+          ref: data754
+          sparse-checkout: data754/${{ matrix.dataset }}
+          fetch-depth: 1
+          path: dataset
+
+      - name: 拼接分卷并解包
+        run: |
+          set -euo pipefail
+          D="dataset/data754/${{ matrix.dataset }}"
+          ls -lh "$D"
+          mkdir -p work/extracted
+          cat $(ls "$D"/*.part* | sort) > work/merged.tar.gz
+          tar -xzf work/merged.tar.gz -C work/extracted
+          BIN_COUNT=$(find work/extracted -name 'part_*.bin' | wc -l)
+          echo "bin_count=$BIN_COUNT" >> "$GITHUB_ENV"
+          if [ "$BIN_COUNT" -eq 0 ]; then
+            echo "::error::解包后没有 part_*.bin"; exit 1
+          fi
+          find work/extracted -name 'part_*.bin' | head -3
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 转矩阵
+        run: |
+          cargo run --release -p umasim --bin convert754 -- work/extracted "out/${{ matrix.dataset }}"
+          echo "=== summary.json ==="
+          cat "out/${{ matrix.dataset }}/summary.json"
+          ls -lh "out/${{ matrix.dataset }}"
+
+      - name: 上传 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: data754-${{ matrix.dataset }}
+          path: out/${{ matrix.dataset }}/
+          retention-days: 90
+          if-no-files-found: error
