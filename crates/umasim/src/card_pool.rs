@@ -261,8 +261,9 @@ mod tests {
             &format!("排除列表为空（实际 {:?}）", pool.excluded)
         );
 
-        // 各属性具体数量（含恢复的 11 张：速+3 耐+2 力+1 根+3 智+2）
-        let expected_sizes = [72, 55, 57, 59, 53]; // speed, stamina, power, guts, wisdom
+        // 各属性具体数量（含恢复的 11 张：速+3 耐+2 力+1 根+3 智+2；
+        // 剔除美浦波旁本体卡 5 张——游戏规则马娘不能装备自己本体的支援卡）
+        let expected_sizes = [71, 54, 56, 59, 51]; // speed, stamina, power, guts, wisdom
         for (i, &expected) in expected_sizes.iter().enumerate() {
             c.check(
                 pool.pool_size(i) == expected,
