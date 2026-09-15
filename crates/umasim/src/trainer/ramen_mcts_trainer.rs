@@ -388,11 +388,12 @@ fn emit_decision_reason(&self, turn: i32, chosen: usize, output: &RamenSearchOut
             .enumerate()
             .map(|(i, (action, (res, res_pt)))| {
                 format!(
-                    "#{i} {action} n={} mean={:.0} sd={:.0} pt={:.0}",
+                    "#{i} {action} n={} mean={:.0} sd={:.0} pt={:.0} wm={:.0}",
                     res.count(),
                     res.mean(),
                     res.stdev(),
-                    res_pt.mean()
+                    res_pt.mean(),
+                    res_pt.weighted_mean(output.radical_factor)
                 )
             })
             .collect::<Vec<_>>()
