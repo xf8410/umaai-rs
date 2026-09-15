@@ -2051,8 +2051,6 @@ pub struct ParamOverride {
     pub ramen_stock_cost: Option<f32>,
     /// 地区选择训练收益权重（preset 40.0）。
     pub region_xunlian_weight: Option<f32>,
-    /// 地区选择 PT 收益权重（preset 30.0）。
-    pub region_pt_weight: Option<f32>,
     /// 地区选择 Hint 收益权重（preset 15.0）。
     pub region_hint_weight: Option<f32>,
     /// 地区选择友情收益权重（preset 1.5）。
@@ -2255,9 +2253,6 @@ impl RecommendedRamenTrainer {
             }
             if let Some(v) = ov.region_xunlian_weight {
                 policy.region_xunlian_weight = v;
-            }
-            if let Some(v) = ov.region_pt_weight {
-                policy.region_pt_weight = v;
             }
             if let Some(v) = ov.region_hint_weight {
                 policy.region_hint_weight = v;

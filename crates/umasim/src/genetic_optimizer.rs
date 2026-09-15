@@ -183,7 +183,6 @@ pub const GENE_SPECS: &[GeneSpec] = &[
     f_gene!("ramen_special_cost", GeneLayer::Policy, 0.0, 60.0, 12.0),
     f_gene!("ramen_stock_cost", GeneLayer::Policy, 0.0, 2.0, 0.4),
     f_gene!("region_xunlian_weight", GeneLayer::Policy, 5.0, 100.0, 40.0),
-    f_gene!("region_pt_weight", GeneLayer::Policy, 5.0, 100.0, 30.0),
     f_gene!("region_hint_weight", GeneLayer::Policy, 2.0, 60.0, 15.0),
     f_gene!("region_youqing_weight", GeneLayer::Policy, 0.0, 10.0, 1.5),
     f_gene!("region_weak_cover_weight", GeneLayer::Policy, 0.0, 60.0, 0.0),
@@ -360,7 +359,6 @@ pub fn decode(genome: &GaGenome) -> Result<ParamOverride> {
     f("ramen_special_cost", &mut ov, &mut |o, v| o.ramen_special_cost = Some(v));
     f("ramen_stock_cost", &mut ov, &mut |o, v| o.ramen_stock_cost = Some(v));
     f("region_xunlian_weight", &mut ov, &mut |o, v| o.region_xunlian_weight = Some(v));
-    f("region_pt_weight", &mut ov, &mut |o, v| o.region_pt_weight = Some(v));
     f("region_hint_weight", &mut ov, &mut |o, v| o.region_hint_weight = Some(v));
     f("region_youqing_weight", &mut ov, &mut |o, v| o.region_youqing_weight = Some(v));
     f("region_weak_cover_weight", &mut ov, &mut |o, v| o.region_weak_cover_weight = Some(v));
