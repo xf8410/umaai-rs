@@ -87,7 +87,9 @@ fn load_ga_bench_config(workspace_root: &std::path::Path) -> Result<GaBenchConfi
 }
 
 /// CLI 解析：GA 协议参数全部可调（缺省 = design.md 定稿值）
-fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String)> {
+/// 返回 (GaParams, GaBenchConfig, out_dir, exclude_chara_ids)
+fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>)> {
+    let mut exclude_charas: Vec<u32> = Vec::new();
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
@@ -136,6 +138,10 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             Arg::Long("uma") => cfg.uma = bench::parse_value(&mut parser, "uma")?,
             Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
             Arg::Long("out") => out_dir = bench::parse_value(&mut parser, "out")?,
+            Arg::Long("exclude-chara") => {
+                let cid: u32 = bench::parse_value(&mut parser, "exclude-chara")?;
+                exclude_charas.push(cid);
+            }
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: ga_optimize [--pop N] [--gens N] [--elitism N] [--k N] [--crossover F]\n\
@@ -145,7 +151,9 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                      \x20                 [--full-runs N] [--holdout-runs N]\n\
                      \x20                 [--lambda-race F] [--none-ratio F]\n\
                      \x20                 [--uma ID] [--friend ID] [--out DIR]\n\
+                     \x20                 [--exclude-chara ID] ...（可传多次）\n\
                      缺省 = design.md 定稿协议；马娘/友人/继承因子读 bench_config.toml\n\
+                     本体卡自动剔除：--uma 的 chara_id（gameId/100）自动加入排除\n\
                      ⚠️ 全量协议每代约 5280 局、40 代约 21 万局，跑前确认预算"
                 );
                 std::process::exit(0);
@@ -155,7 +163,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             }
         }
     }
-    Ok((params, cfg, out_dir))
+    Ok((params, cfg, out_dir, exclude_charas))
 }
 
 /// 基因表 preset 锚点快照 → TOML 文本（None = 该位 preset 不可单值表示）
@@ -361,8 +369,14 @@ fn main() -> Result<()> {
     let workspace_root = get_workspace_root()?;
     std::env::set_current_dir(&workspace_root)?;
 
-    let (params, cfg, out_dir_rel) =
+    let (params, cfg, out_dir_rel, mut exclude_charas) =
         apply_cli(GaParams::default(), load_ga_bench_config(&workspace_root)?, "ga_logs".to_string())?;
+
+    // 自动剔除育成马娘本体卡：chara_id = gameId / 100
+    let uma_chara_id = cfg.uma / 100;
+    if !exclude_charas.contains(&uma_chara_id) {
+        exclude_charas.push(uma_chara_id);
+    }
 
     // 引导序列与 bench_base 完全一致（地区策略交回策略层 + 线程池）
     let mut game_config = load_game_config()?;
@@ -432,9 +446,9 @@ fn main() -> Result<()> {
     bench::write_csv(&out_dir.join("ga_detail.csv"), &detail_header, &[])?;
 
     // 构造评估器（卡组与 bench_base 同源同序：CardPickOpts::default() + make_deck）
-    let pool = SsrPool::load().context("加载 SSR 卡池失败")?;
-    println!("SSR 卡池: {} 张（排除 {} 张未实装卡）",
-        pool.pools.iter().map(|p| p.len()).sum::<usize>(), pool.excluded.len());
+    let pool = SsrPool::load_filtered(&exclude_charas).context("加载 SSR 卡池失败")?;
+    println!("SSR 卡池: {} 张（排除 {} 张未实装卡；按 chara_id 剔除 {:?}）",
+        pool.pools.iter().map(|p| p.len()).sum::<usize>(), pool.excluded.len(), pool.exclude_chara_ids);
     for (i, name) in umasim::card_pool::ATTR_NAMES.iter().enumerate() {
         println!("  {}{}: {} 张", name, umasim::card_pool::ATTR_NAMES_ZH[i], pool.pool_size(i));
     }

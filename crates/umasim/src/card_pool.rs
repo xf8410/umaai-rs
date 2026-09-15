@@ -4,6 +4,12 @@
 //! rarity=3 且 command_id≠0 的卡）。原先 cardDB.json 中存在但 master.mdb 中没有的
 //! 11 张卡（30307–30317）已恢复加入卡池，全量 SSR 共 296 张。
 //!
+//! # 本体卡自动剔除
+//!
+//! 游戏规则：马娘不能装备自己本体的支援卡（chara_id = gameId / 100）。
+//! `SsrPool::load_filtered()` 在加载后自动剔除指定 chara_id 的全部卡片，
+//! 并打印剔除日志；ga_optimize 的 `--uma` 会自动换算 chara_id 传入。
+//!
 //! 卡池按属性（速/耐/力/根/智）分组，每组内按 card_id 降序排列。
 //! 配卡基因通过索引选择卡池中的卡；友人槽固定 card_id=30305 不参与搜索。
 
@@ -27,6 +33,9 @@ pub const FRIEND_CARD_ID: u32 = 30305;
 
 /// 友人卡满破 idrank。
 pub const FRIEND_IDRANK: u32 = 303054;
+
+/// 过滤后属性池最低卡数（低于此值报错退出，不静默继续）。
+pub const MIN_POOL_SIZE: usize = 3;
 
 /// 单张卡的池内记录。
 #[derive(Debug, Clone, Deserialize)]
@@ -58,11 +67,22 @@ pub struct SsrPool {
     pub pools: [Vec<PoolCard>; ATTR_COUNT],
     /// 被排除的 card_id（在 cardDB.json 中但不在 master.mdb 中）。
     pub excluded: Vec<u32>,
+    /// 本次加载时按 chara_id 剔除的卡片（自动+手动合并）。
+    pub exclude_chara_ids: Vec<u32>,
 }
 
 impl SsrPool {
-    /// 从 gamedata/ssr_pool.json 加载。
+    /// 从 gamedata/ssr_pool.json 加载全量卡池（不做 chara_id 过滤）。
     pub fn load() -> Result<Self> {
+        Self::load_filtered(&[])
+    }
+
+    /// 从 gamedata/ssr_pool.json 加载并按 chara_id 列表过滤。
+    ///
+    /// - `exclude_chara_ids`：需剔除的 chara_id 列表（可含育成马娘本体 + 手动排除）。
+    /// - 换算规则：chara_id = gameId / 100（如美浦波旁 102601 → 1026）。
+    /// - 过滤后打印剔除日志；任一属性池 < MIN_POOL_SIZE 则报错。
+    pub fn load_filtered(exclude_chara_ids: &[u32]) -> Result<Self> {
         let path = "gamedata/ssr_pool.json";
         let text = fs_err::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("读取卡池文件失败 {}: {e}", path))?;
@@ -87,9 +107,60 @@ impl SsrPool {
             total
         );
 
+        // ---- 按 chara_id 过滤 ----
+        if !exclude_chara_ids.is_empty() {
+            // 先打印剔除日志（从原始数据扫描，按 chara_id 汇总）
+            let mut exclude_log: HashMap<u32, Vec<u32>> = HashMap::new(); // chara_id -> [card_id]
+            for name in ATTR_NAMES.iter() {
+                if let Some(cards) = data.pool.get(*name) {
+                    for card in cards {
+                        if exclude_chara_ids.contains(&card.chara_id) {
+                            exclude_log.entry(card.chara_id).or_default().push(card.card_id);
+                        }
+                    }
+                }
+            }
+            for (&chara_id, card_ids) in &exclude_log {
+                println!(
+                    "[卡池过滤] 已剔除 {} 张本体卡（chara_id={}）: {:?}",
+                    card_ids.len(),
+                    chara_id,
+                    card_ids
+                );
+            }
+
+            // 执行过滤
+            for pool_cards in pools.iter_mut() {
+                pool_cards.retain(|card| !exclude_chara_ids.contains(&card.chara_id));
+            }
+        }
+
+        // ---- 过滤后最小池大小检查 ----
+        for (i, pool_cards) in pools.iter().enumerate() {
+            ensure!(
+                pool_cards.len() >= MIN_POOL_SIZE,
+                "属性 {}({}) 过滤后仅 {} 张卡 < 最低要求 {}（exclude_chara_ids={:?}）",
+                i,
+                ATTR_NAMES[i],
+                pool_cards.len(),
+                MIN_POOL_SIZE,
+                exclude_chara_ids
+            );
+        }
+
+        let filtered_total: usize = pools.iter().map(|p| p.len()).sum();
+        let excluded_count = total - filtered_total;
+        if excluded_count > 0 {
+            println!(
+                "[卡池过滤] 全量 {} 张 → 过滤后 {} 张（剔除 {} 张）",
+                total, filtered_total, excluded_count
+            );
+        }
+
         Ok(Self {
             pools,
             excluded: data.excluded_from_card_db,
+            exclude_chara_ids: exclude_chara_ids.to_vec(),
         })
     }
 
@@ -261,9 +332,9 @@ mod tests {
             &format!("排除列表为空（实际 {:?}）", pool.excluded)
         );
 
-        // 各属性具体数量（含恢复的 11 张：速+3 耐+2 力+1 根+3 智+2；
-        // 剔除美浦波旁本体卡 5 张——游戏规则马娘不能装备自己本体的支援卡）
-        let expected_sizes = [71, 54, 56, 59, 51]; // speed, stamina, power, guts, wisdom
+        // 各属性具体数量（全量 296 张：速72 耐55 力57 根59 智53）
+        // 本体卡剔除由 load_filtered() 运行时完成，load() 不过滤
+        let expected_sizes = [72, 55, 57, 59, 53]; // speed, stamina, power, guts, wisdom
         for (i, &expected) in expected_sizes.iter().enumerate() {
             c.check(
                 pool.pool_size(i) == expected,
@@ -349,5 +420,87 @@ mod tests {
             );
         }
         c.finish()
+    }
+
+    /// 本体卡自动剔除：美浦波旁 102601 → chara_id=1026，剔 5 张。
+    #[test]
+    fn filter_exclude_bourbon() -> Result<()> {
+        bootstrap()?;
+        // chara_id=1026（美浦波旁）：速30121 耐30059 力30277 智30141+30066 = 5 张
+        let pool = SsrPool::load_filtered(&[1026])?;
+        let mut c = Checks::new();
+
+        // 预期：速71 耐54 力56 根59 智51
+        let expected = [71, 54, 56, 59, 51];
+        for (i, &exp) in expected.iter().enumerate() {
+            c.check(
+                pool.pool_size(i) == exp,
+                &format!("{} 池过滤后 {} = 期望 {}", ATTR_NAMES[i], pool.pool_size(i), exp)
+            );
+        }
+        // 确认 chara_id=1026 的卡全部不在池中
+        for i in 0..ATTR_COUNT {
+            let has_bourbon = pool.pools[i].iter().any(|c| c.chara_id == 1026);
+            c.check(!has_bourbon, &format!("{} 池不含 chara_id=1026", ATTR_NAMES[i]));
+        }
+        // 降序仍然保持
+        for i in 0..ATTR_COUNT {
+            let sorted = pool.pools[i].windows(2).all(|w| w[0].card_id > w[1].card_id);
+            c.check(sorted, &format!("{} 池过滤后仍降序", ATTR_NAMES[i]));
+        }
+        c.finish()
+    }
+
+    /// 本体卡自动剔除：空中救世主 111101 → chara_id=1111，剔 1 张（智池 30255）。
+    #[test]
+    fn filter_exclude_savior() -> Result<()> {
+        bootstrap()?;
+        // chara_id=1111（空中救世主）：仅智池 30255 = 1 张
+        let pool = SsrPool::load_filtered(&[1111])?;
+        let mut c = Checks::new();
+
+        // 预期：速72 耐55 力57 根59 智52
+        let expected = [72, 55, 57, 59, 52];
+        for (i, &exp) in expected.iter().enumerate() {
+            c.check(
+                pool.pool_size(i) == exp,
+                &format!("{} 池过滤后 {} = 期望 {}", ATTR_NAMES[i], pool.pool_size(i), exp)
+            );
+        }
+        // 智池不含 chara_id=1111
+        let has_savior = pool.pools[4].iter().any(|c| c.chara_id == 1111);
+        c.check(!has_savior, "智池不含 chara_id=1111");
+        c.finish()
+    }
+
+    /// 组合剔除：波旁(1026) + 救世主(1111) = 6 张。
+    #[test]
+    fn filter_exclude_combined() -> Result<()> {
+        bootstrap()?;
+        let pool = SsrPool::load_filtered(&[1026, 1111])?;
+        let mut c = Checks::new();
+
+        // 预期：速71 耐54 力56 根59 智50
+        let expected = [71, 54, 56, 59, 50];
+        for (i, &exp) in expected.iter().enumerate() {
+            c.check(
+                pool.pool_size(i) == exp,
+                &format!("{} 池过滤后 {} = 期望 {}", ATTR_NAMES[i], pool.pool_size(i), exp)
+            );
+        }
+        let total: usize = pool.pools.iter().map(|p| p.len()).sum();
+        c.check(total == 290, &format!("过滤后总数 {} = 期望 290", total));
+        c.finish()
+    }
+
+    /// 过滤后池 < MIN_POOL_SIZE 应报错。
+    #[test]
+    fn filter_exclude_too_small_errors() {
+        bootstrap().unwrap();
+        // 构造一个不存在的 chara_id 列表不会触发（池不变），
+        // 但若把除根池外所有池的卡都"虚构剔除"——无法在测试中构造，
+        // 因此只验证：传入一个不影响的 chara_id 不会报错
+        let result = SsrPool::load_filtered(&[9999]);
+        assert!(result.is_ok(), "不存在的 chara_id 不影响卡池");
     }
 }

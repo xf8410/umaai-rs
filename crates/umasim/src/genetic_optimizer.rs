@@ -1401,6 +1401,7 @@ mod tests {
             EMPTY.get_or_init(|| SsrPool {
                 pools: std::array::from_fn(|_| Vec::new()),
                 excluded: Vec::new(),
+                exclude_chara_ids: Vec::new(),
             })
         }
     }
