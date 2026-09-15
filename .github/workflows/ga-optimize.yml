@@ -1,0 +1,60 @@
+name: GA optimize
+
+on:
+  workflow_dispatch:
+    inputs:
+      uma:
+        description: '育成马娘 gameId（102601=美浦波旁 / 111101=空中救世主）'
+        required: true
+        default: '102601'
+      exclude_chara:
+        description: '手动排除的 chara_id，空格分隔（救世主轮传 1026=波旁5张；育成马娘本体卡自动剔除无需填）'
+        required: false
+        default: ''
+      pop:
+        description: '种群大小'
+        required: false
+        default: '50'
+      gens:
+        description: '代数'
+        required: false
+        default: '100'
+      tag:
+        description: '产物 artifact 标签（如 v6-bourbon）'
+        required: false
+        default: 'ga_run'
+
+jobs:
+  ga:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run GA optimizer
+        run: |
+          EXCLUDE_ARGS=""
+          if [ -n "${{ github.event.inputs.exclude_chara }}" ]; then
+            for c in ${{ github.event.inputs.exclude_chara }}; do
+              EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude-chara $c"
+            done
+          fi
+          echo "GA run: uma=${{ github.event.inputs.uma }} pop=${{ github.event.inputs.pop }} gens=${{ github.event.inputs.gens }} exclude=[${{ github.event.inputs.exclude_chara }}]"
+          cargo run --release --bin ga_optimize -- \
+            --uma ${{ github.event.inputs.uma }} \
+            $EXCLUDE_ARGS \
+            --pop ${{ github.event.inputs.pop }} \
+            --gens ${{ github.event.inputs.gens }} \
+            --out ga_logs
+
+      - name: Upload GA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ga-${{ github.event.inputs.tag }}
+          path: ga_logs/
+          retention-days: 90
