@@ -52,7 +52,8 @@ jobs:
           if [ "$BIN_COUNT" -eq 0 ]; then
             echo "::error::解包后没有 part_*.bin"; exit 1
           fi
-          find work/extracted -name 'part_*.bin' | head -3
+          # head 提前关管道会让 find 吃 SIGPIPE，pipefail 下必须 || true 兜底
+          find work/extracted -name 'part_*.bin' | sort | head -3 || true
 
       - uses: dtolnay/rust-toolchain@stable
 
