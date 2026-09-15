@@ -1121,17 +1121,17 @@ impl GaOptimizer {
             }
 
             // 2) 精评晋升：按当前适应度取前 E 名补精评（噪声并列随机保序）
+            //    注：旧版"无差异区间+随机tiebreak"比较器违反全序公理（传递性），
+            //    Rust sort 检测后 panic。改为预计算排序键 (fitness desc, tiebreak desc, index asc)。
             let promotion_slots = self.params.elitism.max(1).min(pop.len());
             let tiebreak: Vec<f64> = pop.iter().map(|_| rng.random::<f64>()).collect();
             let mut order: Vec<usize> = (0..pop.len()).collect();
             order.sort_by(|&a, &b| {
-                let (fa, sa) = (pop[a].display_fitness(), pop[a].display_se());
-                let (fb, sb) = (pop[b].display_fitness(), pop[b].display_se());
-                if (fa - fb).abs() < sa.max(sb) {
-                    tiebreak[b].total_cmp(&tiebreak[a])
-                } else {
-                    fb.total_cmp(&fa).then(a.cmp(&b))
-                }
+                let fa = pop[a].display_fitness();
+                let fb = pop[b].display_fitness();
+                fb.total_cmp(&fa)
+                    .then(tiebreak[b].total_cmp(&tiebreak[a]))
+                    .then(a.cmp(&b))
             });
             for &i in order.iter().take(promotion_slots) {
                 if pop[i].full.is_none() {
