@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     let mut legal: Vec<f32> = Vec::new();
     let mut score_mean: Vec<f32> = Vec::new();
     let mut score_n: Vec<u32> = Vec::new();
+    fs::create_dir_all(&output_dir).with_context(|| format!("建输出目录失败: {}", output_dir.display()))?;
     let mut jsonl = BufWriter::new(File::create(output_dir.join("meta.jsonl.tmp"))?);
 
     let mut sample_scores: Vec<f64> = Vec::new();
@@ -164,7 +165,6 @@ fn main() -> Result<()> {
         "turn_max": if total_samples > 0 { turn_max } else { 0 }
     });
 
-    fs::create_dir_all(&output_dir).with_context(|| format!("建输出目录失败: {}", output_dir.display()))?;
     write_npy_f32(&output_dir.join("features.npy"), &features, total_samples, INPUT_DIM)?;
     write_npy_f32(&output_dir.join("legal_mask.npy"), &legal, total_samples, POLICY_DIM)?;
     write_npy_f32(&output_dir.join("score_mean.npy"), &score_mean, total_samples, POLICY_DIM)?;

@@ -86,6 +86,34 @@ fn load_ga_bench_config(workspace_root: &std::path::Path) -> Result<GaBenchConfi
     Ok(default_ga_bench_config())
 }
 
+/// 从 gamedata/umaDB.json 随机抽一个育成马娘 gameId。
+///
+/// 用系统时间纳秒做种子——每次 CI dispatch 抽到不同马娘，配合
+/// workflow 的 random 模式实现"每个马都随机跑"。本体卡剔除由
+/// 现有 --uma 通道自动处理（gameId/100 换算 chara_id）。
+fn random_uma_from_db(workspace_root: &std::path::Path) -> Result<u32> {
+    let path = workspace_root.join("gamedata/umaDB.json");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("读取 umaDB 失败: {}", path.display()))?;
+    let db: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&text)
+        .with_context(|| format!("解析 umaDB 失败: {}", path.display()))?;
+    let entries: Vec<(u32, String)> = db
+        .values()
+        .filter_map(|v| {
+            let gid = v.get("gameId")?.as_u64()? as u32;
+            let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("?").to_string();
+            Some((gid, name))
+        })
+        .collect();
+    anyhow::ensure!(!entries.is_empty(), "umaDB 无有效马娘");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .subsec_nanos() as usize;
+    let (gid, name) = &entries[nanos % entries.len()];
+    println!("random-uma: {} {}（池 {} 骑）", gid, name, entries.len());
+    Ok(*gid)
+}
+
 /// CLI 解析：GA 协议参数全部可调（缺省 = design.md 定稿值）
 /// 返回 (GaParams, GaBenchConfig, out_dir, exclude_chara_ids)
 fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>)> {
@@ -136,6 +164,9 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                 params.none_gene_ratio = bench::parse_value(&mut parser, "none-ratio")?
             }
             Arg::Long("uma") => cfg.uma = bench::parse_value(&mut parser, "uma")?,
+            Arg::Long("random-uma") => {
+                cfg.uma = random_uma_from_db(&get_workspace_root()?)?;
+            }
             Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
             Arg::Long("out") => out_dir = bench::parse_value(&mut parser, "out")?,
             Arg::Long("exclude-chara") => {
@@ -288,7 +319,6 @@ fn override_to_toml(ov: &ParamOverride) -> String {
     p_f32!(ramen_special_cost);
     p_f32!(ramen_stock_cost);
     p_f32!(region_xunlian_weight);
-    p_f32!(region_pt_weight);
     p_f32!(region_hint_weight);
     p_f32!(region_youqing_weight);
     p_f32!(region_weak_cover_weight);

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       uma:
-        description: '育成马娘 gameId（102601=美浦波旁 / 111101=空中救世主）'
+        description: '育成马娘 gameId（102601=美浦波旁 / 111101=空中救世主），传 random=从umaDB随机抽一骑'
         required: true
         default: '102601'
       exclude_chara:
@@ -43,9 +43,14 @@ jobs:
               EXCLUDE_ARGS="$EXCLUDE_ARGS --exclude-chara $c"
             done
           fi
+          if [ "${{ github.event.inputs.uma }}" = "random" ]; then
+            UMA_ARGS="--random-uma"
+          else
+            UMA_ARGS="--uma ${{ github.event.inputs.uma }}"
+          fi
           echo "GA run: uma=${{ github.event.inputs.uma }} pop=${{ github.event.inputs.pop }} gens=${{ github.event.inputs.gens }} exclude=[${{ github.event.inputs.exclude_chara }}]"
           cargo run --release --bin ga_optimize -- \
-            --uma ${{ github.event.inputs.uma }} \
+            $UMA_ARGS \
             $EXCLUDE_ARGS \
             --pop ${{ github.event.inputs.pop }} \
             --gens ${{ github.event.inputs.gens }} \
