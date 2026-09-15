@@ -1,8 +1,32 @@
 {
-  "source": "master.mdb (rarity=3, command_id!=0)",
-  "total_cards": 285,
+  "source": "master.mdb (rarity=3, command_id!=0) + cardDB.json 30307-30317 (11 cards restored)",
+  "total_cards": 296,
   "pool": {
     "speed": [
+      {
+        "card_id": 30317,
+        "idrank": 303174,
+        "name": "[速]待兼诗歌剧",
+        "full_name": "[目的地是温暖之所在]待兼诗歌剧",
+        "chara_id": 1062,
+        "card_type": 0
+      },
+      {
+        "card_id": 30312,
+        "idrank": 303124,
+        "name": "[速]千明代表",
+        "full_name": "[时而交织的海与空]千明代表",
+        "chara_id": 1057,
+        "card_type": 0
+      },
+      {
+        "card_id": 30311,
+        "idrank": 303114,
+        "name": "[速]乐透心",
+        "full_name": "[宛若指引]乐透心",
+        "chara_id": 1146,
+        "card_type": 0
+      },
       {
         "card_id": 30302,
         "idrank": 303024,
@@ -558,6 +582,22 @@
     ],
     "stamina": [
       {
+        "card_id": 30313,
+        "idrank": 303134,
+        "name": "[耐]统治地位",
+        "full_name": "[无尽游戏]统治地位",
+        "chara_id": 1145,
+        "card_type": 1
+      },
+      {
+        "card_id": 30307,
+        "idrank": 303074,
+        "name": "[耐]神业",
+        "full_name": "[卷头彩页之夏]神业",
+        "chara_id": 1137,
+        "card_type": 1
+      },
+      {
         "card_id": 30304,
         "idrank": 303044,
         "name": "[耐]名将怒涛",
@@ -983,6 +1023,14 @@
       }
     ],
     "power": [
+      {
+        "card_id": 30314,
+        "idrank": 303144,
+        "name": "[力]春乌菈菈",
+        "full_name": "[我与你的交换♪]春乌菈菈",
+        "chara_id": 1052,
+        "card_type": 2
+      },
       {
         "card_id": 30301,
         "idrank": 303014,
@@ -1434,6 +1482,30 @@
     ],
     "guts": [
       {
+        "card_id": 30316,
+        "idrank": 303164,
+        "name": "[根]大森逊",
+        "full_name": "[世界上最小的大爆炸]大森逊",
+        "chara_id": 1101,
+        "card_type": 3
+      },
+      {
+        "card_id": 30315,
+        "idrank": 303154,
+        "name": "[根]微光飞驹",
+        "full_name": "[坏坏小英雄，参上！]微光飞驹",
+        "chara_id": 1054,
+        "card_type": 3
+      },
+      {
+        "card_id": 30308,
+        "idrank": 303084,
+        "name": "[根]杏目",
+        "full_name": "[夏空惬意时光]杏目",
+        "chara_id": 1129,
+        "card_type": 3
+      },
+      {
         "card_id": 30299,
         "idrank": 302994,
         "name": "[根]爱丽速子",
@@ -1884,6 +1956,22 @@
     ],
     "wisdom": [
       {
+        "card_id": 30310,
+        "idrank": 303104,
+        "name": "[智]红色梦想",
+        "full_name": "[大口咬下，化作笑颜]红色梦想",
+        "chara_id": 1136,
+        "card_type": 4
+      },
+      {
+        "card_id": 30309,
+        "idrank": 303094,
+        "name": "[智]房一潘多拉",
+        "full_name": "[天才级的超带感SUMMER!!]房一潘多拉",
+        "chara_id": 1113,
+        "card_type": 4
+      },
+      {
         "card_id": 30306,
         "idrank": 303064,
         "name": "[智]优秀素质",
@@ -2293,17 +2381,5 @@
       }
     ]
   },
-  "excluded_from_card_db": [
-    30307,
-    30308,
-    30309,
-    30310,
-    30311,
-    30312,
-    30313,
-    30314,
-    30315,
-    30316,
-    30317
-  ]
+  "excluded_from_card_db": []
 }

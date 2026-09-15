@@ -1,8 +1,8 @@
 //! SSR 卡池模块（配卡基因搜索基础）。
 //!
 //! 数据来源：`gamedata/ssr_pool.json`（由 master.mdb 预生成，只含 master.mdb 中
-//! rarity=3 且 command_id≠0 的卡）。cardDB.json 中存在但 master.mdb 中没有的卡
-//! （30307 段起 11 张）一律不进池。
+//! rarity=3 且 command_id≠0 的卡）。原先 cardDB.json 中存在但 master.mdb 中没有的
+//! 11 张卡（30307–30317）已恢复加入卡池，全量 SSR 共 296 张。
 //!
 //! 卡池按属性（速/耐/力/根/智）分组，每组内按 card_id 降序排列。
 //! 配卡基因通过索引选择卡池中的卡；友人槽固定 card_id=30305 不参与搜索。
@@ -255,15 +255,14 @@ mod tests {
             );
         }
 
-        // 排除列表包含 30307-30317
-        let expected_excluded: Vec<u32> = (30307..=30317).collect();
+        // 排除列表已清空（原 30307-30317 的 11 张卡已恢复加入卡池）
         c.check(
-            pool.excluded == expected_excluded,
-            &format!("排除列表 = 30307..=30317（实际 {:?}）", pool.excluded)
+            pool.excluded.is_empty(),
+            &format!("排除列表为空（实际 {:?}）", pool.excluded)
         );
 
-        // 各属性具体数量
-        let expected_sizes = [69, 53, 56, 56, 51]; // speed, stamina, power, guts, wisdom
+        // 各属性具体数量（含恢复的 11 张：速+3 耐+2 力+1 根+3 智+2）
+        let expected_sizes = [72, 55, 57, 59, 53]; // speed, stamina, power, guts, wisdom
         for (i, &expected) in expected_sizes.iter().enumerate() {
             c.check(
                 pool.pool_size(i) == expected,
