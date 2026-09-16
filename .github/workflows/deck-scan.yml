@@ -7,8 +7,14 @@ on:
         description: '马娘 gameId（如 109401=森林宝穴）'
         default: '109401'
       runs:
-        description: '每组合局数'
+        description: '精评每组合局数（幸存者）'
         default: '30'
+      screen_runs:
+        description: '初筛每组合局数（全组合都跑，跑完淘汰低分）'
+        default: '10'
+      keep_top:
+        description: '初筛淘汰后保留的组合数（按初筛 mean 取前 N）'
+        default: '40'
       trainer:
         description: '训练员：handwritten|mcts|random'
         default: 'handwritten'
@@ -30,18 +36,21 @@ jobs:
       - name: Build once
         run: cargo build --release -p umasim --bin bench_base
 
-      - name: Scan all deck compositions (speed 0-5 × 全排列)
+      # ===== Phase 1: 初筛（全组合 × screen_runs，跑完按 mean 淘汰）=====
+      - name: Phase1 screen (all compositions × short runs)
         run: |
           python3 - <<'EOF'
-          import subprocess, itertools, os
+          import subprocess, os, csv, glob
+          import statistics as st
           from concurrent.futures import ThreadPoolExecutor
 
           UMA = "${{ inputs.uma }}"
-          RUNS = "${{ inputs.runs }}"
+          SCREEN_RUNS = "${{ inputs.screen_runs }}"
           TRAINER = "${{ inputs.trainer }}"
           SEED = "${{ inputs.seed }}"
+          KEEP_TOP = int("${{ inputs.keep_top }}")
 
-          # 张数分布枚举：speed 张数 0..=5，剩余张数分布到 耐/力/根/智（无单属性上限）
+          # 张数分布枚举：speed 0..=5，剩余分布到 耐/力/根/智（无单属性上限）
           def dists(n, k):
               if k == 1:
                   yield (n,)
@@ -50,76 +59,142 @@ jobs:
                   for tail in dists(n - i, k - 1):
                       yield (i,) + tail
 
-          specs = []
-          for sp in range(6):
-              for d in dists(5 - sp, 4):
-                  specs.append((sp,) + d)
-          print(f"共 {len(specs)} 种张数组合", flush=True)
+          specs = [(sp,) + d for sp in range(6) for d in dists(5 - sp, 4)]
+          print(f"初筛 {len(specs)} 种组合 × {SCREEN_RUNS} 局，将保留前 {KEEP_TOP}", flush=True)
 
           TAG = ["s", "t", "l", "g", "z"]  # 速耐力根智
-          def run_one(spec):
-              tag = "".join(f"{t}{n}" for t, n in zip(TAG, spec) if n > 0) or "all0"
-              out = f"logs/{tag}"
+          def spec_tag(spec):
+              return "".join(f"{t}{n}" for t, n in zip(TAG, spec) if n > 0) or "all0"
+
+          def run_one(args):
+              tag, out, runs = args
+              os.makedirs(out, exist_ok=True)
+              cmd = ["./target/release/bench_base",
+                     "--uma", UMA, "--runs", str(runs), "--seed", SEED,
+                     "--trainer", TRAINER, "--out", out,
+                     "--deck-spec", ",".join(map(str, SPECS_BY_TAG[tag]))]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              if r.returncode != 0:
+                  tail = "\n".join((r.stderr or "").splitlines()[-8:])
+                  print(f"[{tag}] FAIL({r.returncode})\n{tail}", flush=True)
+              return (tag, r.returncode)
+
+          SPECS_BY_TAG = {spec_tag(s): s for s in specs}
+          jobs1 = [(spec_tag(s), f"logs_p1/{spec_tag(s)}", SCREEN_RUNS) for s in specs]
+          with ThreadPoolExecutor(max_workers=3) as ex:
+              codes = list(ex.map(run_one, jobs1))
+          bad = [t for t, c in codes if c != 0]
+          if bad:
+              raise SystemExit(f"初筛 {len(bad)} 个组合失败: {bad[:5]}")
+
+          # 初筛排名
+          def p1_mean(tag):
+              f = f"logs_p1/{tag}/bench_base_results.csv"
+              rec = list(csv.DictReader(open(f)))
+              return st.mean(float(r["score"]) for r in rec) if rec else -1.0
+          ranked = sorted(((p1_mean(t), t) for t, c in codes if c == 0), reverse=True)
+          kept = [t for _, t in ranked[:KEEP_TOP]]
+          cut = [t for _, t in ranked[KEEP_TOP:]]
+          print(f"初筛完成。晋级 {len(kept)}: {kept}")
+          print(f"淘汰 {len(cut)}（初筛分 {ranked[KEEP_TOP][0]:.0f} 以下）: {[f'{t}={m:.0f}' for m, t in ranked[KEEP_TOP:]]}", flush=True)
+          with open("logs_p1_kept.txt", "w") as fh:
+              fh.write("\n".join(kept))
+          EOF
+
+      # ===== Phase 2: 精评（幸存者 × runs）=====
+      - name: Phase2 refine (survivors × full runs)
+        run: |
+          python3 - <<'EOF'
+          import subprocess, os
+          from concurrent.futures import ThreadPoolExecutor
+
+          UMA = "${{ inputs.uma }}"
+          RUNS = "${{ inputs.runs }}"
+          TRAINER = "${{ inputs.trainer }}"
+          SEED = "${{ inputs.seed }}"
+
+          kept = [ln.strip() for ln in open("logs_p1_kept.txt") if ln.strip()]
+          print(f"精评 {len(kept)} 个幸存组合 × {RUNS} 局", flush=True)
+
+          # spec 反解：tag -> 张数（s2t2l1 -> [2,2,1,0,0]）
+          import re
+          def tag_spec(tag):
+              spec = [0] * 5
+              for m in re.finditer(r"([stlgz])(\d+)", tag):
+                  spec["stlgz".index(m.group(1))] = int(m.group(2))
+              assert sum(spec) == 5, f"{tag} 反解失败: {spec}"
+              return spec
+
+          def run_one(tag):
+              out = f"logs_p2/{tag}"
               os.makedirs(out, exist_ok=True)
               cmd = ["./target/release/bench_base",
                      "--uma", UMA, "--runs", RUNS, "--seed", SEED,
                      "--trainer", TRAINER, "--out", out,
-                     "--deck-spec", ",".join(map(str, spec))]
+                     "--deck-spec", ",".join(map(str, tag_spec(tag)))]
               r = subprocess.run(cmd, capture_output=True, text=True)
-              status = "ok" if r.returncode == 0 else f"FAIL({r.returncode})"
-              # 失败时打全 stderr 尾部 + stdout 尾部，成功时抓卡组/汇总行
               if r.returncode != 0:
-                  tail_err = "\n".join((r.stderr or "").splitlines()[-8:])
-                  tail_out = "\n".join((r.stdout or "").splitlines()[-8:])
-                  print(f"[{tag}] {status}\n--- stdout 尾 ---\n{tail_out}\n--- stderr 尾 ---\n{tail_err}", flush=True)
+                  tail = "\n".join((r.stderr or "").splitlines()[-8:])
+                  print(f"[{tag}] FAIL({r.returncode})\n{tail}", flush=True)
               else:
                   keep = [ln for ln in (r.stdout or "").splitlines()
                           if "卡组" in ln or "汇总" in ln]
-                  print(f"[{tag}] {status} :: " + " | ".join(keep[-2:]), flush=True)
+                  print(f"[{tag}] ok :: " + " | ".join(keep[-2:]), flush=True)
               return (tag, r.returncode)
 
           with ThreadPoolExecutor(max_workers=3) as ex:
-              codes = list(ex.map(run_one, specs))
+              codes = list(ex.map(run_one, kept))
           bad = [t for t, c in codes if c != 0]
-          print(f"完成: {len(codes)-len(bad)}/{len(codes)} 成功")
           if bad:
-              print("失败组合:", bad)
-              raise SystemExit(f"{len(bad)} 个组合失败，首个: {bad[0]}")
+              raise SystemExit(f"精评 {len(bad)} 个组合失败: {bad[:5]}")
+          print(f"精评完成: {len(codes)}/{len(codes)}", flush=True)
           EOF
 
+      # ===== 汇总：精评为准，淘汰组附初筛分 =====
       - name: Collect summary
         if: always()
         run: |
           python3 - <<'EOF'
           import csv, glob, os
           import statistics as st
-          rows = []
-          for f in sorted(glob.glob("logs/*/bench_base_results.csv")):
-              tag = os.path.basename(os.path.dirname(f))
-              rec = list(csv.DictReader(open(f)))
-              if not rec:
-                  continue
-              sc = sorted(float(r["score"]) for r in rec)
-              n = len(sc)
-              mean = st.mean(sc)
-              med = sc[n // 2]
-              sd = st.pstdev(sc)
-              five = [st.mean(float(r[k]) for r in rec) for k in
-                      ("speed", "stamina", "power", "guts", "wisdom")]
-              spt = st.mean(float(r["skill_pt"]) for r in rec)
-              rows.append((tag, n, mean, med, max(sc), min(sc), sd, five, spt))
-          rows.sort(key=lambda x: -x[2])
+          def load(dirn):
+              out = {}
+              for f in sorted(glob.glob(f"{dirn}/*/bench_base_results.csv")):
+                  tag = os.path.basename(os.path.dirname(f))
+                  rec = list(csv.DictReader(open(f)))
+                  if rec:
+                      sc = sorted(float(r["score"]) for r in rec)
+                      n = len(sc)
+                      out[tag] = (n, st.mean(sc), sc[n//2], max(sc), min(sc), st.pstdev(sc),
+                                  [st.mean(float(r[k]) for r in rec) for k in
+                                   ("speed", "stamina", "power", "guts", "wisdom")],
+                                  st.mean(float(r["skill_pt"]) for r in rec))
+              return out
+          p1, p2 = load("logs_p1"), load("logs_p2")
+          kept = set(ln.strip() for ln in open("logs_p1_kept.txt") if ln.strip()) if os.path.exists("logs_p1_kept.txt") else set()
+          os.makedirs("logs", exist_ok=True)
           with open("logs/scan_summary.csv", "w", newline="") as fh:
               w = csv.writer(fh)
-              w.writerow(["spec", "runs", "mean", "median", "max", "min", "std",
+              w.writerow(["stage", "spec", "runs", "mean", "median", "max", "min", "std",
                           "speed", "stamina", "power", "guts", "wisdom", "skill_pt"])
-              for tag, n, mean, med, mx, mn, sd, five, spt in rows:
-                  w.writerow([tag, n, f"{mean:.0f}", f"{med:.0f}", f"{mx:.0f}", f"{mn:.0f}",
+              for tag in sorted(p2, key=lambda t: -p2[t][1]):
+                  n, mean, med, mx, mn, sd, five, spt = p2[tag]
+                  w.writerow(["refined", tag, n, f"{mean:.0f}", f"{med:.0f}", f"{mx:.0f}", f"{mn:.0f}",
                               f"{sd:.0f}", *[f"{x:.0f}" for x in five], f"{spt:.0f}"])
-          print(f"{'组合':>12} {'n':>3} {'mean':>7} {'med':>7} {'max':>7} {'min':>7} {'std':>5}  速/耐/力/根/智  skill_pt")
-          for tag, n, mean, med, mx, mn, sd, five, spt in rows:
+              for tag in sorted(p1, key=lambda t: -p1[t][1]):
+                  if tag not in kept:
+                      n, mean, med, mx, mn, sd, five, spt = p1[tag]
+                      w.writerow(["screened_out", tag, n, f"{mean:.0f}", f"{med:.0f}", f"{mx:.0f}", f"{mn:.0f}",
+                                  f"{sd:.0f}", *[f"{x:.0f}" for x in five], f"{spt:.0f}"])
+          print(f"{'阶段':>6} {'组合':>12} {'n':>3} {'mean':>7} {'med':>7} {'max':>7} {'min':>7} {'std':>5}  速/耐/力/根/智  skill_pt")
+          for tag in sorted(p2, key=lambda t: -p2[t][1]):
+              n, mean, med, mx, mn, sd, five, spt = p2[tag]
               fv = "/".join(f"{x:.0f}" for x in five)
-              print(f"{tag:>12} {n:>3} {mean:>7.0f} {med:>7.0f} {mx:>7.0f} {mn:>7.0f} {sd:>5.0f}  {fv}  {spt:.0f}")
+              print(f"{'精评':>6} {tag:>12} {n:>3} {mean:>7.0f} {med:>7.0f} {mx:>7.0f} {mn:>7.0f} {sd:>5.0f}  {fv}  {spt:.0f}")
+          for tag in sorted((t for t in p1 if t not in kept), key=lambda t: -p1[t][1]):
+              n, mean, med, mx, mn, sd, five, spt = p1[tag]
+              fv = "/".join(f"{x:.0f}" for x in five)
+              print(f"{'淘汰':>6} {tag:>12} {n:>3} {mean:>7.0f} {med:>7.0f} {mx:>7.0f} {mn:>7.0f} {sd:>5.0f}  {fv}  {spt:.0f}")
           EOF
 
       - name: Upload results
@@ -129,5 +204,6 @@ jobs:
           name: deck-scan-uma${{ inputs.uma }}
           path: |
             logs/scan_summary.csv
-            logs/*/bench_base_results.csv
+            logs_p1/*/bench_base_results.csv
+            logs_p2/*/bench_base_results.csv
           retention-days: 14
