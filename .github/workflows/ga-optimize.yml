@@ -23,6 +23,14 @@ on:
         description: '产物 artifact 标签（如 v6-bourbon）'
         required: false
         default: 'ga_run'
+      random_cards:
+        description: '随机配卡（true=随机普通卡分布+随机友人，本体卡自动避让）'
+        required: false
+        default: 'false'
+      loop_minutes:
+        description: '循环分钟数（0=单轮；>0 时循环随机马+随机卡跑到时限）'
+        required: false
+        default: '0'
 
 jobs:
   ga:
@@ -34,6 +42,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Build once
+        run: cargo build --release --bin ga_optimize
 
       - name: Run GA optimizer
         run: |
@@ -48,13 +59,25 @@ jobs:
           else
             UMA_ARGS="--uma ${{ github.event.inputs.uma }}"
           fi
-          echo "GA run: uma=${{ github.event.inputs.uma }} pop=${{ github.event.inputs.pop }} gens=${{ github.event.inputs.gens }} exclude=[${{ github.event.inputs.exclude_chara }}]"
-          cargo run --release --bin ga_optimize -- \
-            $UMA_ARGS \
-            $EXCLUDE_ARGS \
-            --pop ${{ github.event.inputs.pop }} \
-            --gens ${{ github.event.inputs.gens }} \
-            --out ga_logs
+          if [ "${{ github.event.inputs.random_cards }}" = "true" ]; then
+            CARDS_ARGS="--random-cards"
+          else
+            CARDS_ARGS=""
+          fi
+          echo "GA run: uma=${{ github.event.inputs.uma }} random_cards=${{ github.event.inputs.random_cards }} loop=${{ github.event.inputs.loop_minutes }}min pop=${{ github.event.inputs.pop }} gens=${{ github.event.inputs.gens }} exclude=[${{ github.event.inputs.exclude_chara }}]"
+          LOOP_MIN=${{ github.event.inputs.loop_minutes }}
+          END=$((SECONDS + LOOP_MIN * 60))
+          i=0
+          while [ $SECONDS -lt $END ]; do
+            i=$((i+1))
+            echo "===== 循环第 $i 轮（已跑 $((SECONDS/60)) 分钟）====="
+            ./target/release/ga_optimize \
+              $UMA_ARGS $CARDS_ARGS $EXCLUDE_ARGS \
+              --pop ${{ github.event.inputs.pop }} \
+              --gens ${{ github.event.inputs.gens }} \
+              --out ga_logs/run_$i || echo "[warn] 第 $i 轮失败，继续下一轮"
+          done
+          echo "循环结束：共 $i 轮"
 
       - name: Upload GA artifacts
         if: always()

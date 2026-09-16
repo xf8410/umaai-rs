@@ -37,12 +37,13 @@ use umasim::genetic_optimizer::{
     SimFitnessEvaluator, select_screen_builds
 };
 use umasim::{
-    bench::{self, RESULTS_HEADER, load_player_builds},
+    bench::{self, DeckComposition, RESULTS_HEADER, load_player_builds},
     game::InheritInfo,
     gamedata::{GAMEDATA, RamenRegionStrategy, init_global_with_config},
     global,
     trainer::ParamOverride,
-    utils::{get_workspace_root, load_game_config}
+    utils::{get_workspace_root, load_game_config},
+    card_pool::PoolCard,
 };
 
 /// bench_config.toml 中 GA 需要的项（马娘/友人/继承因子；其余忽略）
@@ -116,8 +117,9 @@ fn random_uma_from_db(workspace_root: &std::path::Path) -> Result<u32> {
 
 /// CLI 解析：GA 协议参数全部可调（缺省 = design.md 定稿值）
 /// 返回 (GaParams, GaBenchConfig, out_dir, exclude_chara_ids)
-fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>)> {
+fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>, bool)> {
     let mut exclude_charas: Vec<u32> = Vec::new();
+    let mut random_cards = false;
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
@@ -168,6 +170,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                 cfg.uma = random_uma_from_db(&get_workspace_root()?)?;
             }
             Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
+            Arg::Long("random-cards") => random_cards = true,
             Arg::Long("out") => out_dir = bench::parse_value(&mut parser, "out")?,
             Arg::Long("exclude-chara") => {
                 let cid: u32 = bench::parse_value(&mut parser, "exclude-chara")?;
@@ -181,7 +184,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                      \x20                 [--screen-builds N] [--screen-runs N] [--full-builds N]\n\
                      \x20                 [--full-runs N] [--holdout-runs N]\n\
                      \x20                 [--lambda-race F] [--none-ratio F]\n\
-                     \x20                 [--uma ID] [--friend ID] [--out DIR]\n\
+                     \x20                 [--uma ID] [--friend ID] [--random-cards] [--out DIR]\n\
                      \x20                 [--exclude-chara ID] ...（可传多次）\n\
                      缺省 = design.md 定稿协议；马娘/友人/继承因子读 bench_config.toml\n\
                      本体卡自动剔除：--uma 的 chara_id（gameId/100）自动加入排除\n\
@@ -194,7 +197,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             }
         }
     }
-    Ok((params, cfg, out_dir, exclude_charas))
+    Ok((params, cfg, out_dir, exclude_charas, random_cards))
 }
 
 /// 基因表 preset 锚点快照 → TOML 文本（None = 该位 preset 不可单值表示）
@@ -394,12 +397,84 @@ fn print_card_summary(label: &str, card: &umasim::genetic_optimizer::ScoreCard) 
     );
 }
 
+
+/// 随机配卡配置：普通卡类型分布（合计 5、单类型 ≤3）+ 随机友人卡。
+///
+/// 摘除本体卡识别器：友人卡 chara_id == 育成马娘 chara_id（gameId/100）时重抽；
+/// 普通卡层由 `SsrPool::load_filtered(&exclude_charas)` 在代表卡选择时统一剔除。
+/// 随机种子 = SystemTime 纳秒（同进程多轮 / CI 循环每轮不同）。
+static FRIEND_POOL_SIZE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn random_cards_config(
+    workspace_root: &std::path::Path,
+    uma_chara_id: u32,
+) -> Result<([usize; 5], PoolCard)> {
+    use std::sync::atomic::Ordering;
+
+    let path = workspace_root.join("gamedata/ssr_pool.json");
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("读取卡池失败: {}", path.display()))?;
+    let data: serde_json::Value = serde_json::from_str(&text)?;
+    let friend_pool = data["pool"]["friend"]
+        .as_array()
+        .with_context(|| "ssr_pool.json 缺少 friend 池")?;
+    FRIEND_POOL_SIZE.store(friend_pool.len(), Ordering::Relaxed);
+    anyhow::ensure!(!friend_pool.is_empty(), "友人卡池为空");
+
+    // 时间纳秒 LCG（64 位）：CI 循环同秒多轮也互异
+    let mut x = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .subsec_nanos() as u64
+        ^ (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs()
+            .wrapping_mul(0x9E3779B97F4A7C15));
+    let mut next = move || {
+        x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (x >> 33) as usize
+    };
+
+    // 普通卡类型分布：合计 5、单类型 ≤3
+    let mut counts = [0usize; 5];
+    let mut total = 0usize;
+    while total < 5 {
+        let t = next() % 5;
+        if counts[t] < 3 {
+            counts[t] += 1;
+            total += 1;
+        }
+    }
+
+    // 随机友人（本体卡避让：最多重抽池大小次防死循环）
+    let mut friend_card: Option<PoolCard> = None;
+    for _ in 0..friend_pool.len() {
+        let v = &friend_pool[next() % friend_pool.len()];
+        let chara_id = v["chara_id"].as_u64().unwrap_or(0) as u32;
+        if chara_id != uma_chara_id {
+            friend_card = Some(PoolCard {
+                card_id: v["card_id"].as_u64().unwrap_or(0) as u32,
+                idrank: v["idrank"].as_u64().unwrap_or(0) as u32,
+                name: v["name"].as_str().unwrap_or("").to_string(),
+                full_name: v["full_name"].as_str().unwrap_or("").to_string(),
+                chara_id,
+                card_type: v["card_type"].as_i64().unwrap_or(-1) as i32,
+            });
+            break;
+        }
+    }
+    let friend_card = friend_card.with_context(|| {
+        format!("友人池全为本体卡（chara_id={}）冲突，无法随机配卡", uma_chara_id)
+    })?;
+
+    Ok((counts, friend_card))
+}
+
 fn main() -> Result<()> {
     // 切换到 workspace 根（bench_config.toml / gamedata 相对路径依赖）
     let workspace_root = get_workspace_root()?;
     std::env::set_current_dir(&workspace_root)?;
 
-    let (params, cfg, out_dir_rel, mut exclude_charas) =
+    let (params, mut cfg, out_dir_rel, mut exclude_charas, random_cards) =
         apply_cli(GaParams::default(), load_ga_bench_config(&workspace_root)?, "ga_logs".to_string())?;
 
     // 自动剔除育成马娘本体卡：chara_id = gameId / 100
@@ -417,7 +492,20 @@ fn main() -> Result<()> {
         .num_threads(game_config.collector.threads)
         .build_global()?;
 
-    let builds = load_player_builds()?;
+    // 随机配卡：随机普通卡类型分布 + 随机友人（摘除本体卡识别器：chara_id = gameId/100 避让）
+    let builds = if random_cards {
+        let uma_chara_id = cfg.uma / 100;
+        let (counts, friend_card) = random_cards_config(&workspace_root, uma_chara_id)?;
+        println!(
+            "random-cards: 普通卡 [速{} 耐{} 力{} 根{} 智{}] 友人 {} {}（友池 {} 张，本体卡识别 chara_id={} 已避让）",
+            counts[0], counts[1], counts[2], counts[3], counts[4],
+            friend_card.idrank, friend_card.name, FRIEND_POOL_SIZE.load(std::sync::atomic::Ordering::Relaxed), uma_chara_id
+        );
+        cfg.friend = friend_card.idrank;
+        vec![DeckComposition { name: "random".into(), counts }]
+    } else {
+        load_player_builds()?
+    };
     let uma_name = global!(GAMEDATA).get_uma(cfg.uma)?.name.clone();
     let inherit = InheritInfo {
         blue_count: cfg.blue_count,
