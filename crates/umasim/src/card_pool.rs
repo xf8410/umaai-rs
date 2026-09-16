@@ -212,6 +212,8 @@ impl SsrPool {
 pub struct CardSelection {
     /// 每属性的首选下标（0-based，降序池中的位置）。
     pub indices: [usize; ATTR_COUNT],
+    /// 友人卡 idrank（卡组末位；默认 FRIEND_IDRANK，随机配卡模式下由入口注入）
+    pub friend_idrank: u32,
 }
 
 impl CardSelection {
@@ -219,6 +221,7 @@ impl CardSelection {
     pub fn default_top(_pool: &SsrPool) -> Self {
         Self {
             indices: [0; ATTR_COUNT],
+            friend_idrank: FRIEND_IDRANK,
         }
     }
 
@@ -235,7 +238,7 @@ impl CardSelection {
                 deck.push(idrank);
             }
         }
-        deck.push(FRIEND_IDRANK);
+        deck.push(self.friend_idrank);
         ensure!(deck.len() == 6, "卡组必须恰好 6 张卡");
         // 同一副卡组 6 张卡 card_id 不得重复
         let mut ids: Vec<u32> = deck.iter().map(|&idrank| idrank / 10).collect();
@@ -272,7 +275,7 @@ impl CardSelection {
                 a.indices[i]
             };
         }
-        Self { indices }
+        Self { indices, friend_idrank: a.friend_idrank }
     }
 
     /// 卡选择 → 缓存键分量（SipHash）。
@@ -280,6 +283,7 @@ impl CardSelection {
         use std::hash::{Hash, Hasher};
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         self.indices.hash(&mut hasher);
+        self.friend_idrank.hash(&mut hasher);
         hasher.finish()
     }
 }

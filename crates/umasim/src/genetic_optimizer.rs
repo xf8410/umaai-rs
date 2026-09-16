@@ -597,6 +597,8 @@ pub trait FitnessEvaluator {
 /// 卡组由 comp_counts + CardSelection + pool 动态构建，不再依赖外部 build 列表。
 /// 缓存键 = genome_hash ⊕ comp_hash ⊕ card_sel_hash。
 pub struct SimFitnessEvaluator {
+    /// 友人卡 idrank（随机配卡模式由入口注入；默认 FRIEND_IDRANK）
+    friend_idrank: u32,
     uma: u32,
     inherit: InheritInfo,
     /// SSR 卡池（按属性分组，降序排列）。
@@ -615,7 +617,7 @@ impl SimFitnessEvaluator {
     /// 与 bench_base 同源同序。
     pub fn new(
         uma: u32,
-        _friend: u32,
+        friend: u32,
         inherit: InheritInfo,
         params: GaParams,
         pool: SsrPool,
@@ -627,7 +629,8 @@ impl SimFitnessEvaluator {
             params,
             cache: HashMap::new(),
             counts: EvalCounts::default(),
-            detail_rows: Vec::new()
+            detail_rows: Vec::new(),
+            friend_idrank: friend,
         })
     }
 
@@ -650,8 +653,13 @@ impl SimFitnessEvaluator {
         };
         let runs = runs.max(1);
 
-        // 按 comp_counts + card_sel 动态构建卡组
-        let deck = card_sel.build_deck(&self.pool, comp_counts)?;
+        // 按 comp_counts + card_sel 动态构建卡组；友人卡 idrank 由入口注入
+        // （随机配卡模式下每 run 不同；同一 run 内恒定，缓存键不含友人无碰撞）
+        let deck = {
+            let mut cs = card_sel.clone();
+            cs.friend_idrank = self.friend_idrank;
+            cs.build_deck(&self.pool, comp_counts)?
+        };
         let build_name = format_comp_name(comp_counts);
 
         let jobs: Vec<usize> = (0..runs).collect();
