@@ -232,8 +232,8 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
 \n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
 \n                     	           [--radical-factor F] [--search-ucb true|false]
-                     	通用: [--deck "id1,id2,id3,id4,id5[,friend]"]（覆盖卡组，跳过 preset builds）
-                     	      [--deck-spec "c1,c2,c3,c4,c5"]（按张数取各属性池前排卡，单属性可>3）\n\
+                     	通用: [--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
+                     	      [--deck-spec 「c1,c2,c3,c4,c5」]（按张数取各属性池前排卡，单属性可>3）\n\
                      缺省参数读取 workspace 根 bench_config.toml"
                 );
                 std::process::exit(0);
