@@ -67,10 +67,15 @@ jobs:
                      "--deck-spec", ",".join(map(str, spec))]
               r = subprocess.run(cmd, capture_output=True, text=True)
               status = "ok" if r.returncode == 0 else f"FAIL({r.returncode})"
-              # 抓汇总行和卡组行
-              keep = [ln for ln in (r.stdout or "").splitlines()
-                      if "卡组" in ln or "汇总" in ln or "ERROR" in ln or "error" in ln]
-              print(f"[{tag}] {status} :: " + " | ".join(keep[-2:]), flush=True)
+              # 失败时打全 stderr 尾部 + stdout 尾部，成功时抓卡组/汇总行
+              if r.returncode != 0:
+                  tail_err = "\n".join((r.stderr or "").splitlines()[-8:])
+                  tail_out = "\n".join((r.stdout or "").splitlines()[-8:])
+                  print(f"[{tag}] {status}\n--- stdout 尾 ---\n{tail_out}\n--- stderr 尾 ---\n{tail_err}", flush=True)
+              else:
+                  keep = [ln for ln in (r.stdout or "").splitlines()
+                          if "卡组" in ln or "汇总" in ln]
+                  print(f"[{tag}] {status} :: " + " | ".join(keep[-2:]), flush=True)
               return (tag, r.returncode)
 
           with ThreadPoolExecutor(max_workers=3) as ex:
@@ -79,6 +84,7 @@ jobs:
           print(f"完成: {len(codes)-len(bad)}/{len(codes)} 成功")
           if bad:
               print("失败组合:", bad)
+              raise SystemExit(f"{len(bad)} 个组合失败，首个: {bad[0]}")
           EOF
 
       - name: Collect summary
