@@ -208,6 +208,8 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
     while let Some(arg) = parser.next()? {
         match arg {
             Arg::Long("runs") => cfg.runs = bench::parse_value(&mut parser, "runs")?,
+            Arg::Long("uma") => cfg.uma = bench::parse_value(&mut parser, "uma")?,
+            Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
             Arg::Long("seed") => cfg.seed = bench::parse_value(&mut parser, "seed")?,
             Arg::Long("log") => cfg.decision_log = true,
             Arg::Long("out") => cfg.out_dir = bench::parse_value(&mut parser, "out")?,
@@ -232,7 +234,8 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
 \n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
 \n                     	           [--radical-factor F] [--search-ucb true|false]
-                     	通用: [--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
+                     	通用: [--uma GAMEID] [--friend IDRANK]
+                     	      [--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
                      	      [--deck-spec 「c1,c2,c3,c4,c5」]（按张数取各属性池前排卡，单属性可>3）\n\
                      缺省参数读取 workspace 根 bench_config.toml"
                 );
