@@ -18,7 +18,7 @@
 //! # 产出（默认 `ga_logs/`）
 //!
 //! - `ga_generations.csv`：逐代摘要（最优/均值适应度、精评个体数、缓存命中、σ、停滞计数、holdout）
-//! - `ga_detail.csv`：逐局明细（评估级别 + 基因组哈希 + 适应度 + bench 31 列标准行）
+//! - `ga_detail.csv`：逐局明细（评估级别 + 基因组哈希 + 适应度 + bench 31 列标准行 + deck 列）
 //! - `best_genome.toml`：最优基因组的覆盖层 Some 子集（preset 快照，可直接人工评审）
 //! - `preset_baseline.toml`：基因表 preset 锚点快照（None 表示该位 preset 不可单值表示）
 //!
@@ -475,9 +475,12 @@ fn main() -> Result<()> {
         "holdout_mean_score",
         "elapsed_ms"
     ];
+    // 明细表头 = 级别/哈希/fitness + bench 31 列标准行 + deck（与 SimFitnessEvaluator
+    // 的 detail row 构造严格对齐：row 在 outcome_to_row 后追加了 deck 字符串）
     let detail_header: Vec<&str> = ["level", "genome_hash", "fitness"]
         .iter()
         .chain(RESULTS_HEADER.iter())
+        .chain(std::iter::once(&"deck"))
         .copied()
         .collect();
     bench::write_csv(&out_dir.join("ga_generations.csv"), &gen_header, &[])?;
