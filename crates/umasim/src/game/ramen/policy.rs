@@ -961,6 +961,16 @@ impl RamenPolicy {
         match a.operation {
             Operation::Train(_) => anyhow::bail!("score_train_action_other 不接受 Train 动作"),
             Operation::Race => {
+                // 合宿禁比赛（2026-09-17 用户规则；机制依据同上：合宿训练等级 5，
+                // 打自选比赛浪费 buff 回合）。生涯强制比赛回合走 is_race_turn，
+                // 不经过此分支，不受影响；守门 0 自选比赛截止仍最高优先（保育成）。
+                if game.is_xiahesu() {
+                    out.score = f32::NEG_INFINITY;
+                    if self.collect_details {
+                        out.reason = "合宿禁比赛(训练等级5)".to_string();
+                    }
+                    return Ok(out);
+                }
                 let (val, reason) = self.score_race(game)?;
                 out.score = val;
                 if self.collect_details {
@@ -974,11 +984,18 @@ impl RamenPolicy {
                 let mut val = self.config.rest_base + need * self.config.rest_vital_value;
                 // 高体力/合宿压制（2026-09-16 用户规则）：体力充裕时该练不该歇
                 // （智训体力增量+5、失败阈值仅 32）；合宿窗口训练收益高，休息即亏
+                if game.is_xiahesu() {
+                    // 合宿禁休息（2026-09-17 用户规则；机制依据：合宿训练等级拉满 5，
+                    // train_level 直接置 5）。保命口子：体力 <32 时守门 2 直接强制
+                    // 休息，不受此禁影响（守门优先级高于打分）。
+                    out.score = f32::NEG_INFINITY;
+                    if self.collect_details {
+                        out.reason = "合宿禁休息(训练等级5)".to_string();
+                    }
+                    return Ok(out);
+                }
                 if game.uma.vital >= REST_DISCOURAGE_VITAL {
                     val -= REST_DISCOURAGE_PENALTY;
-                }
-                if game.is_xiahesu() {
-                    val -= CAMP_REST_PENALTY;
                 }
                 out.score = val;
                 if self.collect_details {
