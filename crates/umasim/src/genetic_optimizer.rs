@@ -547,6 +547,12 @@ pub struct ScoreCard {
     pub race_fail_rate: f64,
     /// RMJ 成功年数均值（0-3）。
     pub mean_rmj_ok: f64,
+    /// 单局结算评分最高分（分布诊断，手写逻辑归纳用）。
+    pub max_score: f64,
+    /// 单局结算评分最低分（分布诊断）。
+    pub min_score: f64,
+    /// 单局结算评分中位数（分布诊断）。
+    pub median_score: f64,
     /// build 数。
     pub n_builds: usize,
     /// 每 build 局数。
@@ -688,8 +694,11 @@ impl SimFitnessEvaluator {
         let mut scenario_pt = [0.0f64; 3];
         let mut race_fails = 0.0f64;
         let mut rmj_ok_sum = 0.0f64;
+        let deck_str = deck.iter().map(|d| d.to_string()).collect::<Vec<_>>().join("+");
         for outcome in &outcomes {
-            rows.push(bench::outcome_to_row(&build_name, outcome));
+            let mut row = bench::outcome_to_row(&build_name, outcome);
+            row.push(deck_str.clone());
+            rows.push(row);
             scores.push(outcome.score as f64);
             skill_pts.push(outcome.skill_pt as f64);
             for (y, v) in scenario_pt.iter_mut().enumerate() {
@@ -708,6 +717,13 @@ impl SimFitnessEvaluator {
         for v in scenario_pt.iter_mut() {
             *v /= n;
         }
+        let mut sorted_scores = scores.clone();
+        sorted_scores.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median_score = if sorted_scores.len() % 2 == 1 {
+            sorted_scores[sorted_scores.len() / 2]
+        } else {
+            (sorted_scores[sorted_scores.len() / 2 - 1] + sorted_scores[sorted_scores.len() / 2]) / 2.0
+        };
         let card = ScoreCard {
             level,
             fitness,
@@ -717,6 +733,9 @@ impl SimFitnessEvaluator {
             mean_scenario_pt: scenario_pt,
             race_fail_rate,
             mean_rmj_ok: rmj_ok_sum / n,
+            max_score: scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            min_score: scores.iter().cloned().fold(f64::INFINITY, f64::min),
+            median_score,
             n_builds: 1,
             runs_per_build: runs
         };

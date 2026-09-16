@@ -381,10 +381,13 @@ fn override_to_toml(ov: &ParamOverride) -> String {
 /// 打印 ScoreCard 的诊断摘要（适应度公式各分量 + 诊断列）
 fn print_card_summary(label: &str, card: &umasim::genetic_optimizer::ScoreCard) {
     println!(
-        "  [{label}] fitness={:.1} mean_score={:.1}±{:.1} skill_pt={:.1} scenario_pt={:?} race_fail={:.3} rmj_ok={:.2}/3 ({}build×{}runs)",
+        "  [{label}] fitness={:.1} mean_score={:.1}±{:.1} max={:.0} min={:.0} median={:.0} skill_pt={:.1} scenario_pt={:?} race_fail={:.3} rmj_ok={:.2}/3 ({}build×{}runs)",
         card.fitness,
         card.mean_score,
         card.score_std,
+        card.max_score,
+        card.min_score,
+        card.median_score,
         card.mean_skill_pt,
         [format!("{:.0}", card.mean_scenario_pt[0]), format!("{:.0}", card.mean_scenario_pt[1]), format!("{:.0}", card.mean_scenario_pt[2])],
         card.race_fail_rate,
