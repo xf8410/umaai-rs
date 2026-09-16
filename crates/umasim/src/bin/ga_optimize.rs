@@ -574,6 +574,11 @@ fn main() -> Result<()> {
         }
         println!("最优卡组明细: comp_idx={} |{}", report.best_comp_idx, desc);
     }
+    // 最优基因组参数全透出（override_to_toml 仅含非默认 Some 项）：
+    // 供离线按配卡模式归纳手写调优逻辑，避免依赖 artifact 下载
+    println!("----- 最优基因组参数 BEGIN -----");
+    println!("{}", override_to_toml(&report.best_override));
+    println!("----- 最优基因组参数 END -----");
     print_card_summary("精评", &report.best_card);
     if let Some(h) = report.holdout_card.as_ref() {
         print_card_summary("holdout", h);
