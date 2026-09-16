@@ -1,0 +1,133 @@
+name: uma-scan
+
+# 多马娘同卡组跑分对比：CRN 配对（同一 seed 集 + 同一卡组，唯一变量 = 马娘）
+on:
+  workflow_dispatch:
+    inputs:
+      umas:
+        description: "逗号分隔的育成马娘 gameId 列表（基础版=chara*100+1）"
+        required: true
+      uma_names:
+        description: "可选：逗号分隔的名字列表（与 umas 一一对应，仅用于报告展示）"
+        required: false
+        default: ""
+      deck_spec:
+        description: "固定卡组（逗号分隔 idrank）"
+        required: false
+        default: "303174,303124,303044,303064,302894"
+      runs:
+        description: "每匹马跑的局数"
+        required: false
+        default: "30"
+      trainer:
+        description: "策略档"
+        required: false
+        default: "handwritten"
+      seed:
+        description: "起始种子（run i 用 seed+i，全部马娘共用同一 seed 集 → CRN）"
+        required: false
+        default: "42"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build bench_base
+        run: cargo build --release -p umasim --bin bench_base
+
+      - name: Run all umas (CRN paired)
+        run: |
+          python3 - <<'EOF'
+          import subprocess, os, csv, glob, io
+          import statistics as st
+          from concurrent.futures import ThreadPoolExecutor
+
+          UMAS = [u.strip() for u in "${{ inputs.umas }}".split(",") if u.strip()]
+          NAMES = [n.strip() for n in "${{ inputs.uma_names }}".split(",")] if "${{ inputs.uma_names }}".strip() else []
+          DECK = "${{ inputs.deck_spec }}".strip()
+          RUNS = "${{ inputs.runs }}".strip()
+          TRAINER = "${{ inputs.trainer }}".strip()
+          SEED = "${{ inputs.seed }}".strip()
+
+          # CRN：全部马娘共用同一 seed 集（seed + run_idx）
+          def run_one(args):
+              idx, uma = args
+              name = NAMES[idx] if idx < len(NAMES) else f"uma{uma}"
+              out = f"logs/{idx}_{uma}"
+              os.makedirs(out, exist_ok=True)
+              cmd = ["./target/release/bench_base",
+                     "--uma", uma, "--runs", RUNS, "--seed", SEED,
+                     "--trainer", TRAINER, "--out", out,
+                     "--deck-spec", DECK]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              if r.returncode != 0:
+                  return (idx, uma, name, None, r.stderr[-500:])
+              return (idx, uma, name, out, None)
+
+          with ThreadPoolExecutor(max_workers=3) as ex:
+              results = list(ex.map(run_one, enumerate(UMAS)))
+
+          # 汇总：每匹马的 bench_base_results.csv 逐局 fitness
+          rows = []
+          for idx, uma, name, out, err in results:
+              if err:
+                  print(f"[FAIL] {name}({uma}): {err}")
+                  continue
+              f = glob.glob(f"{out}/**/bench_base_results.csv", recursive=True)
+              if not f:
+                  f = glob.glob(f"{out}/**/*results*.csv", recursive=True)
+              if not f:
+                  print(f"[NOFILE] {name}({uma}) no results csv under {out}")
+                  continue
+              scores = []
+              with open(f[0], newline='') as fh:
+                  for row in csv.DictReader(fh):
+                      for key in ("fitness", "score", "final_score"):
+                          if key in row and row[key]:
+                              scores.append(float(row[key])); break
+              if not scores:
+                  with open(f[0]) as fh:
+                      print(f"[EMPTY] {name}({uma}) {f[0]} header={fh.readline()[:200]}")
+                  continue
+              rows.append((idx, uma, name, len(scores), scores))
+
+          rows.sort(key=lambda r: -st.mean(r[4]))
+          print("\n===== 排行（CRN 同种子同卡组，唯一变量=马娘） =====")
+          for idx, uma, name, n, scores in rows:
+              m = st.mean(scores)
+              md = st.median(scores)
+              sd = st.stdev(scores) if n > 1 else 0.0
+              print(f"{name:12s}({uma}) n={n:3d} mean={m:9.1f} median={md:9.1f} std={sd:7.1f} min={min(scores):9.1f} max={max(scores):9.1f}")
+
+          # summary csv
+          os.makedirs("summary", exist_ok=True)
+          with open("summary/uma_scan_summary.csv", "w", newline='') as fh:
+              w = csv.writer(fh)
+              w.writerow(["name", "gameId", "runs", "mean", "median", "std", "min", "max"])
+              for idx, uma, name, n, scores in rows:
+                  w.writerow([name, uma, n,
+                              f"{st.mean(scores):.2f}", f"{st.median(scores):.2f}",
+                              f"{(st.stdev(scores) if n>1 else 0):.2f}",
+                              f"{min(scores):.2f}", f"{max(scores):.2f}"])
+          EOF
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f summary/uma_scan_summary.csv ]; then
+            echo "## uma-scan 结果（CRN 配对）" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat summary/uma_scan_summary.csv >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uma-scan
+          path: |
+            logs/
+            summary/
+          retention-days: 14
