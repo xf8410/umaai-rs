@@ -1887,6 +1887,12 @@ impl RecommendedRamenTrainer {
             policy.effective_ramen_failure = false;
             // 残余收益折扣（方案 E）：主属性快满时打折副属性+PT，提前分流。初始 1.0 待矩阵验证。
             policy.cap_discount_weight = 1.0;
+            // 智力体力豁免开启（2026-09-16 用户规则：高体力不练智选休息=漏洞、
+            // 合宿疯狂休息=亏）：智训练体力增量 +5、失败阈值仅 32
+            // （training_vital_threshold[4]，其他位 51-54）——体力 >=32 时练智近乎
+            // 零风险，不再为省体力放弃智训回合。32 取自 gamedata/constants.json
+            // training_vital_threshold[4] 全干劲档最小值。
+            policy.wisdom_vital_floor = 32;
 
             let mut local = LocalRamenConfig::default();
             local.status_reserve_max = 40.0;

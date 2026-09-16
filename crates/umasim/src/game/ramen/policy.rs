@@ -15,6 +15,15 @@
 
 use anyhow::Result;
 
+/// 高体力时休息/外出的压制阈值（2026-09-16 用户规则：高体力该练不该歇）。
+/// 体力 >= 此值时休息/外出的机会成本大——智训练体力增量为正(+5)且失败阈值仅 32。
+pub const REST_DISCOURAGE_VITAL: i32 = 70;
+/// 高体力时休息/外出的压制力度
+pub const REST_DISCOURAGE_PENALTY: f32 = 200.0;
+/// 夏合宿窗口（turn 36-39 / 60-63，`BaseGame::is_xiahesu()`）休息/外出额外压制：
+/// 合宿训练收益高，休息机会成本大
+pub const CAMP_REST_PENALTY: f32 = 300.0;
+
 use super::{
     effects::{RamenTrainingEffect, apply_ramen_training_effect, calc_ramen_training_effect_with_ramen},
     rules::{calc_ramen_pt_gain, get_region_range, get_super_ramen_clone_train_options},
