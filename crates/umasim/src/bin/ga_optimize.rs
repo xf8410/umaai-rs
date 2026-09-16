@@ -487,6 +487,13 @@ fn main() -> Result<()> {
     for (i, name) in umasim::card_pool::ATTR_NAMES.iter().enumerate() {
         println!("  {}{}: {} 张", name, umasim::card_pool::ATTR_NAMES_ZH[i], pool.pool_size(i));
     }
+    // 卡名映射表（池序 card_id 降序，与 get_idrank 的 idx 对齐）：pool 交给 evaluator 前抽出，
+    // 供最优卡组明细输出使用
+    let pool_cards: Vec<Vec<(u32, String)>> = pool
+        .pools
+        .iter()
+        .map(|cards| cards.iter().map(|c| (c.idrank, c.full_name.clone())).collect())
+        .collect();
     let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, params.clone(), pool)
         .context("构造 SimFitnessEvaluator 失败")?;
 
@@ -543,6 +550,30 @@ fn main() -> Result<()> {
         umasim::genetic_optimizer::genome_hash(&report.best_genome)
     );
     println!("最优配卡选择: {:?}", report.best_card_sel.indices);
+    // 最优卡组完整明细：布局（每属性张数）+ 每张卡（idrank + 全名，连续段同属性相邻）
+    {
+        let counts = bench::all_compositions()[report.best_comp_idx];
+        let mut desc = String::new();
+        for (attr, &count) in counts.iter().enumerate() {
+            if count == 0 {
+                continue;
+            }
+            let names: Vec<String> = (0..count)
+                .map(|j| {
+                    let idx = report.best_card_sel.indices[attr] + j;
+                    let (idrank, name) = &pool_cards[attr][idx];
+                    format!("{idrank} {name}")
+                })
+                .collect();
+            desc.push_str(&format!(
+                " {}×{}[{}]",
+                umasim::card_pool::ATTR_NAMES_ZH[attr],
+                count,
+                names.join(", ")
+            ));
+        }
+        println!("最优卡组明细: comp_idx={} |{}", report.best_comp_idx, desc);
+    }
     print_card_summary("精评", &report.best_card);
     if let Some(h) = report.holdout_card.as_ref() {
         print_card_summary("holdout", h);
