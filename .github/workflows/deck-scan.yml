@@ -1,0 +1,127 @@
+name: deck-scan
+
+on:
+  workflow_dispatch:
+    inputs:
+      uma:
+        description: '马娘 gameId（如 109401=森林宝穴）'
+        default: '109401'
+      runs:
+        description: '每组合局数'
+        default: '30'
+      trainer:
+        description: '训练员：handwritten|mcts|random'
+        default: 'handwritten'
+      seed:
+        description: '基础种子（第 i 局 = seed + i，同 spec 间可比）'
+        default: '42'
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build once
+        run: cargo build --release -p umasim --bin bench_base
+
+      - name: Scan all deck compositions (speed 0-5 × 全排列)
+        run: |
+          python3 - <<'EOF'
+          import subprocess, itertools, os
+          from concurrent.futures import ThreadPoolExecutor
+
+          UMA = "${{ inputs.uma }}"
+          RUNS = "${{ inputs.runs }}"
+          TRAINER = "${{ inputs.trainer }}"
+          SEED = "${{ inputs.seed }}"
+
+          # 张数分布枚举：speed 张数 0..=5，剩余张数分布到 耐/力/根/智（无单属性上限）
+          def dists(n, k):
+              if k == 1:
+                  yield (n,)
+                  return
+              for i in range(n + 1):
+                  for tail in dists(n - i, k - 1):
+                      yield (i,) + tail
+
+          specs = []
+          for sp in range(6):
+              for d in dists(5 - sp, 4):
+                  specs.append((sp,) + d)
+          print(f"共 {len(specs)} 种张数组合", flush=True)
+
+          TAG = ["s", "t", "l", "g", "z"]  # 速耐力根智
+          def run_one(spec):
+              tag = "".join(f"{t}{n}" for t, n in zip(TAG, spec) if n > 0) or "all0"
+              out = f"logs/{tag}"
+              os.makedirs(out, exist_ok=True)
+              cmd = ["./target/release/bench_base",
+                     "--uma", UMA, "--runs", RUNS, "--seed", SEED,
+                     "--trainer", TRAINER, "--out", out,
+                     "--deck-spec", ",".join(map(str, spec))]
+              r = subprocess.run(cmd, capture_output=True, text=True)
+              status = "ok" if r.returncode == 0 else f"FAIL({r.returncode})"
+              # 抓汇总行和卡组行
+              keep = [ln for ln in (r.stdout or "").splitlines()
+                      if "卡组" in ln or "汇总" in ln or "ERROR" in ln or "error" in ln]
+              print(f"[{tag}] {status} :: " + " | ".join(keep[-2:]), flush=True)
+              return (tag, r.returncode)
+
+          with ThreadPoolExecutor(max_workers=3) as ex:
+              codes = list(ex.map(run_one, specs))
+          bad = [t for t, c in codes if c != 0]
+          print(f"完成: {len(codes)-len(bad)}/{len(codes)} 成功")
+          if bad:
+              print("失败组合:", bad)
+          EOF
+
+      - name: Collect summary
+        if: always()
+        run: |
+          python3 - <<'EOF'
+          import csv, glob, os
+          import statistics as st
+          rows = []
+          for f in sorted(glob.glob("logs/*/bench_base_results.csv")):
+              tag = os.path.basename(os.path.dirname(f))
+              rec = list(csv.DictReader(open(f)))
+              if not rec:
+                  continue
+              sc = sorted(float(r["score"]) for r in rec)
+              n = len(sc)
+              mean = st.mean(sc)
+              med = sc[n // 2]
+              sd = st.pstdev(sc)
+              five = [st.mean(float(r[k]) for r in rec) for k in
+                      ("speed", "stamina", "power", "guts", "wisdom")]
+              spt = st.mean(float(r["skill_pt"]) for r in rec)
+              rows.append((tag, n, mean, med, max(sc), min(sc), sd, five, spt))
+          rows.sort(key=lambda x: -x[2])
+          with open("logs/scan_summary.csv", "w", newline="") as fh:
+              w = csv.writer(fh)
+              w.writerow(["spec", "runs", "mean", "median", "max", "min", "std",
+                          "speed", "stamina", "power", "guts", "wisdom", "skill_pt"])
+              for tag, n, mean, med, mx, mn, sd, five, spt in rows:
+                  w.writerow([tag, n, f"{mean:.0f}", f"{med:.0f}", f"{mx:.0f}", f"{mn:.0f}",
+                              f"{sd:.0f}", *[f"{x:.0f}" for x in five], f"{spt:.0f}"])
+          print(f"{'组合':>12} {'n':>3} {'mean':>7} {'med':>7} {'max':>7} {'min':>7} {'std':>5}  速/耐/力/根/智  skill_pt")
+          for tag, n, mean, med, mx, mn, sd, five, spt in rows:
+              fv = "/".join(f"{x:.0f}" for x in five)
+              print(f"{tag:>12} {n:>3} {mean:>7.0f} {med:>7.0f} {mx:>7.0f} {mn:>7.0f} {sd:>5.0f}  {fv}  {spt:.0f}")
+          EOF
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deck-scan-uma${{ inputs.uma }}
+          path: |
+            logs/scan_summary.csv
+            logs/*/bench_base_results.csv
+          retention-days: 14

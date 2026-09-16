@@ -32,6 +32,7 @@ use rayon::ThreadPoolBuilder;
 use serde::Deserialize;
 use umasim::{
     bench::{self, CardPickOpts, RESULTS_HEADER, load_player_builds, outcome_to_row},
+    card_pool::SsrPool,
     game::InheritInfo,
     gamedata::{GAMEDATA, RamenRegionStrategy, init_global_with_config},
     global,
@@ -102,7 +103,17 @@ struct BenchConfig {
     /// 非零时 `best_action_idx` 按 `weighted_mean(radical_factor)` 排序，偏向好运尾部，
     /// 那样测出来的就不是「搜索能否提高**均分**」。要复现 C++ 风格行为再手动调高。
     #[serde(default)]
-    radical_factor_max: f64
+    radical_factor_max: f64,
+    /// 覆盖卡组：idrank 逗号分隔串 `"id1,id2,id3,id4,id5[,friend]"`。
+    /// 传 5 个时友人位用 `friend`。指定后跳过 preset builds，只跑这一组卡
+    /// （标签 `custom_deck`），用于配卡对照实验（如速卡张数扫描）。
+    #[serde(default)]
+    deck: Option<String>,
+    /// 覆盖卡组（张数模式）：`"c1,c2,c3,c4,c5"` = [速,耐,力,根,智] 各属性张数（合计=5）。
+    /// 每属性取 SSR 池（card_id 降序）前 count 张，友人位用 `friend`。
+    /// 允许单属性 > 3（如速 5），不受布局表约束，用于速卡强度扫描实验。
+    #[serde(default)]
+    deck_spec: Option<String>
 }
 
 /// `search_n` 缺省值：小预算档，够跑通又不至于把跑批时间拖爆
@@ -145,9 +156,50 @@ impl Default for BenchConfig {
             search_ucb: default_search_ucb(),
             tokens: String::new(),
             region_weak_cover: None,
-            radical_factor_max: 0.0
+            radical_factor_max: 0.0,
+            deck: None,
+            deck_spec: None
         }
     }
+}
+
+/// 解析 `--deck` 覆盖串：`"id1,id2,id3,id4,id5[,friend]"`（idrank）。
+/// 传 5 个时友人位取 `friend`。不校验卡存在性——不存在会在跑局时由卡池层报错。
+fn parse_deck_override(s: &str, friend: u32) -> Result<[u32; 6]> {
+    let parts: Vec<&str> = s.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+    anyhow::ensure!(
+        parts.len() == 5 || parts.len() == 6,
+        "--deck 需要 5 个支援卡 idrank（友人可省略）或 6 个含友人，收到 {} 个: {s}",
+        parts.len()
+    );
+    let v = parts
+        .iter()
+        .map(|t| t.parse::<u32>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("--deck idrank 解析失败: {e}"))?;
+    let mut deck = [0u32; 6];
+    deck[..5].copy_from_slice(&v[..5]);
+    deck[5] = if v.len() == 6 { v[5] } else { friend };
+    Ok(deck)
+}
+
+/// 解析 `--deck-spec` 张数串：`"c1,c2,c3,c4,c5"` = [速,耐,力,根,智] 各属性张数（合计=5）。
+/// 允许单属性 > 3（不受 `all_compositions()` 布局表约束；真实游戏规则只要求 6 张卡不重复）。
+fn parse_deck_spec(s: &str) -> Result<[usize; 5]> {
+    let parts: Vec<&str> = s.split(',').map(str::trim).filter(|t| !t.is_empty()).collect();
+    anyhow::ensure!(parts.len() == 5, "--deck-spec 需要 5 个张数（速,耐,力,根,智），收到 {} 个: {s}", parts.len());
+    let v = parts
+        .iter()
+        .map(|t| t.parse::<usize>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow::anyhow!("--deck-spec 张数解析失败: {e}"))?;
+    let counts = [v[0], v[1], v[2], v[3], v[4]];
+    anyhow::ensure!(
+        counts.iter().sum::<usize>() == 5,
+        "--deck-spec 张数合计必须 = 5，收到 {:?}",
+        counts
+    );
+    Ok(counts)
 }
 
 /// 解析 CLI 参数（`--key value` 或 `--key=value`），覆盖 bench 配置
@@ -170,6 +222,8 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
             Arg::Long("region-weak-cover") => {
                 cfg.region_weak_cover = Some(bench::parse_value(&mut parser, "region-weak-cover")?)
             }
+            Arg::Long("deck") => cfg.deck = Some(bench::parse_value(&mut parser, "deck")?),
+            Arg::Long("deck-spec") => cfg.deck_spec = Some(bench::parse_value(&mut parser, "deck-spec")?),
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: bench_base [--runs N] [--seed S] [--log] [--out DIR]
@@ -177,7 +231,9 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
 \n                     	handwritten 专用: [--tokens TOKEN串]（如 --tokens rgn1 / rgn2 / reserve20）
 \n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
-\n                     	           [--radical-factor F] [--search-ucb true|false]\n\
+\n                     	           [--radical-factor F] [--search-ucb true|false]
+                     	通用: [--deck "id1,id2,id3,id4,id5[,friend]"]（覆盖卡组，跳过 preset builds）
+                     	      [--deck-spec "c1,c2,c3,c4,c5"]（按张数取各属性池前排卡，单属性可>3）\n\
                      缺省参数读取 workspace 根 bench_config.toml"
                 );
                 std::process::exit(0);
@@ -288,10 +344,32 @@ fn main() -> Result<()> {
     }
 
     let pick = CardPickOpts::default();
-    let mut all_results: Vec<BuildResults> = Vec::with_capacity(builds.len());
+    anyhow::ensure!(
+        cfg.deck.is_none() || cfg.deck_spec.is_none(),
+        "--deck 与 --deck-spec 互斥，只能选一个"
+    );
+    // --deck / --deck-spec 覆盖模式：只跑一组自定义卡组；否则按 preset builds 自动拉卡
+    let deck_jobs: Vec<(String, [u32; 6])> = if let Some(ds) = &cfg.deck {
+        vec![("custom_deck".to_string(), parse_deck_override(ds, cfg.friend)?)]
+    } else if let Some(spec) = &cfg.deck_spec {
+        // 张数模式：每属性取 SSR 池（card_id 降序）前 count 张，与 GA 池序口径一致
+        let counts = parse_deck_spec(spec)?;
+        let pool = SsrPool::load_filtered(&[])?;
+        let sel = umasim::card_pool::CardSelection {
+            indices: [0; 5],
+            friend_idrank: cfg.friend
+        };
+        let deck = sel.build_deck(&pool, &counts)?;
+        vec![("custom_deck".to_string(), deck)]
+    } else {
+        builds
+            .iter()
+            .map(|b| Ok((b.name(), b.make_deck(&pick, cfg.friend)?)))
+            .collect::<Result<Vec<_>>>()?
+    };
+    let mut all_results: Vec<BuildResults> = Vec::with_capacity(deck_jobs.len());
     let mut all_rows: Vec<DecisionLogRow> = Vec::new();
-    for (idx, build) in builds.iter().enumerate() {
-        let deck = build.make_deck(&pick, cfg.friend)?;
+    for (idx, (build_name, deck)) in deck_jobs.iter().enumerate() {
         // 打印卡组信息（含卡名）
         let cards_desc = deck
             .iter()
@@ -301,7 +379,7 @@ fn main() -> Result<()> {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        println!("[{}] {} 卡组: [{}]", idx + 1, build.name(), cards_desc);
+        println!("[{}] {} 卡组: [{}]", idx + 1, build_name, cards_desc);
 
         let mut outcomes = Vec::with_capacity(cfg.runs);
         for i in 0..cfg.runs {
@@ -360,7 +438,7 @@ fn main() -> Result<()> {
                 outcome.elapsed_ms,
             );
             if cfg.decision_log {
-                log.save_to(&out_dir.join(format!("bench_base_decision_{}_{}.csv", build.name(), run_idx)))?;
+                log.save_to(&out_dir.join(format!("bench_base_decision_{}_{}.csv", build_name, run_idx)))?;
             }
             all_rows.extend(log.rows);
             outcomes.push(outcome);
@@ -372,7 +450,7 @@ fn main() -> Result<()> {
         let rmj_mean = outcomes.iter().map(|r| r.rmj_ok as f64).sum::<f64>() / outcomes.len().max(1) as f64;
         println!(
             "  {} 汇总: mean={:.0} median={:.0} min={:.0} max={:.0} std={:.0} RMJ={:.2}/3 自选比赛达标={:.0}%",
-            build.name(),
+            build_name,
             stats.mean,
             stats.median,
             stats.min,
@@ -381,7 +459,7 @@ fn main() -> Result<()> {
             rmj_mean,
             free_race_rate(&outcomes) * 100.0,
         );
-        all_results.push(BuildResults { name: build.name(), outcomes });
+        all_results.push(BuildResults { name: build_name.clone(), outcomes });
     }
 
     // ===== 落盘结果 CSV（合并单文件，build 列为第一列）=====
