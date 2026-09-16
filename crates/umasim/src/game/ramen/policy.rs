@@ -477,6 +477,40 @@ impl RamenPolicy {
             }
         }
 
+        // 守门 4：友人出行截止紧迫（2026-09-16 用户规则）
+        // 友人 5 次出行必须在最后可出行回合前用完：游戏规则 turn 72（第三年 12 月下）
+        // 起禁止友人（can_friend_outing: turn<72），turn 71（12 月上）是最后机会；
+        // 若 71 及之前的回合是比赛回合（强制 Race，无法友人），实际可用回合数减少
+        // ——连战依次前移。URA 决赛回合系统回复体力，不存在"为年末攒体力而推迟
+        // 友人"的必要：不提前出行就是亏。剩余次数 >= 剩余可用回合时强制友人，
+        // 否则排不下、次数作废。
+        let outings_left = 5 - game.friend.out_used.iter().filter(|&&x| x).count();
+        if outings_left > 0 {
+            let turns_left = (game.turn() + 1..=71)
+                .filter(|t| !game.uma.is_race_turn(*t))
+                .count();
+            if outings_left >= turns_left {
+                if let Some(idx) = actions
+                    .iter()
+                    .position(|a| a.operation == Operation::FriendOuting)
+                {
+                    scores.push(RamenPolicyOutput {
+                        score: f32::MAX,
+                        reason: if self.collect_details {
+                            format!(
+                                "守门: 友人紧迫(剩{}次/剩{}回合)",
+                                outings_left, turns_left
+                            )
+                        } else {
+                            String::new()
+                        },
+                        ..Default::default()
+                    });
+                    return Ok(idx);
+                }
+            }
+        }
+
         // 打分选择
         self.score_train_actions_cached(game, actions, ramen, eval_cache, scores)?;
         Ok(argmax_index(scores))
@@ -937,7 +971,15 @@ impl RamenPolicy {
             Operation::Rest => {
                 // 休息价值：恢复体力×边际价值 + 基础值（体力越低越值）
                 let need = (self.config.rest_target_vital - game.uma.vital).max(0) as f32;
-                let val = self.config.rest_base + need * self.config.rest_vital_value;
+                let mut val = self.config.rest_base + need * self.config.rest_vital_value;
+                // 高体力/合宿压制（2026-09-16 用户规则）：体力充裕时该练不该歇
+                // （智训体力增量+5、失败阈值仅 32）；合宿窗口训练收益高，休息即亏
+                if game.uma.vital >= REST_DISCOURAGE_VITAL {
+                    val -= REST_DISCOURAGE_PENALTY;
+                }
+                if game.is_xiahesu() {
+                    val -= CAMP_REST_PENALTY;
+                }
                 out.score = val;
                 if self.collect_details {
                     out.add("rest", val);
@@ -945,7 +987,16 @@ impl RamenPolicy {
                 }
             }
             Operation::NormalOuting => {
-                out.score = self.config.outing_base;
+                let mut val = self.config.outing_base;
+                // 高体力/合宿压制（同 Rest）：干劲已满时普通外出≈纯回体，浪费回合。
+                // 干劲不满时的外出价值仍由守门 3 兜底，这里只压打分阶段的冗余外出。
+                if game.uma.vital >= REST_DISCOURAGE_VITAL {
+                    val -= REST_DISCOURAGE_PENALTY;
+                }
+                if game.is_xiahesu() {
+                    val -= CAMP_REST_PENALTY;
+                }
+                out.score = val;
                 if self.collect_details {
                     out.add("outing", self.config.outing_base);
                     out.reason = "普通外出".to_string();
