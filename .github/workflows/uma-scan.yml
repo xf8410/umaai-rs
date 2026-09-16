@@ -12,7 +12,7 @@ on:
         required: false
         default: ""
       deck_spec:
-        description: "固定卡组（逗号分隔 idrank）"
+        description: "固定卡组（逗号分隔 5 个支援卡 id，透传给 bench_base --deck）"
         required: false
         default: "303174,303124,303044,303064,302894"
       runs:
@@ -60,7 +60,7 @@ jobs:
               cmd = ["./target/release/bench_base",
                      "--uma", uma, "--runs", RUNS, "--seed", SEED,
                      "--trainer", TRAINER, "--out", out,
-                     "--deck-spec", DECK]
+                     "--deck", DECK]
               r = subprocess.run(cmd, capture_output=True, text=True)
               if r.returncode != 0:
                   return (idx, uma, name, None, r.stderr[-500:])
