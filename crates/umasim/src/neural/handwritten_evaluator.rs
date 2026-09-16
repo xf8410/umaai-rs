@@ -73,6 +73,37 @@ const OUTGOING_BONUS_IF_NOT_FULL_MOTIVATION: f64 = 200.0;
 const FINAL_BONUS: i32 = 45 + 30 + 20 + 20; // URA3 + 最终事件 + URA2 + URA1
 
 // ============================================================================
+// 行为修正常量（2026-09-16 修复：高体力乱歇 / 合宿乱歇 / 友人排程）
+// ============================================================================
+
+/// 合宿回合窗口（夏合宿开始+奖励回合，来源 scenario_ramen.json trigger turns）
+const CAMP_TURN_WINDOWS: [(i32, i32); 2] = [(36, 39), (60, 63)];
+
+/// 体力高于此值时休息/外出的机会成本大（应优先训练）
+const VITAL_HIGH_TRAIN_THRESHOLD: i32 = 70;
+
+/// 体力充裕时休息的惩罚（练什么都比歇着强）
+const REST_WHEN_VITAL_HIGH_PENALTY: f64 = 400.0;
+
+/// 合宿期间休息的惩罚（合宿回合训练机会成本大，疯狂休息纯亏）
+const CAMP_REST_PENALTY: f64 = 500.0;
+
+/// 合宿期间训练加成（合宿窗口多练少歇）
+const CAMP_TRAIN_BONUS: f64 = 300.0;
+
+/// 友人出行的最后允许回合（游戏规则 turn<72 禁友人；71=第三年12月上）
+const FRIEND_OUTING_LAST_TURN: i32 = 71;
+
+/// 友人紧迫：剩余次数 >= 剩余可用回合时的基础加成（再不去就浪费次数了）
+const FRIEND_URGENT_BONUS: f64 = 1200.0;
+
+/// 友人紧迫：每多挤不下一次的追加加成
+const FRIEND_SHORTFALL_STEP: f64 = 800.0;
+
+/// 友人紧迫：接近截止（次数+1 >= 剩余回合）时的温和提前加成
+const FRIEND_PRE_URGENT_BONUS: f64 = 300.0;
+
+// ============================================================================
 // 挖掘评估相关常量
 // ============================================================================
 
@@ -202,6 +233,11 @@ fn should_skip_vital_penalty(game: &OnsenGame) -> bool {
     game.onsen_state[SECRET_ONSEN_INDEX]
 }
 
+/// 是否处于夏合宿回合窗口
+fn is_camp_turn(turn: i32) -> bool {
+    CAMP_TURN_WINDOWS.iter().any(|(s, e)| turn >= *s && turn <= *e)
+}
+
 pub fn load_onsen_order() -> Result<OnsenOrder> {
     // 1. 先读取配置文件
     let game_config = load_game_config()?;
@@ -288,6 +324,39 @@ impl HandwrittenEvaluator {
         }
 
         false
+    }
+
+    /// 计算友人出行的排程紧迫度加成
+    ///
+    /// # 用户规则（2026-09-16）
+    /// - 友人 5 次出行必须在最后可出行回合前用完（turn 71=第三年12月上；
+    ///   turn 72 起游戏规则禁止友人出行）
+    /// - 截止回合本身是比赛回合时（生涯连战），实际最后机会依次前移
+    /// - URA 决赛回合系统会回复体力，不需要为攒体力推迟友人——不提前出行就是亏
+    ///
+    /// # 返回
+    /// 加到友人外出价值上的紧迫度分（可正可 0）
+    fn friend_urgency_bonus(&self, game: &OnsenGame) -> f64 {
+        let outings_left = game.friend.out_used.iter().filter(|u| !**u).count() as i32;
+        if outings_left == 0 {
+            return 0.0;
+        }
+        // 剩余可出行回合：当前回合到截止回合之间，跳过比赛回合（比赛强制 Race）
+        let turns_left = (game.turn..=FRIEND_OUTING_LAST_TURN)
+            .filter(|t| !game.uma.is_race_turn(*t))
+            .count() as i32;
+        if turns_left <= 0 {
+            return 0.0;
+        }
+        if outings_left >= turns_left {
+            // 次数比剩余机会还多：现在必须去，缺口越大力度越大
+            FRIEND_URGENT_BONUS + FRIEND_SHORTFALL_STEP * (outings_left - turns_left) as f64
+        } else if outings_left + 1 >= turns_left {
+            // 快到截止：温和提前，避免拖到最后挤不下
+            FRIEND_PRE_URGENT_BONUS
+        } else {
+            0.0
+        }
     }
 
     /// 计算友人外出的超回复相关价值调整
@@ -635,7 +704,14 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
         //let mut debug_line = String::new();
         for action in &actions {
             let value = match action {
-                OnsenAction::Train(t) => self.evaluate_training(game, *t as usize),
+                OnsenAction::Train(t) => {
+                    let mut value = self.evaluate_training(game, *t as usize);
+                    // 合宿窗口多练少歇：训练机会成本低于平时
+                    if is_camp_turn(game.turn) {
+                        value += CAMP_TRAIN_BONUS;
+                    }
+                    value
+                }
 
                 OnsenAction::Sleep => {
                     // 挖掘完成 8 个温泉后，休息价值大幅降低（体力不再重要）
@@ -648,6 +724,14 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
                         let vital_after = (game.uma.vital + vital_gain).min(game.uma.max_vital);
                         let mut value =
                             vital_factor * (vital_evaluation(vital_after, game.uma.max_vital) - vital_before);
+                        // 体力充裕时休息机会成本大：练什么都比歇着强
+                        if game.uma.vital >= VITAL_HIGH_TRAIN_THRESHOLD {
+                            value -= REST_WHEN_VITAL_HIGH_PENALTY;
+                        }
+                        // 合宿期间疯狂休息纯亏
+                        if is_camp_turn(game.turn) {
+                            value -= CAMP_REST_PENALTY;
+                        }
                         // 休息也有挖掘收益
                         value += self.evaluate_dig_value(game, action);
                         value
@@ -671,6 +755,16 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
                         if game.uma.motivation < 5 {
                             value += OUTGOING_BONUS_IF_NOT_FULL_MOTIVATION;
                         }
+                        // 干劲已满时普通外出≈纯回体；体力充裕/合宿时压制
+                        // （干劲不满时外出有真实干劲收益，保留）
+                        if game.uma.motivation >= 5 {
+                            if game.uma.vital >= VITAL_HIGH_TRAIN_THRESHOLD {
+                                value -= REST_WHEN_VITAL_HIGH_PENALTY;
+                            }
+                            if is_camp_turn(game.turn) {
+                                value -= CAMP_REST_PENALTY;
+                            }
+                        }
                         // 普通外出有挖掘收益
                         value += self.evaluate_dig_value(game, action);
                         value
@@ -693,6 +787,10 @@ impl Evaluator<OnsenGame> for HandwrittenEvaluator {
                         // - 已有超回复时：不调整
                         value += self.calc_friend_outing_super_adjustment(game);
                     }
+
+                    // 排程紧迫度：5 次出行必须在最后可用回合（12月上；连战再往前推）前用完，
+                    // 不提前出行就是亏（URA 决赛回合会回体力，攒体力不是推迟友人的理由）
+                    value += self.friend_urgency_bonus(game);
 
                     // 友人外出有挖掘收益
                     value += self.evaluate_dig_value(game, action);
