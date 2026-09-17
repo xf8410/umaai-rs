@@ -233,6 +233,7 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
             }
             Arg::Long("deck") => cfg.deck = Some(bench::parse_value(&mut parser, "deck")?),
             Arg::Long("deck-spec") => cfg.deck_spec = Some(bench::parse_value(&mut parser, "deck-spec")?),
+            Arg::Long("builds") => cfg.builds_filter = Some(bench::parse_value(&mut parser, "builds")?),
             Arg::Long("genome-file") => {
                 cfg.genome_file = Some(bench::parse_value(&mut parser, "genome-file")?)
             }
