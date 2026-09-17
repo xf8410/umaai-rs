@@ -420,7 +420,8 @@ fn main() -> Result<()> {
                         // 决策与 GA 评估时逐位一致（同 trainer 逻辑），--log 产出育成过程报告。
                         let toml_str = std::fs::read_to_string(gf)
                             .with_context(|| format!("无法读取 --genome-file {gf}"))?;
-                        let ov = local_ramen_trainer::parse_override_toml(&toml_str)?;
+                        let ov = local_ramen_trainer::parse_override_toml(&toml_str)
+                            .map_err(|e| anyhow::anyhow!("--genome-file 解析失败: {e}"))?;
                         println!("已加载基因组覆盖层: {gf}");
                         LoggingTrainer::new(RecommendedRamenTrainer::with_overrides(&ov), log_seed)
                     } else if let Some(w) = cfg.region_weak_cover {
