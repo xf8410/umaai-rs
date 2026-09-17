@@ -2147,6 +2147,146 @@ pub struct ParamOverride {
     pub dynamic_special_targets: Option<bool>
 }
 
+/// 解析机器生成的 TOML 覆盖层（genetic_optimizer `override_to_toml` 输出的
+/// `best_genome.toml` 同格式）：跳过段头/注释行，仅接受 `key = value` 规整行；
+/// 三元数组中的 `null` 表示该槽位保持 preset。任何未知键/类型不匹配直接 Err
+/// （硬失败，宁可报错也不静默丢覆盖字段）。
+///
+/// CLI 入口：`bench_base --genome-file <path.toml>`，用于 GA 最优基因组回放
+/// 与育成过程报告（决策日志）生成。
+pub fn parse_override_toml(s: &str) -> Result<ParamOverride, String> {
+    fn parse3<T: std::str::FromStr>(val: &str, key: &str) -> Result<[Option<T>; 3], String> {
+        let inner = val.trim_start_matches('[').trim_end_matches(']');
+        let parts: Vec<&str> = inner.split(',').map(|x| x.trim()).collect();
+        if parts.len() != 3 {
+            return Err(format!("parse_override_toml: {key} 数组长度不是 3: {val}"));
+        }
+        let mut out: [Option<T>; 3] = [None, None, None];
+        for (i, p) in parts.iter().enumerate() {
+            if *p != "null" && !p.is_empty() {
+                out[i] = Some(p.parse::<T>().map_err(|_| {
+                    format!("parse_override_toml: {key}[{i}] = {p} 解析失败")
+                })?);
+            }
+        }
+        Ok(out)
+    }
+    let mut ov = ParamOverride::default();
+    let mut n_set = 0usize;
+    for raw in s.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        let (k, v) = match line.split_once('=') {
+            Some(kv) => kv,
+            None => return Err(format!("parse_override_toml: 缺少 '=' 的行: {line}")),
+        };
+        let key = k.trim();
+        let val = v.trim().trim_end_matches(',').trim();
+        if val.starts_with('[') {
+            match key {
+                "vital_rest_eating" => ov.vital_rest_eating = parse3::<i32>(val, key)?,
+                "pt_rate" => ov.pt_rate = parse3::<f32>(val, key)?,
+                "friend_outing_cumulative_caps" => ov.friend_outing_cumulative_caps = parse3::<usize>(val, key)?,
+                _ => return Err(format!("parse_override_toml: 未知数组键: {key}")),
+            }
+            n_set += 1;
+            continue;
+        }
+        macro_rules! scalar {
+            ($($name:literal => $field:ident : $t:ty),* $(,)?) => {
+                match key {
+                    $($name => {
+                        if val == "null" {
+                            ov.$field = None;
+                        } else {
+                            ov.$field = Some(val.parse::<$t>().map_err(|_| {
+                                format!("parse_override_toml: {key} = {val} 解析失败")
+                            })?);
+                        }
+                        n_set += 1;
+                    })*
+                    _ => return Err(format!("parse_override_toml: 未知键: {key}")),
+                }
+            };
+        }
+        scalar! {
+            "vital_rest" => ov.vital_rest : i32,
+            "wisdom_vital_floor" => ov.wisdom_vital_floor : i32,
+            "motivation_outing" => ov.motivation_outing : i32,
+            "status_rate" => ov.status_rate : f32,
+            "pt_tradeoff" => ov.pt_tradeoff : f32,
+            "pt_tradeoff_shining" => ov.pt_tradeoff_shining : f32,
+            "pt_tradeoff_super" => ov.pt_tradeoff_super : f32,
+            "cap_discount_weight" => ov.cap_discount_weight : f32,
+            "failure_penalty" => ov.failure_penalty : f32,
+            "effective_ramen_failure" => ov.effective_ramen_failure : bool,
+            "shining_bonus" => ov.shining_bonus : f32,
+            "train_vital_value" => ov.train_vital_value : f32,
+            "rest_base" => ov.rest_base : f32,
+            "rest_vital_value" => ov.rest_vital_value : f32,
+            "rest_target_vital" => ov.rest_target_vital : i32,
+            "race_panel_discount" => ov.race_panel_discount : f32,
+            "race_free_urgency_weight" => ov.race_free_urgency_weight : f32,
+            "race_gate_slack" => ov.race_gate_slack : u32,
+            "outing_base" => ov.outing_base : f32,
+            "friend_outing_bonus" => ov.friend_outing_bonus : f32,
+            "ramen_pt_weight" => ov.ramen_pt_weight : f32,
+            "ramen_effect_weight" => ov.ramen_effect_weight : f32,
+            "ramen_special_cost" => ov.ramen_special_cost : f32,
+            "ramen_stock_cost" => ov.ramen_stock_cost : f32,
+            "region_xunlian_weight" => ov.region_xunlian_weight : f32,
+            "region_hint_weight" => ov.region_hint_weight : f32,
+            "region_youqing_weight" => ov.region_youqing_weight : f32,
+            "region_weak_cover_weight" => ov.region_weak_cover_weight : f32,
+            "event_vital_weight" => ov.event_vital_weight : f32,
+            "event_motivation_weight" => ov.event_motivation_weight : f32,
+            "event_bad_flag_penalty" => ov.event_bad_flag_penalty : f32,
+            "early_bond_value" => ov.early_bond_value : f32,
+            "hint_bonus" => ov.hint_bonus : f32,
+            "first_friend_click_value" => ov.first_friend_click_value : f32,
+            "low_friend_bond_value" => ov.low_friend_bond_value : f32,
+            "active_friend_value" => ov.active_friend_value : f32,
+            "feeling_overflow_threshold" => ov.feeling_overflow_threshold : i32,
+            "overflow_value" => ov.overflow_value : f32,
+            "max_base_score_sacrifice" => ov.max_base_score_sacrifice : f32,
+            "status_reserve_max" => ov.status_reserve_max : f32,
+            "dynamic_status_balance" => ov.dynamic_status_balance : bool,
+            "status_gap_strength" => ov.status_gap_strength : f32,
+            "status_overflow_strength" => ov.status_overflow_strength : f32,
+            "dynamic_vital" => ov.dynamic_vital : bool,
+            "probabilistic_hint" => ov.probabilistic_hint : bool,
+            "expected_fail" => ov.expected_fail : bool,
+            "checkpoint_scale" => ov.checkpoint_scale : f32,
+            "rmj_cross_bonus" => ov.rmj_cross_bonus : f32,
+            "great_cross_bonus" => ov.great_cross_bonus : f32,
+            "ramen_window_weight" => ov.ramen_window_weight : f32,
+            "ramen_train_coupling_weight" => ov.ramen_train_coupling_weight : f32,
+            "ramen_weak_train_boost" => ov.ramen_weak_train_boost : f32,
+            "friend_hidden_starve_weight" => ov.friend_hidden_starve_weight : f32,
+            "friend_future_hidden_weight" => ov.friend_future_hidden_weight : f32,
+            "friend_proactive_weight" => ov.friend_proactive_weight : f32,
+            "eat_guarantee_weight" => ov.eat_guarantee_weight : f32,
+            "cook2_stock_weight" => ov.cook2_stock_weight : f32,
+            "eat_requires_training" => ov.eat_requires_training : bool,
+            "eat_requires_covered_train" => ov.eat_requires_covered_train : bool,
+            "y3_pre_train_vital_target" => ov.y3_pre_train_vital_target : i32,
+            "y3_post_train_vital_target" => ov.y3_post_train_vital_target : i32,
+            "y3_vital_shortfall_weight" => ov.y3_vital_shortfall_weight : f32,
+            "y3_post_train_hard_floor" => ov.y3_post_train_hard_floor : i32,
+            "y3_recovery_horizon" => ov.y3_recovery_horizon : bool,
+            "friend_outing_replaces_rest" => ov.friend_outing_replaces_rest : bool,
+            "friend_outing3_recovery_vital" => ov.friend_outing3_recovery_vital : i32,
+            "dynamic_special_targets" => ov.dynamic_special_targets : bool,
+        }
+    }
+    if n_set == 0 {
+        return Err("parse_override_toml: 未解析到任何字段（文件为空或全是段头/注释？）".to_string());
+    }
+    Ok(ov)
+}
+
 impl ParamOverride {
     /// 全 `None` 覆盖层：与 [`RecommendedRamenTrainer::new()`] 基线逐位一致。
     pub fn all_none() -> Self {

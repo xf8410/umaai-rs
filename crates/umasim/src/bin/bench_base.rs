@@ -39,7 +39,8 @@ use umasim::{
     output::decision_log::DecisionLogRow,
     search::SearchConfig,
     trainer::{
-        LoggingTrainer, RamenMctsTrainer, RamenSearchStages, RandomTrainer, RecommendedRamenTrainer
+        LoggingTrainer, RamenMctsTrainer, RamenSearchStages, RandomTrainer, RecommendedRamenTrainer,
+        local_ramen_trainer
     },
     utils::{get_workspace_root, load_game_config}
 };
@@ -113,7 +114,12 @@ struct BenchConfig {
     /// 每属性取 SSR 池（card_id 降序）前 count 张，友人位用 `friend`。
     /// 允许单属性 > 3（如速 5），不受布局表约束，用于速卡强度扫描实验。
     #[serde(default)]
-    deck_spec: Option<String>
+    deck_spec: Option<String>,
+    /// handwritten 专用：基因组覆盖层文件路径（`best_genome.toml` 同格式）。
+    /// 指定后经 `parse_override_toml` 解析并 `with_overrides` 构造 trainer，
+    /// 用于 GA 最优轮回放与育成过程报告（--log 决策日志）。与 tokens/region-weak-cover 互斥。
+    #[serde(default)]
+    genome_file: Option<String>
 }
 
 /// `search_n` 缺省值：小预算档，够跑通又不至于把跑批时间拖爆
@@ -158,7 +164,8 @@ impl Default for BenchConfig {
             region_weak_cover: None,
             radical_factor_max: 0.0,
             deck: None,
-            deck_spec: None
+            deck_spec: None,
+            genome_file: None
         }
     }
 }
@@ -226,6 +233,9 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
             }
             Arg::Long("deck") => cfg.deck = Some(bench::parse_value(&mut parser, "deck")?),
             Arg::Long("deck-spec") => cfg.deck_spec = Some(bench::parse_value(&mut parser, "deck-spec")?),
+            Arg::Long("genome-file") => {
+                cfg.genome_file = Some(bench::parse_value(&mut parser, "genome-file")?)
+            }
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: bench_base [--runs N] [--seed S] [--log] [--out DIR]
@@ -236,7 +246,8 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
 \n                     	           [--radical-factor F] [--search-ucb true|false]
                      	通用: [--uma GAMEID] [--friend IDRANK]
                      	      [--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
-                     	      [--deck-spec 「c1,c2,c3,c4,c5」]（按张数取各属性池前排卡，单属性可>3）\n\
+                     	      [--deck-spec 「c1,c2,c3,c4,c5」]（按张数取各属性池前排卡，单属性可>3）
+                     	      [--genome-file best_genome.toml]（GA 基因组覆盖层回放，配 --log 出育成报告）\n\
                      缺省参数读取 workspace 根 bench_config.toml"
                 );
                 std::process::exit(0);
@@ -399,7 +410,20 @@ fn main() -> Result<()> {
                     if !cfg.tokens.is_empty() && cfg.region_weak_cover.is_some() {
                         anyhow::bail!("--tokens 与 --region-weak-cover 互斥，不能同时指定");
                     }
-                    let trainer = if let Some(w) = cfg.region_weak_cover {
+                    if cfg.genome_file.is_some()
+                        && (!cfg.tokens.is_empty() || cfg.region_weak_cover.is_some())
+                    {
+                        anyhow::bail!("--genome-file 与 --tokens/--region-weak-cover 互斥");
+                    }
+                    let trainer = if let Some(gf) = cfg.genome_file.as_deref() {
+                        // GA 最优基因组回放：读覆盖层 TOML → parse_override_toml → with_overrides。
+                        // 决策与 GA 评估时逐位一致（同 trainer 逻辑），--log 产出育成过程报告。
+                        let toml_str = std::fs::read_to_string(gf)
+                            .with_context(|| format!("无法读取 --genome-file {gf}"))?;
+                        let ov = local_ramen_trainer::parse_override_toml(&toml_str)?;
+                        println!("已加载基因组覆盖层: {gf}");
+                        LoggingTrainer::new(RecommendedRamenTrainer::with_overrides(&ov), log_seed)
+                    } else if let Some(w) = cfg.region_weak_cover {
                         // 只覆盖地区弱位加分权重，其余 10 个实验参数取正式 preset 精确值：
                         // pt_rates=[16,64,64] / gap=0.5 / overflow=0.5 / max_sacrifice=140 /
                         // ramen_window=0.10 / reserve_max=40 / early_bond=8 / hint_bonus=6 /
