@@ -7,6 +7,11 @@
 pub mod luck_score;
 pub use luck_score::LuckScoreTracker;
 
+pub mod record;
+pub use record::RecordingSink;
+
+pub mod zip_export;
+
 use std::sync::{Arc, Mutex};
 
 use umasim::{
@@ -30,7 +35,7 @@ pub struct LastReasonSink {
 }
 
 impl LastReasonSink {
-    pub(crate) fn new() -> Arc<Self> {
+    pub fn new() -> Arc<Self> {
         Arc::new(Self { inner: Mutex::new(None) })
     }
 

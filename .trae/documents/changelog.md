@@ -2,6 +2,27 @@
 
 本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
 
+## 2026-09-17
+- **ga_lab 最优策略合并（默认卡组）**：game_config 卡组切换 GA 通解骨架（速2耐1智2：待兼诗歌剧/千明代表/名将怒涛/优秀素质/青春永驻 + 骏川手纲），8 马 340 局同种子配对显著（Δ+516，t=3.36）
+- **ga_lab 最优策略合并（9 旋钮组合档进 preset）**：已满位普通/超拉面 PT 定价上调（16→37 / 0→35）、弱位覆盖查表→35 直值、友情词条 1.5→0.4、掌握度 6→8、牺牲上限 140→200、拉面窗 0.10→0.15、剧本PT前瞻 0→0.15、Y1 pt_rate 16→56——4 马×2 种子块 420 局配对 Δ+1394 t=12.55（8/8 单元显著）；ramen_weak_train_boost 单测大负（−1017）明确不采纳
+- **bench_base 新增 `--deck` 覆盖卡组入口**：显式 idrank 串指定卡组跑批（跳过 preset builds，标签 custom_deck），配卡对照实验用
+- **重抓两个存量漂移基线**：`test_yearly_observability`（68118→70138，五维同步）与 `test_ramen_three_stage_action_unchanged`（7 组 rollout 均值）——GA 方向定稿进 preset 后当前行为
+- **合宿训练诀窍填充修复**：`fill_feeling_gauge` 门控放宽为「合宿无条件三种槽全 MAX」——协议合宿回合角标全 0（None）时训练也能每种 +1 诀窍（此前在线对局合宿训练比休息/出行少 3 诀窍/回合，MCTS 合宿训练被系统性低估，是「高体力一选休息」的根因）；同步 URA 回合（72-77）角标照常抽签但不落库，训练不再产生诀窍槽（与在线一致）
+- **新增合宿/URA 诀窍填充守门单测 ×2**
+- **智力体力豁免语义修正为白名单**：`wisdom_vital_floor` 豁免带内只放行 智训练/休息/普通外出/治病（原实现=整个 40 门放开，速度/耐力等高位失败率训练在低体力下大亏；默认 MAX 仍不豁免，preset 行为逐位不变）
+- **补齐已满位 PT 定价实验 token**：`trd/trdsh/trds`（N/100，文档早有命名从未实现）接入 `with_tokens` + 解析单测
+- **重抓两个存量漂移基线**：`test_ramen_three_stage_action_unchanged`（7 组期望均值）与 `test_yearly_observability`（BASELINE_SCORE/FIVE）——最近策略调整与合宿诀窍修复后当前行为（干净 master 亦红，score/five 与本次改动逐位无关，纯同步）
+
+## 2026-09-18
+- **局末自动打包本局游戏记录**：umaai 末回合第 2 份快照（拉面 `turn77_2`）处理完写 meta + SVG 后，把 `logs/game{id}/` 打成 `logs/game{id}.zip`（包内条目相对原目录，去掉 `game{id}/` 外壳）并清理原目录——zip crate 依赖进 workspace；切局/退出兜底（`switch` / `process_exit`）不打包，中途停止局保留原目录方便人工排查；终端 stderr 绿色绝对路径（dunce 去 `\\?\`）+ `info!` 日志一份（json 模式友好）
+
+## 2026-09-16
+- **第3年地区单/多点整局配对扫描**：新增 `region_y3_single_focus` 扫参入口；seed42×100 全 101 构成 + seed61444×50 复测——混合档显著负、纯单点档玩家真实 build 大亏（≈−1100，t≈−5）→ 不采纳，维持现有按 build 自适应公式
+- **运气分重放分析工具 + 三项修复**：新增 `luck_replay`（快照重放 → 明细/波动 CSV）、`luck_probe` 探针、`scripts/plot_luck_trend.py` 趋势图；修复 `selected_regions` 空数组整份丢弃、只吃面回合计不到运气分、年度 RMJ 派生状态缺失（第 2/3 年期望虚降 ~2300）
+- **在线决策记录（每局一目录）**：umaai 实时运行按 `single_mode_chara_id` 落 `logs/game{id}/`（`thisTurn.json` 原文 + `decisions.csv` + `meta.json`，`luck_record` 默认开可关）；明细 schema 抽到 lib 与 `luck_replay` 共用，CSV 改走 `csv` crate 结构化写入（离线输出逐字节不变）
+- **局末自动出 SVG**：收到末回合第 2 份快照（拉面 `turn77_2`）处理完即写 meta（`game_end`）并生成 `logs/game{id}/luck_trend.svg`（3 子图：边框/回合数轴/纵刻度与竖排标题/图例「蒙特卡洛估分…」/署名；切局退出兜底；终端绿色绝对路径可跳转）
+- **比赛回合手写 fallback 上屏修复**：`HumanReadableSink` 对空分 fallback 决策（地区选择 / 比赛回合单候选 / RamenSelect 单候选）统一打印「选择…（手写逻辑）」，比赛回合不再静默（JSON 模式不受影响）
+
 ## 2026-09-15
 - **地区弱位覆盖按智卡数查表（方案Ⅰ 固化）**：`region_weak_cover_weight` 改三态（0=按智卡数查表 智≤1→12/智≥2→0、<0=关闭、>0=固定值实验），与弱位训练偏好查表配套；全 101 种构成配对验证智≥2 零变化、智≤1 加权 +220
 - **地区无卡位惩罚参数化**：`score_region` 硬编码 -10 提为 `region_waste_penalty`（默认 10 行为不变），扫描 5/15/20/30 均负收益，确认 10 为平衡点
@@ -9,6 +30,10 @@
 - **主训位翻倍加分实验（未采纳）**：`region_main_bias_bonus` 让地区覆盖 build 卡最多位时 bias_sum 再 + 该位卡数，全 101 构成验证全档大负（3speed 类受伤最重），维持线性 bias_sum，字段保留可配
 - **地区打分移除恒量项**：`score_region` 删 pt_bonus/hint_count 项（同年候选间恒定，不改变 argmax，验证逐位不变），删除孤儿字段 `region_pt_weight`；`region_hint_weight` 保留供吃面选择路径
 - **地区权重扫描入口**：`bench_compositions` 新增 recommended 档（正式推荐 preset）与 `--region-weak-cover / --region-youqing-weight / --region-waste-penalty / --region-main-bias` 参数；`RecommendedRamenTrainer::with_region_weights` 覆盖入口
+- **MCTS pt_favor_rate 扫参定档 2.0**：1.0~12.0 七档 N=1024 扫参（2.0~3.0 免费换 PT、4.0 起转亏、PT 增益 8.0 后饱和）+ 1.0/2.0/2.5 三档 N=4096 深测（5 速系卡组 10 局配对：2.0 评分损失不显著 t=−0.04、PT 增益显著 t=+6.3，2.5 边际仅多 +41pt）；正式默认 1.0→2.0，新增扫参汇总/绘图脚本
+- **拉面 MCTS 决策候选分改真实评分**：`stash_last_summary` 缓存 `candidate_scores` 从 score_pt 轴（含 pt_favor_rate 缩放）改为 calc_score 轴——运气分 baseline、action_luck 与 AIRed 候选显示不再随 pt_favor_rate 虚增；选择仍走 score_pt 不变
+- **urafile 读取改生产者-消费者模型（用户）**：thisTurn.json 监听从「收到事件后合并排空 + contents 去重」改为后台 producer 线程每次写事件读完整 JSON 进异步队列、主循环逐个消费——取消主观丢弃中间回合快照的路径（内容相同的冗余事件除外），notify 缓冲溢出错误事件改重读兜底
+- **清理多余配置（用户）**：删除遗留 constants 快照文件；ramen_turn_inspect 展示同步 RamenMctsTrainer 字段变更（selection → use_combined_ramen_select）
 
 ## 2026-09-14
 - **拉面手写策略评分换PT参数**：新增可调已满位训练 PT 折算价（`pt_tradeoff` 普通档 / `pt_tradeoff_shining` 有彩圈分级 / `pt_tradeoff_super` 超拉面档）——训练位主属性已满时属性收益为 0、只剩 PT，策略按独立价重估该训练候选，避免按 `pt_rate` 高估后终盘贪练已满位

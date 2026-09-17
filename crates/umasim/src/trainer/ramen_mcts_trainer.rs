@@ -203,7 +203,13 @@ impl Default for RamenSearchStages {
 struct LastSearchSummary {
     /// 中选者在 `action_results` 中的下标
     chosen_idx: usize,
-    /// 全候选分数（按 action_results 顺序）
+    /// 全候选分数（按 action_results 顺序，**真实评分口径**——`SearchScore::score`
+    /// 即 `calc_score()`，不含 `pt_favor_rate` 缩放）
+    ///
+    /// 选择动作走 `score_pt` 轴（`best_action_pt_idx`），但**展示与运气分口径固定为
+    /// 真实评分**：`candidate_scores` 会经 `emit_with_luck_decision` 换算 T(n)
+    /// baseline 得出运气分，若在此处取被 `pt_favor_rate` 放大的 `score_pt`，运气分
+    /// （以及 AIRed 显示的候选分）会随该系数虚增、不再反映真实评分得失。
     scores: Vec<f64>,
     /// 全候选的 rollout 样本数（按 action_results 顺序）
     counts: Vec<u32>,
@@ -530,11 +536,19 @@ fn emit_decision_reason(&self, turn: i32, chosen: usize, output: &RamenSearchOut
     /// 仅缓存决策协议需要的字段（分数 / 局数 / 选中下标 + 候选描述），不复制整个
     /// [`RamenSearchOutput`]——`ActionResult.distribution` 数组 clone 成本过大。
     ///
+    /// **分数口径 = 真实评分**（`SearchScore::score` / `calc_score()`）：本摘要供
+    /// `last_decision()` → `candidate_scores` → 运气分 baseline 与 AIRed 展示使用，
+    /// 故不采用被 `pt_favor_rate` 缩放的 `score_pt`（选择口径）。历史上此处误取
+    /// `score_pt`，导致 `pt_favor_rate ≠ 1` 时运气分与显示候选分同步虚增。
+    ///
     /// 2026-09 简化：移除 `reason_text` 计算——`DecisionInfo::reason` 删除后
     /// 该文本不再挂到决策协议。完整 `DecisionReasonData` 改由 `emit_decision_reason`
     /// 通过 `LastReasonSink` 缓存，挂到 `scenario_extra.reason`（main.rs 接线）。
     fn stash_last_summary(&self, output: &RamenSearchOutput, chosen_idx: usize) {
-        let scores: Vec<f64> = output.action_results.iter().map(|(_, pt)| pt.mean()).collect();
+        // **真实评分轴**（`action_results` 是 `(score, score_pt)` 对）：
+        // 取 `.0` 即 `calc_score()`，不含 `pt_favor_rate` 缩放。展示与运气分必须用
+        // 真实评分——动作选择另走 `score_pt`（`best_action_pt_idx`），两者互不影响。
+        let scores: Vec<f64> = output.action_results.iter().map(|(score, _)| score.mean()).collect();
         let counts: Vec<u32> = output.action_results.iter().map(|(s, _)| s.count()).collect();
         // 候选可读描述：与 scores / counts 严格同长同序（按 action_results 顺序）
         let descriptions: Vec<String> = output
@@ -542,6 +556,47 @@ fn emit_decision_reason(&self, turn: i32, chosen: usize, output: &RamenSearchOut
             .iter()
             .map(|a| a.to_string())
             .collect();
+        if let Ok(mut slot) = self.last_search_summary.lock() {
+            *slot = Some(LastSearchSummary { chosen_idx, scores, counts, descriptions });
+        }
+    }
+
+    /// 把**合并搜索**结果聚合为与三阶段 `actions` 对齐的搜索摘要
+    ///
+    /// 合并路径的候选是 `(ramen, targets)` 组合（最多约 28 个），与三阶段 `RamenSelect`
+    /// 候选（`[不吃面] + [每个面一个]`）下标不对应，故不能直接走
+    /// [`Self::stash_last_summary`]。此处按 `ramen` 把组合候选折回三阶段下标：同一个面的
+    /// 多个 targets 变体按**局数加权均值**合并（`Σ(mean_i × n_i) / Σ n_i`）。
+    ///
+    /// **口径自洽**：聚合后 `Σ(candidate_scores[j] × candidate_n[j]) / Σ n` 恒等于
+    /// 「全部合并候选的局数加权均值」——运气分 T(n) baseline 与合并搜索的动作空间
+    /// 口径一致（不吃面只有一个候选，聚合退化为原值）。
+    ///
+    /// 分数取 `.0` 真实评分轴（`calc_score()`），与 [`Self::stash_last_summary`] 同口径。
+    fn stash_combined_summary(
+        &self,
+        combined: &[crate::game::ramen::RamenAction],
+        output: &RamenSearchOutput,
+        actions: &[crate::game::ramen::RamenAction],
+        chosen_idx: usize
+    ) {
+        let mut scores = vec![0.0_f64; actions.len()];
+        let mut counts = vec![0_u32; actions.len()];
+        for (j, act) in actions.iter().enumerate() {
+            let mut weighted = 0.0_f64;
+            let mut n = 0_u32;
+            for (i, cand) in combined.iter().enumerate() {
+                if cand.ramen != act.ramen {
+                    continue;
+                }
+                let (res, _) = &output.action_results[i];
+                weighted += res.mean() * res.count() as f64;
+                n += res.count();
+            }
+            scores[j] = if n > 0 { weighted / n as f64 } else { 0.0 };
+            counts[j] = n;
+        }
+        let descriptions: Vec<String> = actions.iter().map(|a| a.to_string()).collect();
         if let Ok(mut slot) = self.last_search_summary.lock() {
             *slot = Some(LastSearchSummary { chosen_idx, scores, counts, descriptions });
         }
@@ -642,10 +697,12 @@ impl Trainer<RamenGame> for RamenMctsTrainer {
                 match actions.iter().position(|a| a.ramen == best.ramen) {
                     Some(three_idx) => {
                         // 合并搜索的 candidates 是 (ramen, targets) 组合，与三阶段
-                        // actions 列表的下标不对应（同一 ramen 可能跨多个 action）。
-                        // Step 2 暂不在合并路径暴露 DecisionInfo——`last_decision`
-                        // 看到 None 即返回 None，避免 caller 拿到错位的 action_index。
-                        self.clear_last_summary();
+                        // actions 列表的下标不对应（同一 ramen 跨多个 targets 候选）。
+                        // 2026-09 修复：不再 `clear_last_summary()`——改为按 `ramen`
+                        // 聚合回三阶段下标后暴露 DecisionInfo。原实现让 `last_decision`
+                        // 返回 None，导致「只吃面」回合（吃面后不链式接训练决策）整回合
+                        // 没有任何运气分更新（luck 只挂在带搜索评分的末决策上）。
+                        self.stash_combined_summary(&combined, &output, actions, three_idx);
                         return Ok(three_idx);
                     }
                     None => {
@@ -1578,6 +1635,64 @@ mod tests {
         println!("Train 决策 {train_decisions} 次，last_decision 有值 {emitted} 次");
         c.check(train_decisions > 0, "至少跑到一次 Train 决策");
         c.check(emitted > 0, "至少有一次一次 last_decision 有值");
+        c.finish()
+    }
+
+    /// 合并搜索路径暴露 `last_decision`：候选与三阶段 actions 同长同序、聚合口径自洽
+    ///
+    /// 回归背景（2026-09）：合并路径原 `clear_last_summary()` → `last_decision()` 恒为
+    /// `None`，「只吃面」回合（吃面后不链式接训练）整回合没有任何运气分更新。
+    /// 修复后按「面」把 `(ramen, targets)` 组合候选聚合回三阶段下标再 stash，
+    /// 聚合采用**局数加权均值**（`Σ(mean_i × n_i) / Σ n_i`），与运气分 T(n) baseline 同口径。
+    #[test]
+    fn test_combined_path_exposes_last_decision() -> Result<()> {
+        let seed = 42;
+        let (mut game, mut rng) = setup(seed)?;
+        let trainer = RamenMctsTrainer::new(SearchConfig::default().with_search_n(8).with_ucb(false))
+            .with_stages(ramen_and_special_stages())
+            .with_combined_ramen_select(true);
+
+        // 推进到第一个 RamenSelect 决策点（turn>=2 剧本机制启动后的吃面点）
+        for _ in 0..48 {
+            if game.stage == RamenStage::RamenSelect {
+                break;
+            }
+            let _ = game.run_stage(&trainer, &mut rng)?;
+            if !game.next() {
+                break;
+            }
+        }
+        println!("推进到 stage={:?} turn={}", game.stage, game.turn());
+        if game.stage != RamenStage::RamenSelect {
+            println!("未到达 RamenSelect（开局无面可选？），跳过本回归用例");
+            return Ok(());
+        }
+        let actions = game.list_actions()?;
+        let combined = game.list_combined_ramen_select_actions();
+        println!("三阶段候选 {} 个，合并候选 {} 个", actions.len(), combined.len());
+        if actions.len() <= 1 || combined.len() <= 1 {
+            println!("候选不足（单候选不触发合并路径），跳过");
+            return Ok(());
+        }
+
+        let idx = trainer.select_action(&game, &actions, &mut rng)?;
+        let info = trainer.last_decision().expect("合并路径必须暴露 last_decision");
+        let mut c = Checks::new();
+        c.check(info.candidate_scores.len() == actions.len(), "候选评分与三阶段 actions 同长");
+        c.check(info.candidate_descriptions.len() == actions.len(), "候选描述与三阶段 actions 同长");
+        c.check(info.candidate_n.len() == actions.len(), "候选局数与三阶段 actions 同长");
+        c.check(info.action_index < info.candidate_scores.len(), "action_index 在截断后范围内");
+        // 聚合后的描述 = 三阶段候选描述（按 actions 顺序），选中描述与 actions[idx] 一致
+        let chosen_desc = info.candidate_descriptions.get(info.action_index).cloned().unwrap_or_default();
+        let action_desc = actions[idx].to_string();
+        c.check(chosen_desc == action_desc, "选中描述与 actions[选中] 一致");
+        // 局数加权总和 > 0（搜索真实跑过）
+        let total_n: u32 = info.candidate_n.iter().sum();
+        c.check(total_n > 0, "候选局数之和 > 0");
+        println!(
+            "RamenSelect last_decision: 选中={action_desc} n_actions={} total_n={total_n}",
+            actions.len()
+        );
         c.finish()
     }
 

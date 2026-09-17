@@ -21,3 +21,6 @@ master.mdb
 .gopath/
 /tmp/
 
+# 运气分重放分析产物（明细/统计 CSV，按需生成）
+luck_replay*.csv
+

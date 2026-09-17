@@ -1368,20 +1368,24 @@ impl RamenGame {
             self.ramen.absent_cards.clear();
             // 回合固定流：角标 + 人头分布 + hint
             let mut fixed = self.turn_fixed.take();
+            let raw_types = match fixed.as_mut() {
+                Some(f) => assign_train_feeling_type(f),
+                None => assign_train_feeling_type(rng)
+            };
+            self.turn_fixed = fixed;
+            let feelings: [FeelingType; 5] =
+                raw_types.map(|v| FeelingType::try_from(v).unwrap_or(FeelingType::A));
+            // 超级拉面回合（72-77）角标**照常抽取但不落库**：诀窍机制已结束，
+            // 训练不产生诀窍槽（与在线协议角标全 0 → None 一致）。不落库但保留
+            // 抽签消耗，使后续 distribute_all/hint 的固定流偏移与旧行为逐位一致。
+            self.ramen.train_feeling_type = if self.is_super_ramen_turn() { None } else { Some(feelings) };
+            let mut fixed = self.turn_fixed.take();
             match fixed.as_mut() {
                 Some(f) => {
-                    let raw_types = assign_train_feeling_type(f);
-                    let feelings: [FeelingType; 5] =
-                        raw_types.map(|v| FeelingType::try_from(v).unwrap_or(FeelingType::A));
-                    self.ramen.train_feeling_type = Some(feelings);
                     self.distribute_all(f)?;
                     self.distribute_hint(f)?;
                 }
                 None => {
-                    let raw_types = assign_train_feeling_type(rng);
-                    let feelings: [FeelingType; 5] =
-                        raw_types.map(|v| FeelingType::try_from(v).unwrap_or(FeelingType::A));
-                    self.ramen.train_feeling_type = Some(feelings);
                     self.distribute_all(rng)?;
                     self.distribute_hint(rng)?;
                 }
@@ -4953,4 +4957,41 @@ struct AlwaysTrueRng;
 
         c.finish()
     }
+
+    #[test]
+    fn test_super_ramen_turn_no_angle_tag() -> Result<()> {
+        // 超级拉面回合（72-77）：训练诀窍角标照常抽签但不落库（None ⇒ 训练
+        // 不产生诀窍槽）——与在线协议角标全 0 一致（2026-09，见 issues.md）。
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("info");
+        let _ = init_global();
+
+        let mut game = RamenGame::newgame(TEST_UMA_ID, &TEST_DECK, TEST_INHERIT)?;
+        let mut rng = StdRng::seed_from_u64(3);
+
+        // 超级拉面、非比赛回合：跑 distribute 分支（而非 reset_distribution）
+        game.base.turn = 74;
+        println!("turn74 是否比赛回合: {}", game.is_race_turn());
+        assert!(!game.is_race_turn(), "turn74 不应是比赛回合");
+        game.run_distribute(&mut rng)?;
+        println!(
+            "t74 角标={:?}（期望 None）分布非空={}",
+            game.ramen.train_feeling_type,
+            game.base.distribution.iter().any(|d| !d.is_empty())
+        );
+        assert!(game.ramen.train_feeling_type.is_none(), "72-77 训练角标不落库");
+        assert!(
+            game.base.distribution.iter().any(|d| !d.is_empty()),
+            "分布分配未被跳过"
+        );
+
+        // 对照：普通回合仍分配角标
+        game.base.turn = 60;
+        game.run_distribute(&mut rng)?;
+        println!("t60 角标={:?}（期望 Some）", game.ramen.train_feeling_type);
+        assert!(game.ramen.train_feeling_type.is_some(), "普通回合仍分配角标");
+        Ok(())
+    }
+
 }

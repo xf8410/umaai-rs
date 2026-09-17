@@ -85,12 +85,13 @@ pub struct HumanReadableSink;
 
 impl DecisionSink for HumanReadableSink {
     fn emit(&self, info: &DecisionInfo, _view: &GameView) {
-        // 手写 fallback 决策（`candidate_scores` 为空）——主要指默认配置
-        // `ramen_search_stages="train,ramen"` 下 region 未开启、地区选择走手写逻辑。
-        // 它没有搜索评分，luck 行的「期望评分」只是回合加成的换算、运气恒 0，混入会误导，
-        // 故地区选择改为显示所选地区并标注【手写逻辑】、跳过 luck 行。其余 None 阶段的
-        // 决策不再被 main.rs 合成（见 `calc_ramen_training` 的 `decide`），不会到达本分支。
-        if info.candidate_scores.is_empty() && info.decision_kind == "region_select" {
+        // 手写 fallback 决策（`candidate_scores` 为空）：
+        // - 默认配置 `ramen_search_stages="train,ramen"` 下 region 未开启 → 地区选择走手写逻辑
+        // - **比赛回合单候选**（`Train` 且 `is_race_turn`，无搜索评分）
+        // - RamenSelect 合并候选 ≤ 1 / 单候选短路回落三阶段路径
+        // 它们没有搜索评分，luck 行的「期望评分」只是回合加成的换算、运气恒 0，混入会误导，
+        // 故统一显示所选动作并标注【手写逻辑】、跳过 luck 行（JSON 模式下全量字段照常输出）。
+        if info.candidate_scores.is_empty() {
             if let Some(desc) = info.candidate_descriptions.get(info.action_index) {
                 println!("{}", format!("选择{desc}（手写逻辑）").magenta());
             }
@@ -295,6 +296,23 @@ mod tests {
         }));
         HumanReadableSink.emit(&info, &GameView::default());
         println!("带 luck extra 时 emit 完成");
+    }
+
+    /// 手写 fallback（`candidate_scores` 为空）：region_select / 比赛回合 / RamenSelect
+    /// 单候选都应按「选择…（手写逻辑）」上屏，而不是静默跳过（JSON 模式全量字段照常）。
+    #[test]
+    fn test_human_readable_sink_handwritten_fallback() {
+        for (kind, desc) in [("region_select", "地区/[中山-全]"), ("train", "比赛/杏目 G2")] {
+            let mut info = sample_info();
+            info.action_index = 0;
+            info.decision_kind = kind.to_string();
+            info.candidate_scores = Vec::new();
+            info.candidate_n = Vec::new();
+            info.candidate_descriptions = vec![desc.to_string()];
+            info.scenario_extra = None;
+            HumanReadableSink.emit(&info, &GameView::default());
+            println!("{kind} fallback 应打印: 选择{desc}（手写逻辑）");
+        }
     }
 
     /// 本局运气各颜色档位均不 panic（四舍五入 + 着色路径全覆盖）

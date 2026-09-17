@@ -218,6 +218,20 @@ pub struct RamenPolicyConfig {
     /// 主训位"的地区相对"覆盖广但主位分量低"地区的优势。
     /// 实验扫描定档，未固化前 preset 保持 0.0。
     pub region_main_bias_bonus: f32,
+    /// 第 3 年地区选择"单点偏好"强度（实验扫参，默认 0 = 现状）。
+    ///
+    /// 只作用于第 3 年：组合内"单点地区"（`at_trains` 仅覆盖
+    /// 1 个训练位，即 id 10-14）数量少于本值的候选直接否决，`score_region`
+    /// 打分公式一字不动。见 [`RamenPolicy::decide_region`]。
+    ///
+    /// - `0`：现状（候选全 120 组合，公式原样）
+    /// - `1` / `2`：候选限定为「组合内至少含 1 / 2 个单点地区」（3 点地区仍可混入）
+    /// - `3`：纯单点（C(5,3)=10 个全单点组合）
+    ///
+    /// 扫描目的：回答「第 3 年选多训练地区 vs 单点训练地区」的整局收益差异
+    /// （2026-09-15 用户拍板：打分公式不动、扫参）。过滤后候选为空时回退
+    /// 全量候选（防御，正常档位不会触发）。
+    pub region_y3_single_focus: u8,
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
@@ -263,6 +277,7 @@ impl Default for RamenPolicyConfig {
             region_weak_cover_weight: 0.0,
             region_waste_penalty: 10.0,
             region_main_bias_bonus: 0.0,
+            region_y3_single_focus: 0,
             event_vital_weight: 2.2,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
@@ -458,6 +473,29 @@ impl RamenPolicy {
                 return Ok(idx);
             }
         }
+        // 豁免带内（vital ∈ [wisdom_vital_floor, rest_threshold)）：**不是**把整个
+        // 门放给全部动作，而是只放行 智训练 / 休息 / 普通外出 / 治病 参与打分，
+        // 其余训练位（速/耐/力/根）与自由比赛仍视为被体力门限拦截。理由：速/耐等
+        // 位失败率体力阈值 ~50-54，30-40 体力下失败率 20-30%，线性失败期望低估
+        // 大失败尾部与失败回合浪费，实测整门放开扫参大亏（2026-09，见 issues.md）。
+        if wisdom_exempt {
+            // 先全量打分（保持 eval_cache 预填契约——LocalRamenTrainer B2 依赖
+            // 全部训练位 eval 已填），再按白名单把其余候选压到最低分：
+            // 豁免带内只允许 智训练 / 休息 / 普通外出 / 治病 取胜。
+            scores.clear();
+            self.score_train_actions_cached(game, actions, ramen, eval_cache, scores)?;
+            for (a, o) in actions.iter().zip(scores.iter_mut()) {
+                let allowed = match a.operation {
+                    Operation::Train(t) => t as usize == 4,
+                    Operation::Rest | Operation::NormalOuting | Operation::Clinic => true,
+                    _ => false
+                };
+                if !allowed {
+                    o.score = f32::MIN;
+                }
+            }
+            return Ok(argmax_index(scores));
+        }
         // 守门 3：心情低 → 外出（回干劲）
         if uma.motivation < self.config.motivation_outing {
             if let Some(idx) = actions
@@ -614,39 +652,95 @@ impl RamenPolicy {
     /// 曾实验的"少卡位加权"（`low_count_youqing`）全 101 种验证显示：智向 build
     /// 严重受损（-3447），改写为"主训位加权"方向；但 `bias_sum` 已隐式表达 build
     /// 训练倾向——本公式即"按卡组自适应"的最简落地，无需额外加权项。
+    ///
+    /// 第 3 年可叠加"单点偏好"（[`RamenPolicyConfig::region_y3_single_focus`]）：
+    /// 对候选按组合内单点地区数量过滤（`score_region` 公式不动），返回的选中
+    /// 下标与 `scores` 仍对齐**完整候选表**（被否决的组合分数为 0、不参与 argmax）。
     pub fn decide_region(
-        &self, game: &RamenGame, _year_idx: usize, actions: &[RamenAction]
+        &self, game: &RamenGame, year_idx: usize, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if actions.is_empty() {
             anyhow::bail!("RegionSelect 阶段候选为空");
         }
+        // 第 3 年单点偏好：提前算好每个候选的单点地区数，只对年_idx==2 生效。
+        let focus = if year_idx == 2 { self.config.region_y3_single_focus as usize } else { 0 };
+        let mut single_counts = vec![0usize; actions.len()];
+        if focus > 0 {
+            for (i, a) in actions.iter().enumerate() {
+                let Operation::RegionSelect(combo) = a.operation else {
+                    anyhow::bail!("RegionSelect 候选应携带 RegionSelect 操作");
+                };
+                single_counts[i] = Self::count_single_point_regions(&combo)?;
+            }
+        }
+        // focus=0 时全部候选合格；focus>0 时只留单点数量达标的组合。
+        let mut eligible: Vec<usize> = (0..actions.len())
+            .filter(|&i| single_counts[i] >= focus)
+            .collect();
+        if eligible.is_empty() {
+            // 防御：过滤后为空（如 focus 超过当年可达单点上限 3），回退全量候选。
+            eligible = (0..actions.len()).collect();
+        }
         let mut scores: Vec<RamenPolicyOutput> = Vec::with_capacity(actions.len());
         let mut region_scores = vec![None; RAMENDATA.get().map_or(0, |data| data.ramen_region_effect.len())];
-        for a in actions {
+        for (i, a) in actions.iter().enumerate() {
             let Operation::RegionSelect(combo) = a.operation else {
                 anyhow::bail!("RegionSelect 候选应携带 RegionSelect 操作");
             };
             let mut out = RamenPolicyOutput::default();
-            for &rid in combo.iter() {
-                let cached = region_scores
-                    .get_mut(rid)
-                    .ok_or_else(|| anyhow::anyhow!("地区效果缺失: region_id={rid}"))?;
-                let score = match *cached {
-                    Some(score) => score,
-                    None => {
-                        let score = self.score_region(game, rid)?;
-                        *cached = Some(score);
-                        score
-                    }
-                };
-                out.score += score;
-            }
-            if self.collect_details {
-                out.reason = format!("{combo:?}");
+            if eligible.contains(&i) {
+                for &rid in combo.iter() {
+                    let cached = region_scores
+                        .get_mut(rid)
+                        .ok_or_else(|| anyhow::anyhow!("地区效果缺失: region_id={rid}"))?;
+                    let score = match *cached {
+                        Some(score) => score,
+                        None => {
+                            let score = self.score_region(game, rid)?;
+                            *cached = Some(score);
+                            score
+                        }
+                    };
+                    out.score += score;
+                }
+                if self.collect_details {
+                    out.reason = format!("{combo:?}");
+                }
+            } else if self.collect_details {
+                out.reason = format!("{combo:?}（单点{}/{} < {focus} 否决）", single_counts[i], combo.len());
             }
             scores.push(out);
         }
-        Ok((argmax_index(&scores), scores))
+        let mut best = eligible[0];
+        for &i in eligible.iter().skip(1) {
+            if scores[i].score > scores[best].score {
+                best = i;
+            }
+        }
+        Ok((best, scores))
+    }
+
+    /// 组合中"单点地区"（`at_trains` 仅覆盖 1 个训练位、即 `ramen_region_effect`
+    /// 里 `RegionEffect::at_trains.len() == 1`）的数量。
+    ///
+    /// 第 3 年数据下单点地区为 id 10-14（youqing 50/60 单槽）、3 点地区为
+    /// id 15-19（youqing 40 × 3 槽）；用 `at_trains` 长度判断而非硬编码 id，
+    /// 数据变更时仍成立。
+    fn count_single_point_regions(regions: &[usize; 3]) -> Result<usize> {
+        let Some(data) = RAMENDATA.get() else {
+            anyhow::bail!("RAMENDATA 未初始化");
+        };
+        let mut n = 0usize;
+        for &rid in regions {
+            let region = data
+                .ramen_region_effect
+                .get(rid)
+                .ok_or_else(|| anyhow::anyhow!("地区效果缺失: region_id={rid}"))?;
+            if region.at_trains.len() == 1 {
+                n += 1;
+            }
+        }
+        Ok(n)
     }
 
     /// RegionSelect 阶段（仅索引）
@@ -1535,6 +1629,94 @@ mod tests {
         println!("两者选择是否不同: {}", combos[idx_s] != combos[idx_w]);
         assert_ne!(combos[idx_s], combos[idx_w], "不同 build 必须选出不同的第 3 年地区组合");
         Ok(())
+    }
+
+    /// 第 3 年"单点偏好"（`region_y3_single_focus`）候选过滤语义：
+    /// `score_region` 公式不动，只按组合内单点地区数量否决候选；选中下标与
+    /// `scores` 对齐完整候选表；仅第 3 年生效；过滤后候选为空时回退全量。
+    #[test]
+    fn test_region_y3_single_focus_filters_combos() -> anyhow::Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        init_test_logger("info")?;
+        init_global()?;
+
+        use crate::{gamedata::ramen::RAMENDATA, utils::Checks};
+        let combos = crate::game::ramen::rules::get_region_combinations(2)?;
+        let actions: Vec<RamenAction> = combos
+            .iter()
+            .map(|&c| RamenAction::no_ramen(Operation::RegionSelect(c)))
+            .collect();
+        let game = make_game()?;
+        let data = RAMENDATA.get().expect("init_global 后 RAMENDATA 已装载");
+        let is_single = |rid: usize| data.ramen_region_effect[rid].at_trains.len() == 1;
+
+        let mut cfg = RamenPolicyConfig::default();
+        let f0 = RamenPolicy::new(cfg.clone());
+        cfg.region_y3_single_focus = 2;
+        let f2 = RamenPolicy::new(cfg.clone());
+        cfg.region_y3_single_focus = 3;
+        let f3 = RamenPolicy::new(cfg.clone());
+        cfg.region_y3_single_focus = 4; // 超过当年可达单点上限（3），必然过滤为空
+        let f4 = RamenPolicy::new(cfg);
+
+        let (i0, _s0) = f0.decide_region(&game, 2, &actions)?;
+        let (i2, _s2) = f2.decide_region(&game, 2, &actions)?;
+        let (i3, s3) = f3.decide_region(&game, 2, &actions)?;
+        let (i4, _s4) = f4.decide_region(&game, 2, &actions)?;
+        println!(
+            "Y3 选区: focus=0 → {:?} / focus=2 → {:?} / focus=3 → {:?} / focus=4 → {:?}",
+            combos[i0], combos[i2], combos[i3], combos[i4]
+        );
+
+        let single = |combo: &[usize; 3]| combo.iter().filter(|&&r| is_single(r)).count();
+        let mut c = Checks::new();
+        c.check(single(&combos[i3]) == 3, "focus=3 选中组合全为单点地区");
+        c.check(single(&combos[i2]) >= 2, "focus=2 选中组合至少含 2 个单点地区");
+        c.check(s3.len() == actions.len(), "focus=3 的 scores 与完整候选表同长");
+        c.check(i3 < actions.len(), "focus=3 选中下标在完整候选表范围内");
+        c.check(
+            s3.iter().zip(&actions).all(|(o, a)| {
+                let Operation::RegionSelect(combo) = a.operation else { return false };
+                o.score != 0.0 || single(&combo) < 3
+            }),
+            "被否决候选分数为 0（不参与 argmax），当选候选分数非 0"
+        );
+        c.check(combos[i4] == combos[i0], "focus=4 过滤为空→回退全量，选区与 focus=0 一致");
+        c.check(combos[i3] != combos[i0], "focus=3 与 focus=0 选区不同（扫描档位确实改变选区）");
+        c.finish()
+    }
+
+    /// `region_y3_single_focus` 只作用于第 3 年：第 1/2 年带任意 focus 的决策
+    /// 与 focus=0 逐位一致（配对实验其余年份两臂等价的依据）。
+    #[test]
+    fn test_region_y3_single_focus_ignored_outside_y3() -> anyhow::Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        init_test_logger("info")?;
+        init_global()?;
+
+        use crate::{game::ramen::rules::get_region_combinations, utils::Checks};
+        let game = make_game()?;
+        let mut cfg = RamenPolicyConfig::default();
+        let f0 = RamenPolicy::new(cfg.clone());
+        cfg.region_y3_single_focus = 3;
+        let f3 = RamenPolicy::new(cfg);
+        let mut c = Checks::new();
+        for year_idx in 0..2usize {
+            let combos = get_region_combinations(year_idx)?;
+            let actions: Vec<RamenAction> = combos
+                .iter()
+                .map(|&x| RamenAction::no_ramen(Operation::RegionSelect(x)))
+                .collect();
+            let (ia, _) = f0.decide_region(&game, year_idx, &actions)?;
+            let (ib, _) = f3.decide_region(&game, year_idx, &actions)?;
+            c.check(
+                ia == ib,
+                &format!("第 {} 年选区不受 region_y3_single_focus 影响", year_idx + 1)
+            );
+        }
+        c.finish()
     }
 
     /// 构造一个可用的 RamenGame（默认卡组 102601，train 阶段可打分）

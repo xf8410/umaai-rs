@@ -1744,6 +1744,51 @@ impl RecommendedRamenTrainer {
         trainer
     }
 
+    /// 地区打分权重覆盖（三年统一；`None` = 保持 preset 值）。
+    ///
+    /// 只覆盖地区选择相关权重，其余策略参数逐字继承 `new()`。
+    /// `youqing_weight` 对应 [`RamenPolicyConfig::region_youqing_weight`]（卡组构成×友情词条），
+    /// `waste_penalty` 对应 [`RamenPolicyConfig::region_waste_penalty`]（覆盖无卡位惩罚），
+    /// `weak_cover_weight` 三态语义同 `with_experiment_overrides` 的第 10 参数
+    /// （`None` = preset 默认按智卡数查表），
+    /// `main_bias_bonus` 对应 [`RamenPolicyConfig::region_main_bias_bonus`]（C2 主训位翻倍）。
+    pub fn with_region_weights(
+        mut self,
+        youqing_weight: Option<f32>,
+        waste_penalty: Option<f32>,
+        weak_cover_weight: Option<f32>,
+        main_bias_bonus: Option<f32>,
+    ) -> Self {
+        for year in self.years.iter_mut() {
+            if let Some(v) = youqing_weight {
+                year.policy.config.region_youqing_weight = v;
+            }
+            if let Some(v) = waste_penalty {
+                year.policy.config.region_waste_penalty = v;
+            }
+            if let Some(v) = weak_cover_weight {
+                year.policy.config.region_weak_cover_weight = v;
+            }
+            if let Some(v) = main_bias_bonus {
+                year.policy.config.region_main_bias_bonus = v;
+            }
+        }
+        self
+    }
+
+    /// 第 3 年地区选择"单点偏好"强度（实验扫参，见
+    /// [`RamenPolicyConfig::region_y3_single_focus`]）。
+    ///
+    /// 三年统一写入该字段，但字段只在 `year_idx == 2`（第 3 年）被消费，
+    /// 第 1/2 年行为不受影响——配对实验中其余年份两臂逐位等价，Δ 纯归因第 3 年。
+    /// `0` = 现状（默认），`1..=3` = 组合内至少含 1..=3 个单点地区。
+    pub fn with_region_y3_single_focus(mut self, focus: u8) -> Self {
+        for year in self.years.iter_mut() {
+            year.policy.config.region_y3_single_focus = focus;
+        }
+        self
+    }
+
     /// EXP-006c：从 token 串构造 preset 变体（逐 token 覆盖三年同配置）。
     ///
     /// - `wisfN`：智力训练体力豁免下限 = N（见 [`RamenPolicyConfig::wisdom_vital_floor`]）
@@ -1780,7 +1825,7 @@ impl RecommendedRamenTrainer {
                     year.policy.config.pt_tradeoff_shining = w;
                 }
             } else if let Some(v) = token.strip_prefix("trds") {
-                // 超级拉面已满位 PT 折算价（评分换PT系数超拉面档）：trds200=2.0
+                // 超级拉面回合（72-77）已满位 PT 定价（N/100，见 pt_tradeoff_super）：trds200=2.0
                 let w: f32 = v.parse::<f32>()? / 100.0;
                 for year in trainer.years.iter_mut() {
                     year.policy.config.pt_tradeoff_super = w;
@@ -1793,7 +1838,7 @@ impl RecommendedRamenTrainer {
                     year.policy.config.pt_rate = w;
                 }
             } else if let Some(v) = token.strip_prefix("trd") {
-                // 已满位 PT 折算价（评分换PT系数普通档）：trd200=2.0
+                // 已满位训练普通档 PT 定价（N/100，见 RamenPolicyConfig::pt_tradeoff）：trd200=2.0
                 let w: f32 = v.parse::<f32>()? / 100.0;
                 for year in trainer.years.iter_mut() {
                     year.policy.config.pt_tradeoff = w;
@@ -1939,11 +1984,22 @@ impl RecommendedRamenTrainer {
             local.friend_rest_max_special = 4;
             local.deadline_urgency_scale = 0.0;
             local.dynamic_special_targets = true;
-            // 已满位训练 PT 定价固化最优档（上游 c0189d1：移除 ramen_pt_sacrifice_score 可调配置，
-            // 固化为标定最优值）：有彩圈 36（评分峰值，7 build×100 局 +533）、
-            // 无彩圈 16（PT≈40 且属性 0，恒重压）；GA 仍可通过 ParamOverride.pt_tradeoff_shining 覆盖。
+            // 已满位训练 PT 定价：有彩圈 36（评分峰值，7 build×100 局 +533）；无彩圈档由下方 GA 方向上调（16→37）
+            // （上游 c0189d1 固化 pt_tradeoff_shining；GA 仍可通过 ParamOverride.pt_tradeoff_shining 覆盖）
             policy.pt_tradeoff_shining = 36.0;
-            policy.pt_tradeoff = 16.0;
+            // ===== GA 方向定稿（2026-09-17 ga_lab 合并，9 旋钮组合档）=====
+            // 来源：ga_lab fork (479fb38) 跨轮一致 GA 方向；本地 CRN 配对验证
+            // （4 马 × 2 种子块 = 420 局配对，组合档 Δ=+1394 t=12.55，8/8 单元显著）。
+            // 注意：单项均≤0/惰性，收益来自组合交互；weakboost(ramen_weak_train_boost)
+            // 单独 -1017 且拖累组合 → 明确不采纳。
+            policy.pt_tradeoff = 37.0;              // 满位普通档 16→37（GA 100% 上调）覆盖上行定稿
+            policy.pt_tradeoff_super = 35.0;        // 超拉面回合 0→35（GA 97%）
+            policy.region_weak_cover_weight = 35.0; // 弱位覆盖 查表→35（GA 97%；>0 直值）
+            policy.region_youqing_weight = 0.4;     // 友情词条 1.5→0.4（GA top 100% 降）
+            local.hint_bonus = 8.0;                 // 掌握度 6→8
+            local.max_base_score_sacrifice = 200.0; // 140→200
+            local.ramen_window_weight = 0.15;       // 0.10→0.15
+            local.checkpoint_scale = 0.15;          // 剧本PT前瞻 0→0.15
             LocalRamenTrainer::with_configs(policy, local)
         }
 
@@ -1951,7 +2007,7 @@ impl RecommendedRamenTrainer {
             // 回合级体力门限：不吃面回合统一 40（base_seed=61444 配对 100 局扫描峰值，
             // 30→40 总加权 +318；45 回落——门限过高休息过多）；吃面回合仅第三年放掉
             // （Y3 fail_rate_drop=100% 必成），第一/二年保留 40（Y1/Y2 吃面训练仍可能失败）。
-            years: [make(16.0, 40, 40), make(64.0, 40, 40), make(64.0, 40, 0)],
+            years: [make(56.0, 40, 40), make(64.0, 40, 40), make(64.0, 40, 0)],
             last_year: Mutex::new(None),
             record_last_year: true
         }
@@ -2828,6 +2884,69 @@ mod tests {
         c.check(matches!(trainer.last_year.lock().as_deref(), Ok(Some(0))), "普通实例记录本次决策年份");
         c.check(matches!(rollout.last_year.lock().as_deref(), Ok(None)), "rollout 跳过决策年份记录");
         c.check(rollout.last_breakdown().is_none(), "rollout 不采集原因日志");
+        c.finish()
+    }
+
+    /// `with_region_y3_single_focus` 把强度写入三年（字段只在第 3 年被消费），
+    /// 且经完整 `select_action` 路径后第 3 年选中组合确实全为单点地区、
+    /// 与默认档（focus=0）选区不同。
+    #[test]
+    #[allow(clippy::panic)]
+    fn recommended_region_y3_single_focus_end_to_end() -> Result<()> {
+        use crate::{
+            gamedata::{init_global, ramen::RAMENDATA},
+            utils::{Checks, get_workspace_root, init_test_logger}
+        };
+        use crate::game::{
+            InheritInfo,
+            ramen::{Operation, RamenAction, RamenGame, rules::get_region_combinations}
+        };
+        use rand::{SeedableRng, prelude::StdRng};
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let data = RAMENDATA.get().expect("init_global 后 RAMENDATA 已装载");
+        let is_single = |rid: usize| data.ramen_region_effect[rid].at_trains.len() == 1;
+
+        let deck = [302424, 302894, 303044, 302924, 303024, 303054];
+        let inherit = InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] };
+        let actions: Vec<RamenAction> = get_region_combinations(2)?
+            .iter()
+            .map(|&c| RamenAction::no_ramen(Operation::RegionSelect(c)))
+            .collect();
+
+        let mut game = RamenGame::newgame(102601, &deck, inherit)?;
+        game.base.turn = 47; // 第 3 年地区选择
+        let mut rng = StdRng::seed_from_u64(42);
+
+        let trainer = RecommendedRamenTrainer::new();
+        let idx0 = trainer.select_action(&game, &actions, &mut rng)?;
+        let f3 = RecommendedRamenTrainer::new().with_region_y3_single_focus(3);
+        let idx3 = f3.select_action(&game, &actions, &mut rng)?;
+        println!("Y3 选区: focus=0 → {:?} / focus=3 → {:?}", actions[idx0].operation, actions[idx3].operation);
+
+        let combo3 = match actions[idx3].operation {
+            Operation::RegionSelect(c) => c,
+            _ => return Err(anyhow::anyhow!("focus=3 选中不是 RegionSelect"))
+        };
+        let combo0 = match actions[idx0].operation {
+            Operation::RegionSelect(c) => c,
+            _ => return Err(anyhow::anyhow!("focus=0 选中不是 RegionSelect"))
+        };
+        let mut c = Checks::new();
+        c.check(
+            combo3.iter().all(|&rid| is_single(rid)),
+            "focus=3 经完整 select_action 选中组合全为单点地区"
+        );
+        c.check(combo0 != combo3, "focus=3 与 focus=0 选区不同");
+        c.check(
+            trainer.years.iter().all(|y| y.policy.config.region_y3_single_focus == 0)
+                && f3.years.iter().all(|y| y.policy.config.region_y3_single_focus == 3),
+            "with_region_y3_single_focus 三年统一写入"
+        );
         c.finish()
     }
 
@@ -3894,6 +4013,24 @@ mod tests {
         println!("LocalRamenTrainer::select_action  n/a [含整段打分链路]");
         println!("\n注意：reserve_penalty 是 LocalRamenTrainer private 方法，从外部不可直测。");
         println!("select_action 总耗时 - reserve_penalty 预估 ≈ 其他打分项。");
+    }
+
+    #[test]
+    fn test_with_tokens_tradeoff_parsing() -> anyhow::Result<()> {
+        // trd / trdsh / trds = N/100 刻度（与 9/14 扫参 trd1600/trdsh3600 命名一致）
+        let t = RecommendedRamenTrainer::with_tokens("trd800")?;
+        println!("trd800 → pt_tradeoff={}", t.years[0].policy.config.pt_tradeoff);
+        assert_eq!(t.years[0].policy.config.pt_tradeoff, 8.0);
+        let t = RecommendedRamenTrainer::with_tokens("trdsh3000")?;
+        println!("trdsh3000 → pt_tradeoff_shining={}", t.years[0].policy.config.pt_tradeoff_shining);
+        assert_eq!(t.years[0].policy.config.pt_tradeoff_shining, 30.0);
+        let t = RecommendedRamenTrainer::with_tokens("trds2400")?;
+        println!("trds2400 → pt_tradeoff_super={}", t.years[0].policy.config.pt_tradeoff_super);
+        assert_eq!(t.years[0].policy.config.pt_tradeoff_super, 24.0);
+        let bad = RecommendedRamenTrainer::with_tokens("trdxx");
+        println!("未知 token trdxx 是否报错: {}", bad.is_err());
+        assert!(bad.is_err(), "无法解析的 trd 值必须报错");
+        Ok(())
     }
 }
 

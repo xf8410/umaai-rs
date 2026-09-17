@@ -98,6 +98,11 @@ struct BenchConfig {
     /// `None` = 正式 preset（0.0，弱位覆盖不加分）。与 `tokens` 互斥。
     #[serde(default)]
     region_weak_cover: Option<f32>,
+    /// 覆盖卡组：5/6 个支援卡 idrank（`"id1,id2,id3,id4,id5[,friend]"`，逗号分隔）。
+    /// 指定后跳过 preset builds，只跑这一组卡（表格标签 `custom_deck`），
+    /// 用于配卡对照实验（如"默认卡组 vs GA 通解"同种子配对）。
+    #[serde(default)]
+    deck: Option<String>,
     /// mcts 专用：激进度上限
     ///
     /// 缺省 **0.0**（取普通均值）而非 `SearchConfig::default()` 的 50.0：
@@ -247,6 +252,7 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
                 println!(
                     "用法: bench_base [--runs N] [--seed S] [--log] [--out DIR]
 \n                     	[--trainer random|handwritten|mcts]
+\n                     	[--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
 \n                     	handwritten 专用: [--tokens TOKEN串]（如 --tokens rgn1 / rgn2 / reserve20）
 \n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
@@ -280,6 +286,26 @@ fn load_bench_config(workspace_root: &std::path::Path) -> Result<BenchConfig> {
         println!("提示: 未找到 bench_config.toml，使用内置默认参数");
         Ok(BenchConfig::default())
     }
+}
+
+/// 解析 `--deck` 覆盖串：`"id1,id2,id3,id4,id5[,friend]"`（idrank，逗号分隔）。
+/// 传 5 个时友人位用配置的 `friend`；传 6 个则第 6 个为友人。
+fn parse_deck_override(s: &str, friend: u32) -> Result<[u32; 6]> {
+    let v: Vec<u32> = s
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u32>())
+        .collect::<std::result::Result<_, _>>()?;
+    anyhow::ensure!(
+        v.len() == 5 || v.len() == 6,
+        "--deck 需要 5 个支援卡 idrank（友人可省略）或 6 个含友人，收到 {} 个: {s}",
+        v.len()
+    );
+    let mut deck = [0u32; 6];
+    deck[..5].copy_from_slice(&v[..5]);
+    deck[5] = if v.len() == 6 { v[5] } else { friend };
+    Ok(deck)
 }
 
 /// 按决策阶段分组统计耗时（mean us / max us / 次数），按阶段名排序
@@ -442,13 +468,13 @@ fn main() -> Result<()> {
                         println!("已加载基因组覆盖层: {gf}");
                         LoggingTrainer::new(RecommendedRamenTrainer::with_overrides(&ov), log_seed)
                     } else if let Some(w) = cfg.region_weak_cover {
-                        // 只覆盖地区弱位加分权重，其余 10 个实验参数取正式 preset 精确值：
-                        // pt_rates=[16,64,64] / gap=0.5 / overflow=0.5 / max_sacrifice=140 /
-                        // ramen_window=0.10 / reserve_max=40 / early_bond=8 / hint_bonus=6 /
-                        // weakboost=0（走查找表） / eat_requires_covered_train=true。
+                        // 只覆盖地区弱位加分权重，其余 10 个实验参数取正式 preset 精确值
+                        // （即 RecommendedRamenTrainer::new()，含 2026-09-17 GA 方向定稿：
+                        // pt_rates=[56,64,64] / pt_tradeoff=37 / weak_cover 直值 35 等），
+                        // 保证与 `new()` 的唯一差异就是本权重。
                         LoggingTrainer::new(
                             RecommendedRamenTrainer::with_experiment_overrides(
-                                [16.0, 64.0, 64.0], 0.5, 0.5, 140.0, 0.10, 40.0, 8.0, 6.0, 0.0, w, true
+                                [56.0, 64.0, 64.0], 0.5, 0.5, 200.0, 0.15, 40.0, 8.0, 8.0, 0.0, w, true
                             ),
                             log_seed
                         )
