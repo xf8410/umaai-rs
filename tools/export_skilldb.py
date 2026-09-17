@@ -11,8 +11,10 @@
    用途：score_explain 的技能池（价格、评分增量、名称）。
 
 2. hintDB.json —— 支援卡自带 hint 技能，来源 single_mode_hint_gain：
-   card_id → [{skill_id, type}]，type 0=白圈 hint（近似打 9 折）、1=金圈（8 折）。
-   用途：--pool deck-hint 口径的可买集合与折扣。
+   card_id → [{skill_id, kind}]。2026-09-17 修正：skill_id = hint_value_1
+   （限 hint_gain_type=0，363 个技能 100% 命中 skillDB）；hint_id（9081xxx 段）
+   是 hint 版式 id 不是技能。kind 统一 0（白圈 9 折近似，见函数内注释）。
+   用途：--pool deck-hint 口径的可买集合与折扣（终局买技能的候选池）。
 
 3. ura_status_to_point.json —— URA（UmamusumeResponseAnalyzer）开源仓库
    Database.cs 内嵌的 StatusToPoint 表（0..2500 档），属性值 → 评价点。
@@ -86,15 +88,35 @@ def main() -> None:
     print(f"skillDB.json: {len(skills)} 技能（可买池 {buyable}）")
 
     # ---- 2) hintDB.json ----
+    # 2026-09-17 修正：skill_id 取 hint_value_1（限 hint_gain_type=0 的行）。
+    # 实测 master.mdb：hint_gain_type=0 共 3805 行、363 个唯一技能 id，100% 命中
+    # skillDB（带 grade/cost）；hint_gain_type=1 的 1139 行 hint_value_1 ∈ {1..5,30}
+    # 是非技能增益，过滤。hint_id（9081xxx 段）只是 hint 版式 id，不是技能——
+    # 旧版错把 hint_id 存成 skill_id，导致 deck-hint 候选池全部无法定价/评分，
+    # 终局买技能空转（实测：buyable 全 0）。
+    # 折扣近似：hint 行不区分白/金圈等级，统一按白圈 9 折（kind=0 → 10% off），
+    # 与 score_explain::deck_hint_discounts 的 kind 映射一致。
     hints = defaultdict(list)
-    for cid, hid, kind in cur.execute(
-        "select support_card_id, hint_id, hint_gain_type from single_mode_hint_gain"
+    for cid, skill_id in cur.execute(
+        "select support_card_id, hint_value_1 from single_mode_hint_gain "
+        "where hint_gain_type = 0"
     ):
-        hints[str(cid)].append({"skill_id": hid, "kind": kind})
+        hints[str(cid)].append({"skill_id": skill_id, "kind": 0})
+    # (卡, 技能) 去重（同一 hint 类型多 hint_group 行只代表同一技能重复获得）
+    for cid in hints:
+        seen = set()
+        uniq = []
+        for e in hints[cid]:
+            if e["skill_id"] not in seen:
+                seen.add(e["skill_id"])
+                uniq.append(e)
+        hints[cid] = sorted(uniq, key=lambda x: x["skill_id"])
     (GD / "hintDB.json").write_text(
         json.dumps(hints, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
-    print(f"hintDB.json: {len(hints)} 张支援卡自带 hint 技能")
+    n_cards = sum(1 for v in hints.values() if v)
+    n_skills = len({e["skill_id"] for v in hints.values() for e in v})
+    print(f"hintDB.json: {n_cards} 张支援卡自带 hint 技能，唯一技能 {n_skills} 个")
 
     # ---- 3) ura_status_to_point.json：从 URA 源码抓（需联网或本地 clone）----
     ura_file = GD / "ura_status_to_point.json"
