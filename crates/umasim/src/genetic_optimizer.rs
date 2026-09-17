@@ -1387,6 +1387,9 @@ mod tests {
                 mean_scenario_pt: [0.0; 3],
                 race_fail_rate: 0.0,
                 mean_rmj_ok: 3.0,
+                max_score: fitness,
+                min_score: fitness,
+                median_score: fitness,
                 n_builds: 3,
                 runs_per_build: 20
             }
@@ -1729,7 +1732,7 @@ mod tests {
         let genome = GaGenome::all_none();
         let comp_counts = bench::DEFAULT_COMP_COUNTS;
         let comp_idx = bench::DEFAULT_COMP_INDEX;
-        let card_sel = CardSelection { indices: [0; 5] };
+        let card_sel = CardSelection { indices: [0; 5], friend_idrank: crate::card_pool::FRIEND_IDRANK };
         let gh = genome_hash(&genome);
         let ch = super::comp_hash(comp_idx, &comp_counts);
         let sh = card_sel.hash_key();
@@ -1771,7 +1774,7 @@ mod tests {
         let genome = GaGenome::all_none();
         let comp_counts = bench::DEFAULT_COMP_COUNTS;
         let comp_idx = bench::DEFAULT_COMP_INDEX;
-        let card_sel = CardSelection { indices: [0; 5] };
+        let card_sel = CardSelection { indices: [0; 5], friend_idrank: crate::card_pool::FRIEND_IDRANK };
         let gh = genome_hash(&genome);
         let ch = super::comp_hash(comp_idx, &comp_counts);
         let sh = card_sel.hash_key();
@@ -2095,8 +2098,8 @@ mod tests {
     fn ga_three_dim_hash_distinct() -> Result<()> {
         let genome_a = GaGenome::all_none();
         let genome_b = GaGenome::all_preset();
-        let card_sel_a = CardSelection { indices: [0; 5] };
-        let card_sel_b = CardSelection { indices: [1, 0, 0, 0, 0] };
+        let card_sel_a = CardSelection { indices: [0; 5], friend_idrank: crate::card_pool::FRIEND_IDRANK };
+        let card_sel_b = CardSelection { indices: [1, 0, 0, 0, 0], friend_idrank: crate::card_pool::FRIEND_IDRANK };
         let comp_a = bench::DEFAULT_COMP_INDEX;
         let comp_b = 0usize; // [0,0,0,2,3] or similar
 

@@ -404,8 +404,8 @@ mod tests {
         let pool = SsrPool::load()?;
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
-        let a = CardSelection { indices: [0; ATTR_COUNT] };
-        let b = CardSelection { indices: [1; ATTR_COUNT] };
+        let a = CardSelection { indices: [0; ATTR_COUNT], friend_idrank: FRIEND_IDRANK };
+        let b = CardSelection { indices: [1; ATTR_COUNT], friend_idrank: FRIEND_IDRANK };
 
         let child = CardSelection::crossover(&a, &b, &mut rng);
         println!("交叉结果: {:?}", child.indices);
