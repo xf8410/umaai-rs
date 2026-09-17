@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GA 实验室战报：育成 AI 策略全账（大白话版）</title>
+<style>
+:root{
+  --bg:#ffffff; --ink:#1c2430; --sub:#5a6572; --line:#e3e7ec; --soft:#f6f8fa;
+  --accent:#0b6b4f; --accent-weak:#e7f3ee; --warn:#a04a00; --warn-weak:#fdf2e5;
+  --bad:#9c2f2f; --bad-weak:#fbeeee; --gold:#8a6d1a; --gold-weak:#faf4dc;
+  --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  font-size:16px;line-height:1.75;overflow-wrap:break-word}
+main{max-width:1080px;margin:0 auto;padding:28px 20px 64px}
+h1{font-size:26px;line-height:1.35;margin:8px 0 4px}
+h2{font-size:20px;margin:44px 0 12px;padding-top:10px;border-top:2px solid var(--ink)}
+h3{font-size:17px;margin:24px 0 8px}
+p{margin:10px 0}
+.sub{color:var(--sub);font-size:14px}
+.lede{font-size:17px;font-weight:600;margin:14px 0 6px}
+nav.toc{background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:18px 0 8px}
+nav.toc ol{margin:6px 0 2px;padding-left:22px}
+nav.toc a{color:var(--accent);text-decoration:none}
+nav.toc a:hover{text-decoration:underline}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14.5px}
+caption{caption-side:top;text-align:left;font-weight:600;padding:6px 0;color:var(--sub)}
+th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:600}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tbl-wrap{overflow-x:auto}
+code{font-family:var(--mono);font-size:.92em;background:var(--soft);border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.big{font-size:34px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+.tag{display:inline-block;border-radius:20px;padding:1px 10px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.tag.ok{background:var(--accent-weak);color:var(--accent)}
+.tag.warn{background:var(--warn-weak);color:var(--warn)}
+.tag.bad{background:var(--bad-weak);color:var(--bad)}
+.tag.gold{background:var(--gold-weak);color:var(--gold)}
+.callout{border-left:4px solid var(--accent);background:var(--accent-weak);border-radius:0 8px 8px 0;padding:10px 14px;margin:14px 0}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-weak)}
+.callout.bad{border-left-color:var(--bad);background:var(--bad-weak)}
+.tl{list-style:none;margin:14px 0;padding:0;position:relative}
+.tl::before{content:"";position:absolute;left:9px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tl li{position:relative;padding:0 0 14px 34px}
+.tl li::before{content:"";position:absolute;left:2px;top:7px;width:16px;height:16px;border-radius:50%;
+  background:var(--bg);border:3px solid var(--accent)}
+.tl .t{font-weight:700}
+.tl .d{color:var(--sub);font-size:14px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:14px 0}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px 16px;background:var(--bg)}
+.card h3{margin:2px 0 6px;font-size:16px}
+.card .role{font-size:13px;color:var(--accent);font-weight:600}
+a{color:var(--accent)}
+a:hover{text-decoration:underline}
+:focus-visible{outline:3px solid #0b6b4f55;outline-offset:2px;border-radius:4px}
+details{border:1px solid var(--line);border-radius:8px;padding:8px 14px;margin:10px 0;background:var(--soft)}
+summary{cursor:pointer;font-weight:600}
+dl.dict{margin:10px 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0 26px}
+dl.dict dt{font-weight:700;margin-top:10px}
+dl.dict dd{margin:2px 0 0;color:var(--sub);font-size:14.5px}
+footer{margin-top:48px;border-top:1px solid var(--line);padding-top:12px;color:var(--sub);font-size:13.5px}
+@media print{
+  nav.toc{display:none}
+  body{font-size:12.5px}
+  h2{break-after:avoid}
+  table{break-inside:auto}
+  tr{break-inside:avoid}
+  .card,.callout{break-inside:avoid}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<main>
+<header>
+<p class="sub">GA 实验室 · xf8410/umaai-rs · 截至 2026-09-17 · 所有分数都出自模拟器实测，可复现</p>
+<h1>育成 AI 策略全账：试过什么、改了什么、卡在哪</h1>
+</header>
+
+<p class="lede">一句话看懂：这套系统给育成模拟器装了一个"教练大脑"，每回合决定<span class="tag ok">练什么</span> <span class="tag ok">休息</span> <span class="tag ok">出门</span> <span class="tag ok">比赛</span> <span class="tag ok">友人卡</span>；再用遗传算法（GA）自动拧教练手册里的 77 个参数旋钮，把育成终局考试得分一路刷上去。</p>
+<p>目前随机抽马跑批的最高分：<span class="big">71415.6</span>　<span class="sub">（换考卷重考 71368.0，几乎没掉分 = 不是背题背出来的）</span></p>
+
+<nav class="toc" aria-label="目录">
+<ol>
+<li><a href="#routes">四条技术路线，各自在干嘛</a></li>
+<li><a href="#improve">和原版手写策略比，改了什么（核心）</a></li>
+<li><a href="#gate">筛选方式和硬门</a></li>
+<li><a href="#limit">限制：诚实账</a></li>
+<li><a href="#milestone">提分里程碑账</a></li>
+<li><a href="#dict">名词小抄（玩家语义词典）</a></li>
+</ol>
+</nav>
+
+<h2 id="routes">一、四条技术路线，各自在干嘛</h2>
+<div class="grid2">
+<div class="card"><h3>手写规则派 <span class="tag ok">主力引擎</span></h3>
+<p class="role">文件：local_ramen_trainer.rs + ramen/policy.rs</p>
+<p>人把"教练经验"写成规则 + 打分表。每回合把<b>休息、外出、练速耐力根智、比赛、友人卡</b>五个动作各打一个分，选分最高的执行。跑批（bench）用的就是它，快：一局几秒，一天能跑几十万局。</p></div>
+<div class="card"><h3>GA 调参派 <span class="tag gold">提分主力</span></h3>
+<p class="role">文件：genetic_optimizer.rs（77 基因覆盖层）</p>
+<p>GA 不重写手册，只拧手册里的旋钮（"体力低于多少才休息""友人卡加多少分"这类数值）。一代 50 套参数各跑几局考试，高分配对的"生孩子"（交叉+变异），百代之后留下最优参数组。这些参数只做<b>覆盖层</b>，不动底层代码。</p></div>
+<div class="card"><h3>蒙特卡洛搜索派 <span class="tag warn">评估与预览</span></h3>
+<p class="role">RamenMCTS + handwritten_evaluator</p>
+<p>MCTS 每回合往前模拟很多局再选走法，上限更高但太慢（单局要很久）。所以不进跑分主线，用在两处：手机 app 浮窗的"终局预估"、以及给 NN 当老师打谱。手写引擎里也借了它的思路：局部往前看一小段（lookahead）再打分。</p></div>
+<div class="card"><h3>神经网络派 <span class="tag warn">数据生产线</span></h3>
+<p class="role">754 维编码，5 套数据共约 5.6 万局</p>
+<p>模拟器<b>不跑 NN 决策</b>。NN 线的产出是"教材"：让 MCTS 当老师打谱，把（局面，老师选法，终局分）存成训练数据，其他 AI 直接取用。三套编码并存：暮雪 Python 384 维（旧模型）、Rust 540 维（旧模拟器）、754 维（新一代数据）。009b 权重缺失，NN 亲自上场跑分暂时挂起。</p></div>
+</div>
+<div class="callout"><b>蒸馏关系一张图：</b>MCTS 当老师打谱 → 训练数据 → NN 学生；手写策略是另一位独立的老师，GA 是手写策略的"私教"（只调参数不改教义）。两条师资线目前没合并。</div>
+
+<h2 id="improve">二、和原版手写策略比，改了什么（核心）</h2>
+<p>原版是上游 Sigmoid 的 preset（出厂教练手册）。它在行为上有一批"人类玩家一眼看出亏"的毛病。下面五条全部落地在 commit <code>479fb38</code>，r5 跑批起生效：</p>
+<div class="tbl-wrap">
+<table>
+<caption>五条策略修复：原版行为 → 我们的改动 → 实测</caption>
+<thead><tr><th>#</th><th>原版毛病（玩家视角）</th><th>改动（代码做了什么）</th><th>实测结果</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><b>友人卡浪费</b>：第三年打完 5 次没用完，白亏好感度加成</td><td>新增"守门4"：剩余次数 ≥ 剩余可用回合 → 强制友人外出；比赛回合自动跳过往前挪（连战提前安排）</td><td><span class="tag ok">r5 起全员合规</span></td></tr>
+<tr><td class="num">2</td><td><b>合宿摆烂</b>：7月上~8月下合宿期间居然会去休息、打比赛，浪费训练等级 5 的 buff</td><td>合宿 8 回合内：休息和比赛直接打成负无穷分（永远不选）；体力危险线 32 以下仍保命休息</td><td><span class="tag ok">合宿全练</span></td></tr>
+<tr><td class="num">3</td><td><b>满体力闲逛</b>：体力明明快满，还去休息、出门散心</td><td>体力 ≥ 70 时，休息和普通外出各扣 200 分</td><td><span class="tag ok">行为压住</span></td></tr>
+<tr><td class="num">4</td><td><b>不敢练智</b>：体力稍高就放弃智力训练</td><td>智力训练单独开体力豁免：体力 ≥ 32 就能练（智训还回 5 点体力，几乎零风险）</td><td><span class="tag gold">智3配卡冲进卡组前五</span></td></tr>
+<tr><td class="num">5</td><td><b>时机感差</b>：什么时候练/出/歇/赛没概念（用户定义的"掌握度"）</td><td>以上四条全是时机修正：该出手时出手，不该出手时压分</td><td><span class="tag warn">分数中性</span>：55 骑同马前后对比净 −0.07%，行为摆正了但没直接涨分</td></tr>
+</tbody>
+</table>
+</div>
+<div class="callout warn"><b>诚实备注：</b>五条修复没有让分数暴涨（同马对比基本持平），它们的价值是把行为扳到"人类玩家认可的正确姿势"，为 GA 继续提分垫了不亏分的底。</div>
+
+<h3>除策略行为外，工程层的改进</h3>
+<div class="tbl-wrap">
+<table>
+<thead><tr><th>改进</th><th>干了什么</th><th>效果</th></tr></thead>
+<tbody>
+<tr><td><b>GA 两级评估 + 期末考</b></td><td>初评 3 套配置×20 局海选 → 幸存者 7 套×60 局精评 → 冠军换种子重考（holdout）</td><td>跑批时间可控，冠军分数不带"背题"水分（gap 平均仅 120~140 分）</td></tr>
+<tr><td><b>deck-scan 两阶段淘汰</b></td><td>全部卡组×10 局海选 → 前 40 名 → ×30 局决赛</td><td>低分配卡早死早超生，算力花在刀刃上</td></tr>
+<tr><td><b>CRN 噪声纪律</b></td><td>任何"提升"必须同种子逐局配对、统计显著才转正；不显著正式剔除留档</td><td>杀掉了"噪声晋级"：摆烂修复线 12 个补丁全部凭数据判负，不硬留</td></tr>
+<tr><td><b>本体卡硬门</b></td><td>马娘不能带自己本体卡（游戏规则）：运行时按 chara_id 自动剔 + 手动排除名单</td><td>配卡解 100% 合法，296 张池自动变 290 张</td></tr>
+<tr><td><b>明细账 35 列修复</b></td><td>ga_detail.csv 补 deck 列，修掉列数错位</td><td>r4 白跑 4 小时的教训，之后短跑验货后再放长跑</td></tr>
+<tr><td><b>uma-scan 多马同卷对比</b></td><td>7 匹马共用同一套 30 个种子 + 同一卡组，唯一变量是马娘</td><td>马娘间真差距从噪声里挖出来（见第五节）</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="gate">三、筛选方式和硬门</h2>
+<h3>分数怎么算（适应度）</h3>
+<p>适应度 = <b>每局考试平均分 − 800 × 比赛失败次数</b>。比赛挂科重罚，防"摆烂避赛刷分"；技能点/育成点只记账不进分（它们是确定性收入，不需要护栏）。冠军参数还要在<b>换种子</b>的 holdout 上重考一遍——分数接近才算真本事。</p>
+<h3>GA 的进化机制</h3>
+<ul>
+<li>初始 50 套参数：1 套全默认 + 1 套全出厂 + 48 套随机扰动</li>
+<li>锦标赛选亲（k=3）→ 均匀交叉（0.9）→ 变异步长从 0.15 逐步衰减到 0.03（前期大步探索，后期精修）</li>
+<li>精英保留 4 套；相同参数只考一次（缓存去重），100 代约 87 万局</li>
+<li>随机抽马跑批（r5~r7）：每轮随机抽一匹马 + 独立 GA，多轮合并看分布</li>
+</ul>
+<h3>硬门清单</h3>
+<ul>
+<li><b>比赛失败罚 800</b>：避赛刷分直接出局</li>
+<li><b>守门链优先级</b>：自选比赛达标 &gt; 生病治病 &gt; 体力 &lt; 40 休息 &gt; 心情差外出 &gt; 友人卡截止 &gt; 打分表</li>
+<li><b>合宿禁令</b>：8 回合内休息/比赛 = 负分，永不入选</li>
+<li><b>本体卡禁令</b>：谁育成谁的本体卡自动出局</li>
+<li><b>活动卡不进池</b>：卡池只收录常驻卡，防止"活动卡撑分"虚高</li>
+<li><b>转正门槛</b>：CRN 配对显著提升才进主线，否则留档剔除（用户 09-14 定调）</li>
+</ul>
+
+<h2 id="limit">四、限制：诚实账</h2>
+<div class="tbl-wrap">
+<table>
+<thead><tr><th>限制</th><th>具体是什么</th><th>影响</th></tr></thead>
+<tbody>
+<tr><td><b>模拟器不算适性</b></td><td>跑法/距离/场地适性、种马红因子都不进评分；比赛结算只看五维+技能。红因子在模拟器里没有这个旋钮</td><td>跑分排名 = 育成上限；现实比赛还要叠适性维度。uma-scan 七马里只有迷人景致的"缺长距离适性"转化成显著掉分，其他短板没被拉开</td></tr>
+<tr><td><b>单局噪声大</b></td><td>单马 30 局 std 2100~3000 分</td><td>裸均值会骗人，一切结论必须配对检验；300 局下配对标准误 ±40</td></tr>
+<tr><td><b>抽马随机</b></td><td>每轮随机抽马，谁抽到容易的马谁分高</td><td>单轮 max 没意义，要看合并分布（r5+r6 已合并 314 轮/187 骑）</td></tr>
+<tr><td><b>摆烂病冻结中</b></td><td>病根已查明（体力 45 一刀切守门 + 属性溢出不计价），但 12 个修复补丁全判负</td><td>按噪声纪律不硬留，等最后一个候选（友情+诀窍计价）授权后重估</td></tr>
+<tr><td><b>NN 不进主线</b></td><td>009b 权重缺失；旧模型 384 维编码与 Rust 540 维不兼容</td><td>NN 亲自跑分挂起；目前 NN 线只产训练数据供其他 AI</td></tr>
+<tr><td><b>MCTS 太慢</b></td><td>单局要很久</td><td>只能当老师和预览，跑批主线必须用手写引擎</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2 id="milestone">五、提分里程碑账</h2>
+<ul class="tl">
+<li><span class="t">出厂手册基线 64752（09-15）</span><span class="d">上游 preset 直跑波旁，GA 的起跑线。锚点漂移已确认是上游自带问题，非我们引入</span></li>
+<li><span class="t">GA 小预算 64484（v3）</span><span class="d">25 个体×20 代+海选 20 局：噪声大、预算小，输在预算不够</span></li>
+<li><span class="t">GA 大预算 68732.6（v4，+6.15%）</span><span class="d">波旁最优 68732.6 / 期末考 68704.7，12 分钟跑完 87 万局。配卡 3速+1耐+1智</span></li>
+<li><span class="t">换马验证 68218.5（v5 救世主）</span><span class="d">换匹马只差 0.75%，但最优配卡完全不同（全速 5 张）——"不同马娘分数差不多，但思路要换"是可用结论</span></li>
+<li><span class="t">策略五规则修复（09-17，479fb38）</span><span class="d">友人卡/合宿/满体力/练智/时机感五条落地；55 骑同马对比净 −0.07%，行为合规分数不伤</span></li>
+<li><span class="t">随机马跑批 r5~r7：最高 71415.6</span><span class="d">r5 抽到目白善信刷出全场最高；期末考 71368 几乎不掉分。合并账（314 轮）平均 69603.7</span></li>
+<li><span class="t">配卡通解定谳</span><span class="d">96.2% 轮次收敛"速2耐1智2"；92% 收敛到同一组五卡：待兼诗歌剧（速）+千明代表（速）+名将怒涛（耐）+优秀素质（智）+青春永驻（智）。高分段 top25% 100% 都是这套骨架</span></li>
+<li><span class="t">七马同卷对比（uma-scan）</span><span class="d">统一通解卡组下 7 匹差追双A马 67700 档：梦之旅 68196 居首；迷人景致 66920 是唯一被统计显著压制的（缺长距离适性转化成了真掉分）</span></li>
+</ul>
+
+<h2 id="dict">六、名词小抄（玩家语义词典）</h2>
+<dl class="dict">
+<dt>适应度</dt><dd>育成终局的考试得分，本报告里所有"分"都指它。平均分 − 800×比赛挂科。</dd>
+<dt>GA / 基因</dt><dd>遗传算法。一个"基因组"= 一套教练参数（77 个旋钮的拧法）。代与代之间优胜劣汰。</dd>
+<dt>守门</dt><dd>打分表之前的强制规则：生病必须治、体力见底必须歇、友人卡临期必须用。守门赢过一切打分。</dd>
+<dt>holdout（期末考）</dt><dd>换一批随机种子重考。分数接近初赛 = 没背题；掉很多 = 过拟合。</dd>
+<dt>CRN 配对</dt><dd>同种子同卷重考对比。把马娘间/参数间的真差距和运气分离开的唯一办法。</dd>
+<dt>合宿</dt><dd>第二、三年 7月上~8月下的夏季集训，训练等级直接拉满 5。这 8 回合休息或比赛都是浪费。</dd>
+<dt>友人卡</dt><dd>友人支援卡，育成里可外出 5 次，12月上前用完不亏。解锁后的外出回体力+降压力+给属性。</dd>
+<dt>差追</dt><dd>跑法适性"差し（后追超车）+ 追込（最后一口气）"双 A。当前七马实验的筛选条件。</dd>
+<dt>红因子</dt><dd>种马继承的适性因子（蓝因子加属性、红因子加适性）。模拟器目前不建模，跑分不受它影响。</dd>
+<dt>摆烂</dt><dd>AI 该训练时反复休息的病。行为指标：每局休息 4.1 次。病根查明，修复线冻结中。</dd>
+<dt>本体卡</dt><dd>育成马娘自己的支援卡。游戏规则禁止自戴，程序自动剔除。</dd>
+<dt>万能卡组</dt><dd>GA 各轮独立收敛出的同一组五卡（速2耐1智2）。跨 314 轮 92% 出现率，视为当前版本通解。</dd>
+</dl>
+
+<footer>
+<p>数据来源：xf8410/umaai-rs 仓库实测跑批（<a href="https://github.com/xf8410/umaai-rs/actions" target="_blank" rel="noopener noreferrer">GitHub Actions · GA 实验室入口</a>）；策略修复 commit 479fb38；收账报告 ga_r5/ga_r6_settle_report.md；多马对比 uma-scan run 35164342228。报告由风起整理，2026-09-17。</p>
+</footer>
+</main>
+</body>
+</html>
