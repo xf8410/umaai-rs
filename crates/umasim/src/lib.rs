@@ -10,6 +10,7 @@ pub mod output;
 pub mod rng;
 pub mod sample_collector;
 pub mod sampler;
+pub mod score_explain;
 pub mod search;
 pub mod trainer;
 pub mod training_sample;
