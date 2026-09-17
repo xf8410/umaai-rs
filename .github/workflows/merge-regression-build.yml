@@ -1,0 +1,36 @@
+name: merge-regression-build
+
+# 上游合并后的编译验证 + 守门单测 + bench_base 产物分发
+# 手动触发；不做任何优化/跑批，纯 build+test+upload
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: merge-regression-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust（stable minimal）
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build --release（bench_base）
+        run: cargo build --release -p umasim --bin bench_base
+
+      - name: cargo test 守门单测（umasim）
+        run: cargo test --release -p umasim 2>&1 | tail -40
+
+      - name: 上传 bench_base 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench_base-release
+          path: target/release/bench_base
+          retention-days: 30
+          if-no-files-found: error
