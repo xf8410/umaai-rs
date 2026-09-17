@@ -119,7 +119,12 @@ struct BenchConfig {
     /// 指定后经 `parse_override_toml` 解析并 `with_overrides` 构造 trainer，
     /// 用于 GA 最优轮回放与育成过程报告（--log 决策日志）。与 tokens/region-weak-cover 互斥。
     #[serde(default)]
-    genome_file: Option<String>
+    genome_file: Option<String>,
+    /// 只跑指定名字的 player_builds 子集：`"speed,stamina,power_wisdom"`（逗号分隔）。
+    /// 用于与 GA 初筛口径对齐（select_screen_builds 选速/耐/智卡最多的 3 个 build）。
+    /// 未指定 = 跑全部 preset builds。名字须与 bench_config.toml [player_builds] key 一致。
+    #[serde(default)]
+    builds_filter: Option<String>
 }
 
 /// `search_n` 缺省值：小预算档，够跑通又不至于把跑批时间拖爆
@@ -165,7 +170,8 @@ impl Default for BenchConfig {
             radical_factor_max: 0.0,
             deck: None,
             deck_spec: None,
-            genome_file: None
+            genome_file: None,
+            builds_filter: None
         }
     }
 }
@@ -320,7 +326,17 @@ fn main() -> Result<()> {
         .build_global()?;
 
     // 卡组来源：玩家 build 预置（每个 build 用代表卡自动生成卡组）
-    let builds = load_player_builds()?;
+    let mut builds = load_player_builds()?;
+    if let Some(filter) = &cfg.builds_filter {
+        let names: Vec<&str> = filter.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        anyhow::ensure!(!names.is_empty(), "--builds 过滤列表为空");
+        builds.retain(|b| names.iter().any(|n| b.name == *n));
+        anyhow::ensure!(
+            !builds.is_empty(),
+            "--builds 过滤后无匹配卡组: {}",
+            filter
+        );
+    }
     let data = global!(GAMEDATA);
     let uma_name = data.get_uma(cfg.uma)?.name.clone();
 
