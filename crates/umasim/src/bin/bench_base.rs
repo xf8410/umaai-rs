@@ -110,11 +110,6 @@ struct BenchConfig {
     /// 那样测出来的就不是「搜索能否提高**均分**」。要复现 C++ 风格行为再手动调高。
     #[serde(default)]
     radical_factor_max: f64,
-    /// 覆盖卡组：idrank 逗号分隔串 `"id1,id2,id3,id4,id5[,friend]"`。
-    /// 传 5 个时友人位用 `friend`。指定后跳过 preset builds，只跑这一组卡
-    /// （标签 `custom_deck`），用于配卡对照实验（如速卡张数扫描）。
-    #[serde(default)]
-    deck: Option<String>,
     /// 覆盖卡组（张数模式）：`"c1,c2,c3,c4,c5"` = [速,耐,力,根,智] 各属性张数（合计=5）。
     /// 每属性取 SSR 池（card_id 降序）前 count 张，友人位用 `friend`。
     /// 允许单属性 > 3（如速 5），不受布局表约束，用于速卡强度扫描实验。
@@ -286,26 +281,6 @@ fn load_bench_config(workspace_root: &std::path::Path) -> Result<BenchConfig> {
         println!("提示: 未找到 bench_config.toml，使用内置默认参数");
         Ok(BenchConfig::default())
     }
-}
-
-/// 解析 `--deck` 覆盖串：`"id1,id2,id3,id4,id5[,friend]"`（idrank，逗号分隔）。
-/// 传 5 个时友人位用配置的 `friend`；传 6 个则第 6 个为友人。
-fn parse_deck_override(s: &str, friend: u32) -> Result<[u32; 6]> {
-    let v: Vec<u32> = s
-        .split(',')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .map(|p| p.parse::<u32>())
-        .collect::<std::result::Result<_, _>>()?;
-    anyhow::ensure!(
-        v.len() == 5 || v.len() == 6,
-        "--deck 需要 5 个支援卡 idrank（友人可省略）或 6 个含友人，收到 {} 个: {s}",
-        v.len()
-    );
-    let mut deck = [0u32; 6];
-    deck[..5].copy_from_slice(&v[..5]);
-    deck[5] = if v.len() == 6 { v[5] } else { friend };
-    Ok(deck)
 }
 
 /// 按决策阶段分组统计耗时（mean us / max us / 次数），按阶段名排序
