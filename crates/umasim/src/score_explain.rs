@@ -19,16 +19,16 @@
 //!    属性评分查 URA 开源仓库的 StatusToPoint 表（0..2500 档，1200+ 区间权重更高）。
 //!    这个口径下技能点本身不算分，花掉换技能就等于把技能点"兑现"成了评分。
 //!
-//! 2. **本仓库结算口径（拉面杯 RMJ）**：见 `game/uma.rs` 的 `calc_score`：
-//!    `总分 = skill_score + (skill_pt + total_hints × 6.5) × 2 + Σ 五维评分`
-//!    注意技能点每 1 点直接按 2 分计入！所以买技能的净增分 =
-//!    `评分增量 − 价格 × 2`。多数技能是亏的（比如 110 点买 170 分技能，净亏 50），
-//!    只有评分增量 > 价格 × 2 的技能才值得买。这是 URA 没有的洞察，
-//!    也是本模块作为"增强项"输出第二种口径推荐表的原因。
+//! 2. **本仓库结算口径（新口径 2026-09-17，终局买技能）**：见 `game/uma.rs` 的 `calc_score`：
+//!    `总分 = 属性分(URA表) + (固有510 + Σ买到技能Grade) + 结余PT × 2`
+//!    育成全程**不学技能**只攒 Pt；育成结束时按「净增分 = Grade − 价格×2 > 0」
+//!    从高到低贪心买入（×2 是 URA 截图对账的技能价格折算：1 技能点 = 2 评价点）。
+//!    PT 项选择「结余折算」而非删除：买技能花掉的 PT 按同一折算率退出计分，
+//!    「净增分 > 0 才买」的判据才与计分公式逐位自洽。
 //!
 //! 两口径的属性分在 0..1200 区间查的表完全一致（同一张官方表）；1200 之后本仓库
-//! 沿用 3399 档延拓（拉面杯实测口径），URA 用官方拟合到 2500 档。差异见
-//! `formula_compare()`，报告里也有一张对照表。
+//! 新口径直接采用 URA 官方 2500 档（旧口径曾用 3399 档延拓，见 `LocalScoring::legacy_from_constants`）。
+//! 差异见 `formula_compare()`，报告里也有一张对照表。
 //!
 //! # 数据来源（全部有据可查，无脑补）
 //!
@@ -49,10 +49,14 @@
 //!   hint_gain_type=0（白圈）→ 打 9 折，hint_gain_type=1（金圈）→ 打 8 折。
 //!   全池口径一律原价。
 //! - 「可购买技能集」在全池口径下 = disable_singlemode=0 且有价格的技能
+//! - 卡组 hint 技能（hintDB 里的 9081xxx 段）在现有数据源（旧版 master.mdb /
+//!   上游 gamedata）中【没有名字、价格、评分】，按「禁止脑补」铁律不参与购买推荐，
+//!   只用于跨卡组「技能面」对比（Jaccard 相似度）
 //!   （rarity 1 普通 / 2 金），马娘固有（rarity 3+）不可买。卡组 hint 口径下 =
 //!   卡组 6 张支援卡自带的 hint 技能。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -142,12 +146,16 @@ pub struct UmaSnapshot {
     pub five_status: [i32; 5],
     /// 五维上限（剧本基值 + 继承上限）
     pub five_status_limit: [i32; 5],
-    /// 已学技能评分之和（模拟器里 = 固有技能 510 分，育成过程不买技能）
+    /// 已学技能评分之和（新口径：固有 510 + 终局买技能 ΣGrade）
     pub skill_score: i32,
-    /// 剩余技能点（模拟器全程只攒不花）
+    /// 剩余技能点（新口径：终局买入后 = 结余）
     pub skill_pt: i32,
     /// 全程获得的 hint 等级总数（每个 hint 等级折 6.5 技能点）
-    pub total_hints: i32
+    pub total_hints: i32,
+    /// 终局买技能账目：已买 Grade 合计（0 = 未结算或空买）
+    pub bought_grades: i32,
+    /// 终局买技能账目：已购总花费（skill_pt 已扣减）
+    pub bought_cost: i32
 }
 
 impl UmaSnapshot {
@@ -158,8 +166,21 @@ impl UmaSnapshot {
             five_status_limit: uma.five_status_limit,
             skill_score: uma.skill_score,
             skill_pt: uma.skill_pt,
-            total_hints: uma.total_hints
+            total_hints: uma.total_hints,
+            bought_grades: uma.bought_grades,
+            bought_cost: uma.bought_cost
         }
+    }
+
+    /// 回推「终局买技能之前」的快照（推荐表重放用：对 before 重放确定性贪心，
+    /// 得到的就是模拟器实际买入清单）。
+    pub fn before_purchase(&self) -> Self {
+        let mut before = self.clone();
+        before.skill_score -= self.bought_grades;
+        before.skill_pt += self.bought_cost;
+        before.bought_grades = 0;
+        before.bought_cost = 0;
+        before
     }
 
     /// 总技能点 = skill_pt + total_hints × hint_pt_rate（向下取整，与
@@ -182,9 +203,12 @@ pub fn lookup_saturated(table: &[i32], idx: i32) -> i32 {
     table[i]
 }
 
-/// 本仓库拉面杯结算口径的计分器（查表 + PT 折分率），运行时从 GAMECONSTANTS 构造。
+/// 本仓库结算口径的计分器（查表 + PT 折算率），运行时从 GAMECONSTANTS 构造。
+///
+/// 新结算口径（2026-09-17）下与 `UmaGame::calc_score` 完全同源：
+/// 属性表用 URA StatusToPoint（与 calc_score 同表同查法），PT 项 = 结余 PT × rate。
 pub struct LocalScoring {
-    /// 五维 → 评分查表（constants.json 的 five_status_final_score，3399 档）
+    /// 五维 → 评分查表（新口径 = URA StatusToPoint 2501 档；空表降级本地 3399 档）
     pub table: Vec<i32>,
     /// 每 1 技能点折多少分（constants.json 的 pt_score_rate = 2.0）
     pub pt_rate: f32
@@ -192,6 +216,23 @@ pub struct LocalScoring {
 
 impl LocalScoring {
     pub fn from_constants() -> Self {
+        let c = GAMECONSTANTS
+            .get()
+            .expect("GAMECONSTANTS 未初始化，请先 init_global_with_config");
+        // 与 Uma::status_score_ura 同源：优先 URA 表，空表回退本地 3399 档延拓表
+        let table = if c.ura_status_to_point.is_empty() {
+            c.five_status_final_score.clone()
+        } else {
+            c.ura_status_to_point.clone()
+        };
+        Self {
+            table,
+            pt_rate: c.pt_score_rate
+        }
+    }
+
+    /// 旧口径计分器（本地 3399 档表 + 全部 PT×rate 不买技能）——仅供新旧口径对照打印。
+    pub fn legacy_from_constants() -> Self {
         let c = GAMECONSTANTS
             .get()
             .expect("GAMECONSTANTS 未初始化，请先 init_global_with_config");
@@ -220,13 +261,14 @@ impl LocalScoring {
         (pt as f32 * self.pt_rate) as i32
     }
 
-    /// 不含买入的基础分 = 属性分 + 已学技能分 + 全部 PT 折分
-    /// （等于 `UmaGame::calc_score`，因为模拟器育成中不买技能）。
+    /// 买入前的基础分（对照用）= 属性分 + 固有技能分 + 全部 PT 折算
+    /// （等于未买技能时的 `UmaGame::calc_score`）。
     pub fn base_score(&self, snap: &UmaSnapshot) -> i32 {
         self.status_total(snap) + snap.skill_score + self.pt_score(snap.total_pt())
     }
 
-    /// 模拟买入后的结算分：技能分加 grade、技能点扣花费后走同一套查表。
+    /// 模拟买入后的结算分：skill_score 加 ΣGrade、skill_pt 扣总花费后走同一套查表。
+    /// 与 `UmaGame::calc_score`（终局已买入状态）逐位一致。
     pub fn score_after(&self, snap: &UmaSnapshot, plan: &BuyPlan) -> i32 {
         let mut after = snap.clone();
         after.skill_score += plan.grade_total;
@@ -244,6 +286,23 @@ pub struct SkillDb {
     hints: HashMap<String, Vec<HintEntry>>,
     /// URA StatusToPoint 表（下标 = 属性值，值 = 评价点，0..2500）
     pub ura_status_table: Vec<i32>
+}
+
+/// 进程级共享 [`SkillDb`]（一次加载，GA 跑批 / rollout 终评共用）。
+/// 加载失败缓存 `None`：终局买技能静默停用（core-only .so 无数据文件时保持可运行）。
+static SHARED_DB: OnceLock<Option<SkillDb>> = OnceLock::new();
+
+/// 取进程级共享 SkillDb；文件缺失/损坏时返回 None（调用方跳过买入，不报错）。
+pub fn try_shared_db() -> Option<&'static SkillDb> {
+    SHARED_DB
+        .get_or_init(|| match SkillDb::load() {
+            Ok(db) => Some(db),
+            Err(e) => {
+                log::warn!("skillDB/hintDB/URA表加载失败，终局买技能停用: {e:#}");
+                None
+            }
+        })
+        .as_ref()
 }
 
 impl SkillDb {
@@ -295,6 +354,25 @@ impl SkillDb {
     /// 卡组 hint 技能 id 集合（跨卡组对比用）
     pub fn deck_hint_ids(&self, deck: &[u32; 6]) -> HashSet<u32> {
         self.deck_hint_discounts(deck).keys().copied().collect()
+    }
+
+    /// 卡组 hint 技能明细：[(skill_id, 折扣%)]（跨卡组技能面对比用）。
+    ///
+    /// 注意：9081xxx 段技能在现有数据源里没有名字/价格/评分，这里只报 id 与折扣。
+    pub fn deck_hint_skills(&self, deck: &[u32; 6]) -> Vec<(u32, i32)> {
+        let mut v: Vec<(u32, i32)> = self.deck_hint_discounts(deck).into_iter().collect();
+        v.sort_unstable();
+        v
+    }
+
+    /// 两个技能面（skill_id 集合）的 Jaccard 相似度：交/并。空集对空集按 1.0。
+    pub fn jaccard(a: &HashSet<u32>, b: &HashSet<u32>) -> f64 {
+        if a.is_empty() && b.is_empty() {
+            return 1.0;
+        }
+        let inter = a.intersection(b).count();
+        let union = a.union(b).count();
+        inter as f64 / union.max(1) as f64
     }
 
     /// URA 口径的五维评分（2501 档查表，饱和）
@@ -359,9 +437,9 @@ pub struct BuyPlan {
     pub buys: Vec<BuyCandidate>,
     /// 总花费（技能点）
     pub cost_total: i32,
-    /// URA 口径总评分增量 = Σgrade
+    /// 总评分增量 = Σgrade
     pub grade_total: i32,
-    /// 本仓库口径总净增分 = Σ(grade − price×pt_rate)
+    /// 总净增分 = Σ(grade − price×pt_rate)
     pub delta_local_total: i32
 }
 
@@ -494,10 +572,11 @@ pub fn summary_ura(db: &SkillDb, snap: &UmaSnapshot, plan: &BuyPlan) -> ScoreSum
     }
 }
 
-/// 本仓库拉面杯结算口径摘要：
-/// `总分 = 属性分(本地表) + 已学技能分 + 买入技能分 + 剩余PT×pt_rate`。
+/// 本仓库结算口径摘要（新口径 2026-09-17）：
+/// `总分 = 属性分(URA表) + 固有技能分 + 买入技能分 + 结余PT×pt_rate`。
 ///
-/// 与 `UmaGame::calc_score` 完全同式：模拟买入动作后的终分。
+/// 与 `UmaGame::calc_score`（终局已买入状态）完全同式；`snap` 传买入前快照时，
+/// 本函数给出「按 plan 买入后的预测终分」。
 pub fn summary_local(local: &LocalScoring, snap: &UmaSnapshot, plan: &BuyPlan) -> ScoreSummary {
     let scores = local.status_scores(snap);
     let status_total: i32 = scores.iter().sum();
@@ -555,7 +634,7 @@ pub fn print_summary(s: &ScoreSummary) {
     println!("  属性评分小计          : {}", s.status_total);
     println!("  总技能点(获得)        : {}", s.pt_total);
     println!(
-        "  已使用技能点          : {}（模拟器育成过程中不买技能，恒为 0）",
+        "  已使用技能点          : {}（终局买技能账目；before 快照恒为 0）",
         s.pt_used
     );
     println!("  剩余技能点            : {}", s.pt_left);
@@ -580,14 +659,14 @@ pub fn formula_compare(local: &LocalScoring, snap: &UmaSnapshot, db: &SkillDb) -
     let ura: i32 = db.ura_status_scores(snap).iter().sum();
     let lo: i32 = local.status_scores(snap).iter().sum();
     out.push(format!(
-        "属性分：URA表小计={ura} vs 本地3399档小计={lo}（0..1200 两表同源一致，1200+ 延拓不同）"
+        "属性分：URA表小计={ura} vs 本地3399档小计={lo}（新口径已采用 URA 表；0..1200 两表同源一致，1200+ 延拓不同）"
     ));
     out.push(format!(
-        "技能点折分：URA 口径 PT 不直接计分（花掉才变技能分）；本仓库口径 PT×{:.1} 直接计入",
+        "技能点折分：URA 口径 PT 不直接计分（花掉才变技能分）；本仓库新口径 PT×{:.1} 折算（URA 截图对账），买技能扣减结余 PT",
         local.pt_rate
     ));
     out.push(
-        "技能购买决策：URA 按 grade/price 排序（买必赚）；本仓库按 grade−price×2 排序（多为负值，最优常常是不买）"
+        "技能购买决策：URA 按 grade/price 排序（买必赚）；本仓库按 grade−price×2 排序，只买净增分>0 的，贪心买入后 ΣGrade 计入技能分"
             .to_string()
     );
     out

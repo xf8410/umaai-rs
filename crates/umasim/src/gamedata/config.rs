@@ -74,13 +74,27 @@ pub struct GameConstants {
     /// 蒙特卡洛每回合比手写逻辑增加的分数（搜索启发式）
     /// 默认值来源："game_config.toml" → "default_config.toml" → `default_mcts_turn_bonus()`
     #[serde(default, skip)]
-    pub mcts_turn_bonus: i32
+    pub mcts_turn_bonus: i32,
+    /// URA 属性评分表（StatusToPoint，0..2500 共 2501 档，下标 = 属性值，值 = 评价点）。
+    /// 来源：URA 开源仓库 Database.cs 内嵌表，导出为 gamedata/ura_status_to_point.json。
+    /// 新结算口径（2026-09-17）：`Uma::calc_score` 的属性分查本表（1200+ 区间权重高于
+    /// 本地 3399 档延拓表）。`skip`：constants.json 无此键；文件缺失时留空 Vec，
+    /// 查表处自动降级回本地表（core-only .so 数据目录不含新文件时保持可运行）。
+    #[serde(default, skip)]
+    pub ura_status_to_point: Vec<i32>
 }
 
 impl GameConstants {
     pub fn load() -> Result<Self> {
         info!("载入游戏数据");
-        load_json("gamedata/constants.json")
+        let mut c: GameConstants = load_json("gamedata/constants.json")?;
+        // URA 属性评分表：独立文件，缺失不阻断初始化（留空 → 评分降级本地表）；
+        // 但文件存在而格式错误必须 fail loud（数据损坏不能静默用错表）。
+        match std::fs::metadata("gamedata/ura_status_to_point.json") {
+            Ok(_) => c.ura_status_to_point = load_json("gamedata/ura_status_to_point.json")?,
+            Err(_) => log::warn!("gamedata/ura_status_to_point.json 缺失，评分降级本地 3399 档表")
+        }
+        Ok(c)
     }
 
     /// 查五维属性对应的终局评分，越界饱和到表末

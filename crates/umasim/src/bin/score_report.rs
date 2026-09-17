@@ -244,6 +244,8 @@ fn main() -> Result<()> {
 
     let db = SkillDb::load()?;
     let local = LocalScoring::from_constants();
+    // 旧口径计分器（本地 3399 档表 + 全部 PT×2 不买技能），仅供新旧口径对照打印
+    let local_legacy = LocalScoring::legacy_from_constants();
     let data = global!(GAMEDATA);
     let uma_name = data.get_uma(cfg.uma)?.name.clone();
     let inherit = InheritInfo {
@@ -303,27 +305,34 @@ fn main() -> Result<()> {
         let mut last_snap: Option<UmaSnapshot> = None;
         for i in 0..cfg.runs {
             let snap = run_one(cfg.uma, deck, &inherit, cfg.seed, i as u64, &trainer)?;
-            let score = local.base_score(&snap);
+            // 新口径（2026-09-17）：run_full_game 终局已自动买技能（finalize），
+            // snap 是「买入后」状态；回推 before 快照用于重放买入清单与对照。
+            let before = snap.before_purchase();
+            let score_new = local.base_score(&snap);
+            let score_legacy = local_legacy.base_score(&before);
             let rank = umasim::gamedata::GAMECONSTANTS
                 .get()
                 .expect("GAMECONSTANTS")
-                .get_rank_name(score);
+                .get_rank_name(score_new);
             println!(
-                "  [#{:02}] {} seed={} 结算分={} ({}) 五维={:?} skill_pt={} hints={}",
+                "  [#{:02}] {} seed={} 终局分(新口径)={} ({}) [旧口径对照={}] 五维={:?} skill_pt(结余)={} hints={} 买入花费={}PT +{}分",
                 i + 1,
                 build_name,
                 cfg.seed + i as u64,
-                score,
+                score_new,
                 rank,
+                score_legacy,
                 snap.five_status,
                 snap.skill_pt,
-                snap.total_hints
+                snap.total_hints,
+                snap.bought_cost,
+                snap.bought_grades
             );
 
-            // 验证模式：top-N 推荐技能实际买入后重算，预测 Δ vs 实际 Δ
+            // 验证模式：top-N 推荐技能实际买入后重算，预测 Δ vs 实际 Δ（基于买入前快照）
             if cfg.verify && !cfg.builds_all {
-                let plan = recommend(&db, &snap, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
-                let (pred, act, dev) = verify_delta(&local, &snap, &plan);
+                let plan = recommend(&db, &before, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
+                let (pred, act, dev) = verify_delta(&local, &before, &plan);
                 println!(
                     "    验证: 买入{}个技能 花费{}PT 预测Δ={} 实际Δ={} 偏差={}",
                     plan.buys.len(),
@@ -332,17 +341,19 @@ fn main() -> Result<()> {
                     act,
                     dev
                 );
-                verify_rows.push((i + 1, build_name.clone(), score, pred, act, dev));
+                verify_rows.push((i + 1, build_name.clone(), score_new, pred, act, dev));
             }
             last_snap = Some(snap);
         }
 
         // ===== 完整摘要（只用最后一局状态；跨卡组模式每个 build 都出推荐表）=====
         let snap = last_snap.expect("至少跑了 1 局");
-        let plan_ura = recommend(&db, &snap, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
-        let plan_local = recommend(&db, &snap, cfg.pool, deck, cfg.top, BuyPolicy::LocalDelta);
-        let sum_ura = summary_ura(&db, &snap, &plan_ura);
-        let sum_local = summary_local(&local, &snap, &plan_local);
+        // 推荐表基于「买入前」快照：对它重放确定性贪心 = 模拟器终局实际买入清单
+        let before = snap.before_purchase();
+        let plan_ura = recommend(&db, &before, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
+        let plan_local = recommend(&db, &before, cfg.pool, deck, cfg.top, BuyPolicy::LocalDelta);
+        let sum_ura = summary_ura(&db, &before, &plan_ura);
+        let sum_local = summary_local(&local, &before, &plan_local);
 
         if !cfg.json {
             println!();
@@ -368,10 +379,10 @@ fn main() -> Result<()> {
                 "平均性价比（总评价点/总技能点）: {:.3}；总评价点={} 总花费={}",
                 avg_value, plan_ura.grade_total, plan_ura.cost_total
             );
-            println!("* 净增分 = 本仓库拉面杯口径的 grade−价格×2（URA 口径下无意义，见下表）");
+            println!("* 净增分 = 本仓库口径的 grade−价格×2（URA 口径下无意义，见下表）");
 
             println!();
-            println!("===== 技能推荐表（本仓库拉面杯口径，净增分=评分增量−价格×2 降序）=====");
+            println!("===== 技能推荐表（本仓库口径，净增分=评分增量−价格×2 降序，即终局实际买入策略）=====");
             println!("{:<4} {:<24} {:>6} {:>8} {:>10} {:>10}", "#", "技能名", "技能点", "评价点", "性价比", "净增分");
             for (i, c) in plan_local.buys.iter().take(cfg.top).enumerate() {
                 println!(
@@ -385,7 +396,7 @@ fn main() -> Result<()> {
                 );
             }
             println!(
-                "口径要点：拉面杯结算里技能点本身值 2 分/点，买技能是『花 2 分/点的本钱换评价点』；\n\
+                "口径要点：本仓库结算里技能点按 2 分/点折算（URA 截图对账），买技能是『花 2 分/点的本钱换评价点』；\n\
                  净增分为负的技能不值得买。本轮符合条件的有 {} 个，合计净增 {} 分。",
                 plan_local.buys.len(),
                 plan_local.delta_local_total
@@ -425,7 +436,7 @@ fn main() -> Result<()> {
                 .collect();
             cands.sort_by(|a, b| b.1.total_cmp(&a.1));
             per_build.push((build_name.clone(), cands.into_iter().take(cfg.top).collect()));
-            println!("  [{}] 终局结算分={}", build_name, local.base_score(&snap));
+            println!("  [{}] 终局分(新口径)={}", build_name, local.base_score(&snap));
         }
         // 行=技能（各 build top 并集），列=build 性价比
         let mut all_names: Vec<String> = Vec::new();
@@ -473,12 +484,18 @@ fn main() -> Result<()> {
         let mut builds_json = Vec::new();
         for (build_name, deck) in &deck_jobs {
             let snap = run_one(cfg.uma, deck, &inherit, cfg.seed, 0, &trainer)?;
-            let plan_ura = recommend(&db, &snap, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
-            let plan_local = recommend(&db, &snap, cfg.pool, deck, cfg.top, BuyPolicy::LocalDelta);
+            let before = snap.before_purchase();
+            let plan_ura = recommend(&db, &before, cfg.pool, deck, cfg.top, BuyPolicy::UraValue);
+            let plan_local = recommend(&db, &before, cfg.pool, deck, cfg.top, BuyPolicy::LocalDelta);
             builds_json.push(serde_json::json!({
                 "build": build_name,
                 "deck_idrank": deck,
-                "base_score_local": local.base_score(&snap),
+                "score_new_final": local.base_score(&snap),
+                "score_legacy_ref": local_legacy.base_score(&before),
+                "bought": {
+                    "cost": snap.bought_cost,
+                    "grades": snap.bought_grades
+                },
                 "snapshot": {
                     "five_status": snap.five_status,
                     "skill_pt": snap.skill_pt,
@@ -486,11 +503,11 @@ fn main() -> Result<()> {
                     "skill_score": snap.skill_score,
                     "total_pt": snap.total_pt()
                 },
-                "summary_ura": summary_ura(&db, &snap, &plan_ura),
-                "summary_local": summary_local(&local, &snap, &plan_local),
+                "summary_ura": summary_ura(&db, &before, &plan_ura),
+                "summary_local": summary_local(&local, &before, &plan_local),
                 "plan_ura": plan_ura,
                 "plan_local": plan_local,
-                "formula_compare": formula_compare(&local, &snap, &db)
+                "formula_compare": formula_compare(&local, &before, &db)
             }));
         }
         json_out.insert("uma".into(), serde_json::json!(cfg.uma));

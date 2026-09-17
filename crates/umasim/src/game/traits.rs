@@ -92,8 +92,32 @@ pub trait Game: Clone {
         Ok(())
     }
     /// 育成结束时的处理（如最终奖励）
-    /// 默认实现为空，由具体剧本覆盖
+    ///
+    /// 默认实现 = 终局买技能（新结算口径 2026-09-17：全程攒 Pt，结束时按
+    /// 「净增分 = Grade − 价格×2 > 0」贪心买入，详见 `Uma::finalize_skill_purchase`）。
+    /// 剧本若覆盖本方法，**必须**在覆盖版里自行调用 [`Game::finalize_skill_purchase`]
+    /// （参见 onsen 剧本的覆盖版），否则该剧本退化为「全程攒 Pt 不买」。
     fn on_simulation_end<T: Trainer<Self>>(&mut self, _trainer: &T, _rng: &mut StdRng) -> Result<()> {
+        self.finalize_skill_purchase_from_deck()
+    }
+
+    /// 从 `deck()` 组装 idrank 数组并触发终局买技能。
+    ///
+    /// 供 trait 默认 `on_simulation_end` 与各剧本覆盖版共用，避免组装逻辑重复。
+    fn finalize_skill_purchase_from_deck(&mut self) -> Result<()> {
+        let mut deck = [0u32; 6];
+        for (i, card) in self.deck().iter().take(6).enumerate() {
+            deck[i] = card.card_id * 10 + card.rank;
+        }
+        if let Some(plan) = self.uma_mut().finalize_skill_purchase(&deck) {
+            diag!(
+                "终局买技能 {} 个：评分 +{}，花费 {}PT，结余 {}PT",
+                plan.buys.len(),
+                plan.grade_total,
+                plan.cost_total,
+                self.uma().skill_pt
+            );
+        }
         Ok(())
     }
     // 动作相关

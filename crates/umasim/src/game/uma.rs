@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     diag,
     explain::Explain,
-    gamedata::{ActionValue, EventChoice, FreeRaceData, GAMECONSTANTS, GAMEDATA, UmaData},
+    gamedata::{
+        ActionValue, EventChoice, FreeRaceData, GAMECONSTANTS, GAMEDATA, GameConstants, UmaData
+    },
     global,
     utils::*
 };
@@ -136,20 +138,33 @@ pub struct Uma {
     /// 生涯比赛bitset 低到高位对应11-71回合
     pub career_races: u64,
     /// 比赛场次 bitset 对应11-71回合
-    pub win_races: u64
+    pub win_races: u64,
+    /// 终局买技能：已买技能 Grade 合计（固有 510 之外累加进 skill_score 的部分）。
+    /// 0 = 尚未结算或一个都没买。由 [`Uma::finalize_skill_purchase`] 写入。
+    #[serde(default)]
+    pub bought_grades: i32,
+    /// 终局买技能：已购总花费（技能点）。`skill_pt` 已扣减，此字段仅作账目与
+    /// 「回推买入前快照」用（score_report 的推荐表重放依赖它）。
+    #[serde(default)]
+    pub bought_cost: i32
 }
 
 /// `calc_score()` 的可归因分量分解
 ///
 /// 七个分量之和逐位等于 [`Uma::calc_score`]，用于搜索层的终局归因统计。
 ///
+/// 新结算口径（2026-09-17）下各项含义：
+/// - `skill` = 固有技能分（5 星 = 510）+ 终局买技能 ΣGrade（育成全程不学技能）
+/// - `pt` = 结余总 PT × pt_score_rate（买技能扣掉的 PT 不再计分，见 `calc_score` 文档）
+/// - `five_status` = URA StatusToPoint 表查值（空表降级本地 3399 档）
+///
 /// PT 项**不可**再拆成 skill_pt 与 hint 的独立贡献：`total_pt()` 内有一次 `floor()`、
 /// 外面又有一次 `as i32`，两层截断使其数学上不可分。五维记的是查表后的分数。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScoreParts {
-    /// 技能分（`skill_score` 原值）
+    /// 技能分（`skill_score` 原值 = 固有 + 已买 Grade）
     pub skill: i32,
-    /// PT 折算分：`(total_pt() as f32 * pt_score_rate) as i32`
+    /// PT 折算分：`(total_pt() as f32 * pt_score_rate) as i32`（结余 PT）
     pub pt: i32,
     /// 五维各自的查表得分（速耐力根智），已按 limit 截断
     pub five_status: [i32; 5]
@@ -214,7 +229,9 @@ impl Uma {
             five_status: data.five_status_initial.clone(),
             five_status_bonus: data.five_status_bonus.clone(),
             five_status_limit: limit_base,
-            skill_score: 510, // 固有按5星计算,
+            // 固有技能分：固定按 5 星 = 510（URA 对账口径，所有育成马娘一视同仁）。
+            // 育成全程不学技能，终局 finalize_skill_purchase 才把买入技能的 Grade 累加进来。
+            skill_score: 510,
             total_hints: 21,  // 按全部初始技能3级打折计算
             career_races: data.zip_races(),
             ..Default::default()
@@ -244,6 +261,18 @@ impl Uma {
         (self.skill_pt as f32 + self.total_hints as f32 * global!(GAMECONSTANTS).hint_pt_rate).floor() as i32
     }
 
+    /// 新结算口径属性分查表：优先 URA StatusToPoint 表（2501 档，1200+ 权重更高），
+    /// 空表（core-only 环境数据缺失）降级本地 3399 档延拓表。
+    /// 两表 0..1200 区间同源一致（同一张官方表）。
+    #[inline]
+    fn status_score_ura(&self, status: i32, cons: &GameConstants) -> i32 {
+        if cons.ura_status_to_point.is_empty() {
+            cons.status_final_score(status)
+        } else {
+            crate::score_explain::lookup_saturated(&cons.ura_status_to_point, status)
+        }
+    }
+
     /// 把 [`Self::calc_score`] 分解成可归因分量
     ///
     /// 七个分量之和逐位等于 [`Self::calc_score`]。只在 3 项（`skill` / `pt` /
@@ -254,7 +283,7 @@ impl Uma {
         let mut five_status = [0i32; 5];
         for i in 0..5 {
             let status = self.five_status[i].min(self.five_status_limit[i]);
-            five_status[i] = cons.status_final_score(status);
+            five_status[i] = self.status_score_ura(status, cons);
         }
         ScoreParts {
             skill: self.skill_score,
@@ -263,11 +292,63 @@ impl Uma {
         }
     }
 
-    /// 正常计算评分
+    /// 正常计算评分（新结算口径：攒 Pt → 终局买技能）
     ///
-    /// 等于 [`Self::score_parts`] 七个分量之和。
+    /// `总分 = URA属性分 + (固有技能分 + Σ买到技能Grade) + 结余总PT × pt_score_rate`
+    ///
+    /// - **属性分**：查 URA StatusToPoint 表（gamedata/ura_status_to_point.json，
+    ///   0..2500 档；表缺失时降级本地 3399 档延拓表）。
+    /// - **技能分**：固有按 5 星 = 510（`Uma::new` 固定写入，URA 对账口径）；育成
+    ///   全程**不学技能**只攒 Pt，育成结束时 [`Uma::finalize_skill_purchase`] 按
+    ///   「净增分 = Grade − 价格×2 > 0」贪心买入，ΣGrade 累加进 `skill_score`。
+    /// - **PT 项**：结余总 PT（skill_pt + hints×6.5，买技能后）× 2.0
+    ///   （constants.json `pt_score_rate`，URA 截图对账：1 技能点 = 2 评价点）。
+    ///   选择「结余折算」而非「删除 PT 项」：买技能花掉的 PT 按同一折算率从总分中
+    ///   扣除，`Grade − 价格×2` 的买入判据才与计分公式逐位自洽（若删除 PT 项，
+    ///   任何 Grade>0 的技能都该无脑买，判据失去意义）。
     pub fn calc_score(&self) -> i32 {
         self.score_parts().total()
+    }
+
+    /// 育成终局买技能（新结算口径的收尾动作，近似幂等）
+    ///
+    /// 全程攒下的 Pt 在此一次性消费：
+    /// - 候选池 = 配卡 6 张支援卡自带的 hint 技能（`SkillPool::DeckHint`，含近似折扣价）
+    /// - 贪心策略 = 净增分 `Grade − 价格×2` 降序，只买净增分 > 0 的技能
+    ///   （×2 = `pt_score_rate`，URA 截图对账的技能价格折算：花 1 PT 的机会成本是 2 分）
+    /// - 买入后：`skill_score += ΣGrade`、`skill_pt -= 总花费`，账目写入
+    ///   `bought_grades` / `bought_cost`
+    ///
+    /// 幂等性：按 `bought_cost != 0` 判定已结算；「一个都没买」的空计划会保持账目
+    /// 为 0，重复调用只是重放同一确定性计算，结果不变，无副作用。
+    ///
+    /// skillDB/hintDB 加载失败（如 core-only .so 无数据文件）时返回 None 并跳过：
+    /// 退化为「全程攒 Pt 不买」，计分公式其余部分不受影响。
+    pub fn finalize_skill_purchase(
+        &mut self,
+        deck: &[u32; 6]
+    ) -> Option<crate::score_explain::BuyPlan> {
+        if self.bought_cost != 0 {
+            return None; // 已结算过
+        }
+        let db = crate::score_explain::try_shared_db()?;
+        let snap = crate::score_explain::UmaSnapshot::from_uma(self);
+        let plan = crate::score_explain::recommend(
+            db,
+            &snap,
+            crate::score_explain::SkillPool::DeckHint,
+            deck,
+            0,
+            crate::score_explain::BuyPolicy::LocalDelta
+        );
+        if plan.buys.is_empty() {
+            return None;
+        }
+        self.bought_grades = plan.grade_total;
+        self.bought_cost = plan.cost_total;
+        self.skill_score += plan.grade_total;
+        self.skill_pt -= plan.cost_total;
+        Some(plan)
     }
 
     pub fn calc_score_with_pt_favor(&self) -> i32 {

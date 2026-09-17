@@ -1822,6 +1822,8 @@ impl Game for OnsenGame {
     }
 
     fn on_simulation_end<T: Trainer<Self>>(&mut self, _trainer: &T, _rng: &mut StdRng) -> Result<()> {
+        // 覆盖版替换了 trait 默认实现，必须自行触发终局买技能（新结算口径）
+        self.finalize_skill_purchase_from_deck()?;
         diag!(">> 育成结束，触发最终奖励事件");
         /*
         // 查找回合78事件 (ぴょいや！大宴会！)
