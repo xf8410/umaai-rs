@@ -1109,7 +1109,7 @@ impl RamenPolicy {
                 }
                 out.score = val;
                 if self.collect_details {
-                    out.add("outing", self.config.outing_base);
+                    out.add("outing", val);
                     out.reason = "普通外出".to_string();
                 }
             }
