@@ -1503,7 +1503,7 @@ mod tests {
         c.check(preset_ov.eat_requires_training == Some(true), "eat_requires_training 回环 = Some(true)");
         c.check(preset_ov.dynamic_special_targets == Some(true), "dynamic_special_targets 回环 = Some(true)");
         c.check(preset_ov.status_gap_strength == Some(0.5), "status_gap_strength 回环 = Some(0.5)");
-        c.check(preset_ov.ramen_window_weight == Some(0.10), "ramen_window_weight 回环 = Some(0.10)");
+        c.check(preset_ov.ramen_window_weight == Some(0.15), "ramen_window_weight 回环 = Some(0.15)（2026-09-17 GA 定稿同步）");
 
         // 2.5) preset≠Default 陷阱位：GA 基线必须锚在 preset 值，不是 Default。
         //      依据：RamenPolicyConfig::default() cap_discount_weight=0.0、
