@@ -283,7 +283,9 @@ impl Uma {
         let mut five_status = [0i32; 5];
         for i in 0..5 {
             let status = self.five_status[i].min(self.five_status_limit[i]);
-            five_status[i] = self.status_score_ura(status, cons);
+            // 2026-09-18 用户令：评分回退旧口径（r8 fitness=71415.6 同尺），
+            // 属性分恢复 status_final_score 本地表；URA 表查值入口保留未删，便于将来切换。
+            five_status[i] = cons.status_final_score(status);
         }
         ScoreParts {
             skill: self.skill_score,
@@ -292,20 +294,15 @@ impl Uma {
         }
     }
 
-    /// 正常计算评分（新结算口径：攒 Pt → 终局买技能）
+    /// 正常计算评分（2026-09-18 回退旧口径：与 r8 fitness=71415.6 同尺）
     ///
-    /// `总分 = URA属性分 + (固有技能分 + Σ买到技能Grade) + 结余总PT × pt_score_rate`
+    /// `总分 = 属性分(status_final_score 本地表) + 固有技能分 510 + 结余总PT × pt_score_rate`
     ///
-    /// - **属性分**：查 URA StatusToPoint 表（gamedata/ura_status_to_point.json，
-    ///   0..2500 档；表缺失时降级本地 3399 档延拓表）。
-    /// - **技能分**：固有按 5 星 = 510（`Uma::new` 固定写入，URA 对账口径）；育成
-    ///   全程**不学技能**只攒 Pt，育成结束时 [`Uma::finalize_skill_purchase`] 按
-    ///   「净增分 = Grade − 价格×2 > 0」贪心买入，ΣGrade 累加进 `skill_score`。
-    /// - **PT 项**：结余总 PT（skill_pt + hints×6.5，买技能后）× 2.0
-    ///   （constants.json `pt_score_rate`，URA 截图对账：1 技能点 = 2 评价点）。
-    ///   选择「结余折算」而非「删除 PT 项」：买技能花掉的 PT 按同一折算率从总分中
-    ///   扣除，`Grade − 价格×2` 的买入判据才与计分公式逐位自洽（若删除 PT 项，
-    ///   任何 Grade>0 的技能都该无脑买，判据失去意义）。
+    /// - **属性分**：`cons.status_final_score`（本地 3399 档延拓表）。
+    /// - **技能分**：仅固有 510 常数项（所有育成马娘一视同仁）；终局买技能停用
+    ///   （[`Uma::finalize_skill_purchase`] 已 return None，账目代码保留）。
+    /// - **PT 项**：结余总 PT（skill_pt + hints×6.5，全程不买全额结余）× 2.0。
+    /// - 历史口径（2026-09-17 新口径：URA 属性表 + Σ买入 Grade）见 f1ac423，已回退。
     pub fn calc_score(&self) -> i32 {
         self.score_parts().total()
     }
@@ -328,6 +325,12 @@ impl Uma {
         &mut self,
         deck: &[u32; 6]
     ) -> Option<crate::score_explain::BuyPlan> {
+        // 2026-09-18 用户令：评分回退旧口径（r8 fitness=71415.6 同尺），不计买技能
+        // Grade → 终局买技能停用，全程攒 Pt 不消费（结余 PT 照常 ×pt_score_rate）。
+        // 恢复方法：删除下方早退，解开块注释即可（f1ac423 实现+账目完整保留）。
+        let _ = deck;
+        None
+        /*
         if self.bought_cost != 0 {
             return None; // 已结算过
         }
@@ -349,6 +352,7 @@ impl Uma {
         self.skill_score += plan.grade_total;
         self.skill_pt -= plan.cost_total;
         Some(plan)
+        */
     }
 
     pub fn calc_score_with_pt_favor(&self) -> i32 {
