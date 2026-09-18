@@ -116,8 +116,9 @@ fn random_uma_from_db(workspace_root: &std::path::Path) -> Result<u32> {
 
 /// CLI 解析：GA 协议参数全部可调（缺省 = design.md 定稿值）
 /// 返回 (GaParams, GaBenchConfig, out_dir, exclude_chara_ids)
-fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>)> {
+fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>, Vec<std::path::PathBuf>)> {
     let mut exclude_charas: Vec<u32> = Vec::new();
+    let mut seed_genome_paths: Vec<std::path::PathBuf> = Vec::new();
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
@@ -169,6 +170,15 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             }
             Arg::Long("friend") => cfg.friend = bench::parse_value(&mut parser, "friend")?,
             Arg::Long("out") => out_dir = bench::parse_value(&mut parser, "out")?,
+            Arg::Long("seed-genome") => {
+                let spec: String = bench::parse_value(&mut parser, "seed-genome")?;
+                for p in spec.split(',') {
+                    let p = p.trim();
+                    if !p.is_empty() {
+                        seed_genome_paths.push(std::path::PathBuf::from(p));
+                    }
+                }
+            }
             Arg::Long("exclude-chara") => {
                 let cid: u32 = bench::parse_value(&mut parser, "exclude-chara")?;
                 exclude_charas.push(cid);
@@ -194,7 +204,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             }
         }
     }
-    Ok((params, cfg, out_dir, exclude_charas))
+    Ok((params, cfg, out_dir, exclude_charas, seed_genome_paths))
 }
 
 /// 基因表 preset 锚点快照 → TOML 文本（None = 该位 preset 不可单值表示）
@@ -403,7 +413,7 @@ fn main() -> Result<()> {
     let workspace_root = get_workspace_root()?;
     std::env::set_current_dir(&workspace_root)?;
 
-    let (params, cfg, out_dir_rel, mut exclude_charas) =
+    let (params, cfg, out_dir_rel, mut exclude_charas, seed_genome_paths) =
         apply_cli(GaParams::default(), load_ga_bench_config(&workspace_root)?, "ga_logs".to_string())?;
 
     // 自动剔除育成马娘本体卡：chara_id = gameId / 100
@@ -503,7 +513,19 @@ fn main() -> Result<()> {
     let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, params.clone(), pool)
         .context("构造 SimFitnessEvaluator 失败")?;
 
-    let report = GaOptimizer::new(params.clone()).run(&mut evaluator)?;
+    // --seed-genome：外部参数包（override_to_toml 快照）归一化为基因组注入种群，
+    // 与进化个体同马池同卡组配对（CRN），用于 GA 考场口径的参数对比。
+    let seed_genomes: Vec<GaGenome> = seed_genome_paths
+        .iter()
+        .map(|p| parse_genome_toml(p).with_context(|| format!("解析种子基因组 {}", p.display())))
+        .collect::<Result<Vec<_>>>()?;
+    for (i, g) in seed_genomes.iter().enumerate() {
+        let some_cnt = g.0.iter().filter(|x| **x >= 0.0).count();
+        println!("[seed-genome] 包 {} → {} 个 Some 基因（全量 {}）", i + 1, some_cnt, GENE_COUNT);
+    }
+    let report = GaOptimizer::new(params.clone())
+        .with_seed_genomes(seed_genomes)
+        .run(&mut evaluator)?;
 
     // 逐代摘要落盘
     let gen_rows: Vec<Vec<String>> = report
@@ -609,4 +631,110 @@ fn main() -> Result<()> {
     // 无结果保护：理论上 run() 已保证 best 存在
     let _: GaGenome = report.best_genome;
     Ok(())
+}
+
+
+/// 逐行解析 override_to_toml 快照（[policy]/[local] 段；TOML 无 null，
+/// 数组空槽写作 null，按 None 处理）。
+#[derive(Debug, Clone)]
+enum TomlVal {
+    Bool(bool),
+    Num(f64),
+    Arr(Vec<Option<f64>>),
+}
+
+fn parse_toml_val(raw: &str) -> TomlVal {
+    let raw = raw.trim();
+    if raw.starts_with('[') {
+        if let Some(end) = raw.rfind(']') {
+            let items = raw[1..end]
+                .split(',')
+                .map(|s| {
+                    let s = s.trim();
+                    if s.is_empty() || s == "null" {
+                        None
+                    } else {
+                        s.parse::<f64>().ok()
+                    }
+                })
+                .collect();
+            return TomlVal::Arr(items);
+        }
+    }
+    if raw == "true" {
+        return TomlVal::Bool(true);
+    }
+    if raw == "false" {
+        return TomlVal::Bool(false);
+    }
+    TomlVal::Num(raw.parse::<f64>().unwrap_or(f64::NAN))
+}
+
+/// 真实值 → [0,1] 归一化基因（decode_gene_value 的逆运算）。
+fn normalize_gene(v: f64, spec: &umasim::genetic_optimizer::GeneSpec) -> f32 {
+    let span = spec.hi - spec.lo;
+    if span <= 0.0 {
+        return 0.0;
+    }
+    let g = (v - spec.lo) / span;
+    g.clamp(0.0, 1.0) as f32
+}
+
+fn lookup_array_slot(
+    vals: &std::collections::HashMap<String, TomlVal>,
+    base: &str,
+    slot: usize,
+    spec: &umasim::genetic_optimizer::GeneSpec,
+) -> f32 {
+    match vals.get(base) {
+        Some(TomlVal::Arr(items)) => match items.get(slot).copied().flatten() {
+            Some(v) => normalize_gene(v, spec),
+            None => -1.0f32,
+        },
+        // 数组字段被写成标量（单槽快照）时也接受
+        Some(TomlVal::Num(v)) => normalize_gene(*v, spec),
+        _ => -1.0f32,
+    }
+}
+
+/// 参数包 toml → GaGenome：基因名与覆盖层字段同名；数组型基因
+/// （vital_rest_eating/pt_rate/friend_outing_cumulative_caps）按 *_y1/_y2/_y3
+/// 槽位展开；缺失键 → -1（None，保留 preset）。
+fn parse_genome_toml(path: &std::path::Path) -> Result<GaGenome> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("读取种子基因组 {}", path.display()))?;
+    let mut vals: std::collections::HashMap<String, TomlVal> = std::collections::HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            vals.insert(k.trim().to_string(), parse_toml_val(v));
+        }
+    }
+    let mut genes = Vec::with_capacity(GENE_COUNT);
+    for spec in GENE_SPECS.iter() {
+        let g = if let Some(base) = spec.name.strip_suffix("_y1") {
+            lookup_array_slot(&vals, base, 0, spec)
+        } else if let Some(base) = spec.name.strip_suffix("_y2") {
+            lookup_array_slot(&vals, base, 1, spec)
+        } else if let Some(base) = spec.name.strip_suffix("_y3") {
+            lookup_array_slot(&vals, base, 2, spec)
+        } else {
+            match vals.get(spec.name) {
+                Some(TomlVal::Bool(b)) => {
+                    if *b {
+                        1.0f32
+                    } else {
+                        0.0f32
+                    }
+                }
+                Some(TomlVal::Num(v)) => normalize_gene(*v, spec),
+                _ => -1.0f32,
+            }
+        };
+        genes.push(g);
+    }
+    Ok(GaGenome(genes))
 }

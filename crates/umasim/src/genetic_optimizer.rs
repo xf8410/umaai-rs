@@ -938,13 +938,22 @@ pub struct GaReport {
 #[derive(Debug, Clone)]
 pub struct GaOptimizer {
     /// 代际参数。
-    pub params: GaParams
+    pub params: GaParams,
+    /// 外部种子基因组（--seed-genome 注入）：按顺序替换种群前 N 个个体，
+    /// 配卡/布局借用个体 2（首个随机个体），同轮同马池同卡组 → CRN 配对。
+    pub seed_genomes: Vec<GaGenome>,
 }
 
 impl GaOptimizer {
     /// 用指定参数构造优化器。
     pub fn new(params: GaParams) -> Self {
-        Self { params }
+        Self { params, seed_genomes: Vec::new() }
+    }
+
+    /// 注入外部种子基因组（参数包 toml 归一化后的基因组）。
+    pub fn with_seed_genomes(mut self, seeds: Vec<GaGenome>) -> Self {
+        self.seed_genomes = seeds;
+        self
     }
 
     /// 初始种群：个体 0 = 全 None（基线冠军）、个体 1 = 全 preset、其余随机
@@ -1130,6 +1139,18 @@ impl GaOptimizer {
         let start = Instant::now();
         let mut rng = StdRng::seed_from_u64(self.params.ga_seed);
         let mut pop = self.init_population(&mut rng, evaluator.pool());
+        // --seed-genome 注入：把前 N 个个体替换为外部参数包，配卡/布局借用
+        // 个体 2（首个随机个体），保证同轮同马池同卡组的配对对比（CRN）。
+        if !self.seed_genomes.is_empty() && pop.len() > 2 {
+            let (d_comp, d_sel) = (pop[2].comp_idx, pop[2].card_sel);
+            for (i, g) in self.seed_genomes.iter().enumerate() {
+                if i >= pop.len() {
+                    break;
+                }
+                pop[i] = Self::make_individual(g.clone(), d_comp, d_sel, evaluator.pool());
+                println!("[seed-genome] 个体 {} 注入外部参数包（comp_idx={} 借用个体 2）", i, d_comp);
+            }
+        }
         let mut history = Vec::with_capacity(self.params.gens);
         // 全程最优（精评口径）：(fitness, genome, comp_idx, card_sel, override, card)
         let mut best: Option<(f64, GaGenome, usize, CardSelection, ParamOverride, ScoreCard)> = None;
