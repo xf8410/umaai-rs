@@ -1170,14 +1170,18 @@ mod tests {
         // 2026-09 更新：吃面 PT 增量 / eat_count 延后到 NextTurn，训练阶段用吃面前 PT
         // 算 ramen_pt_effect / region_bonus 档位，整局数值变化（拉面效果变弱导致整局偏低），
         // 基准重抓。
-        c.check(score == 65741, "评分与改动前逐位相同");
+        // 2026-09-17 重录（fork master）：上游合并 875dd2c（评估核心/trainer/policy 行为
+        // 变化 + 9 旋钮 preset 定稿）叠加 fork 评分新口径（f1ac423），同卡组同种子
+        // 65741→78476，五维 [3337,2216,2200,1073,1214]→[3337,2174,1614,1109,1433]，
+        // skill_pt 8254→7327，searched_count 55→53（搜索行为随之变化），基准重抓。
+        c.check(score == 78476, "评分与改动前逐位相同");
         c.check(
-            game.uma.five_status == [3337, 2216, 2200, 1073, 1214],
+            game.uma.five_status == [3337, 2174, 1614, 1109, 1433],
             "五维与改动前逐位相同"
         );
-        c.check(game.uma.skill_pt == 8254, "技能点与改动前逐位相同");
+        c.check(game.uma.skill_pt == 7327, "技能点与改动前逐位相同");
         c.check(game.ramen.scenario_pt == 0, "剧本 PT 与改动前逐位相同");
-        c.check(searched == 55, "searched_count 与改动前逐位相同");
+        c.check(searched == 53, "searched_count 与改动前逐位相同");
         c.finish()
     }
 
@@ -1323,7 +1327,11 @@ mod tests {
         // `select_action` 的合并短路 `!game.is_race_turn()` 不成立，见本文件 495-547）。
         // 2026-09 更新：吃面 PT 增量延后到 NextTurn 后，本回合 PT 档位提升延后生效，
         // 整局搜索路径微小变化，SpecialSelect 调用 / 重搜数基线重抓。
-        c.check(special_calls == 30, "SpecialSelect 调用数与改动前逐位相同");
+        // 2026-09-17 重录（fork master）：上游合并 875dd2c（评估核心/trainer/policy 行为
+        // 变化）后训练评分上移，训练阶段在 RamenSelect 中提前定型/跳出，落到
+        // SpecialSelect 缓存路径的调用量 30→31；重搜数仍为 0（缓存命中语义未变），
+        // 调用数基准重抓。
+        c.check(special_calls == 31, "SpecialSelect 调用数与改动前逐位相同");
         c.check(special_searches == 0, "SpecialSelect 重搜数与改动前逐位相同");
         // 再留一条与具体数字解耦的语义上界，防止将来重抓快照时把比例抬上去
         c.check(

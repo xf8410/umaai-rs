@@ -3423,9 +3423,14 @@ mod tests {
         checks.check(game == original, "覆盖与体力预演不改变原局面");
 
         // 第三年非合宿、多 Hint 与友人已解锁的局面，当前面覆盖位会切换长期价值的 Hint 模式。
+        // 2026-09-17：友人紧迫守门（2026-09-16 用户规则，policy 守门 4）在「剩余次数 >=
+        // 剩余可用回合」时单条输出强制友人出行、走 decide_train_cached 守门早退，
+        // 长期价值与友人动态估值填充不再触达，原 sentinel 失效。把出行次数预用 2 次
+        // （剩 3 次 < 剩余可用回合），解除紧迫强制、恢复全量打分路径，sentinel 语义还原。
         game.base.turn = 64;
         game.stage = RamenStage::Train;
         game.uma.motivation = 5;
+        game.friend.out_used = vec![true, true, false, false, false];
         game.friend.out_state = FriendOutState::AfterUnlock;
         game.base.distribution = vec![vec![0, 1], vec![2], vec![3], vec![4], Vec::new()];
         for person in &mut game.persons {

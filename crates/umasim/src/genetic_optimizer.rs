@@ -1339,12 +1339,12 @@ mod tests {
         extra_count: [0, 30, 0, 0, 30, 30]
     };
     const FRIEND: u32 = 303054;
-    // master c830f63 实测基线锚点（seed=42/run0/TEST_DECK/TEST_INHERIT，与 bench.rs 测试同源）。
-    // 注：仓库冻结锚点 63870 在本 checkout 已过期（bench::tests::test_yearly_observability_full_game_and_csv
-    // 同样 NG），属仓库既有漂移而非本模块引入；GA 的零差异门是"覆盖层 ≡ 现行为"的
-    // 路径等价（通道 A/B 对比），本锚点只用于锁定当前基线可复现。
-    const MASTER_ANCHOR_SCORE: i32 = 64752;
-    const MASTER_ANCHOR_FIVE: [i32; 5] = [3337, 2445, 1974, 1187, 1018];
+    // 基线锚点（seed=42/run0/TEST_DECK/TEST_INHERIT，与 bench.rs 测试同源口径）。
+    // 2026-09-17 重录（fork master）：上游合并 875dd2c（9 旋钮 preset 定稿 + 评估
+    // 核心/trainer/policy 行为变化）后实测 64752→92393。GA 的零差异门是
+    // "覆盖层 ≡ 现行为"的路径等价（通道 A/B 对比），本锚点只用于锁定当前基线可复现。
+    const MASTER_ANCHOR_SCORE: i32 = 92393;
+    const MASTER_ANCHOR_FIVE: [i32; 5] = [3337, 2445, 2107, 1230, 1251];
 
     /// 测试引导：工作目录 + 日志 + 全局数据（与 bench.rs 测试同款）。
     fn bootstrap() -> Result<()> {
@@ -1840,7 +1840,8 @@ mod tests {
     ///   含 score_breakdown；elapsed_us 为墙钟计时必须排除）；
     /// - 通道 B：`with_overrides_for_rollout(all_none)`（GA 批评估实际路径，
     ///   rollout 关闭观测，故对比除 score_breakdown 外的决策字段）。
-    /// - 基线锚点：score = 63870、五维 = [3337,2293,2200,1086,829]（master 冻结）。
+    /// - 基线锚点：score = 92393、五维 = [3337,2445,2107,1230,1251]
+    ///   （2026-09-17 fork master 875dd2c 合并后重录）。
     #[test]
     fn ga_zero_diff_full_game_all_none_bit_identical() -> Result<()> {
         bootstrap()?;
@@ -1864,10 +1865,10 @@ mod tests {
 
         let mut c = Checks::new();
         println!("基线 score={} five={:?}", base_out.score, base_out.five_status);
-        c.check(base_out.score == MASTER_ANCHOR_SCORE, "基线锚点 score = 64752（master c830f63 实测）");
+        c.check(base_out.score == MASTER_ANCHOR_SCORE, "基线锚点 score = 92393（2026-09-17 fork master 875dd2c 合并后重录）");
         c.check(
             base_out.five_status == MASTER_ANCHOR_FIVE,
-            "基线锚点五维 = [3337,2445,1974,1187,1018]（master c830f63 实测）"
+            "基线锚点五维 = [3337,2445,2107,1230,1251]（2026-09-17 fork master 875dd2c 合并后重录）"
         );
 
         let cmp_outcome = |c: &mut Checks, a: &GameOutcome, b: &GameOutcome, label: &str| {
@@ -2049,11 +2050,15 @@ mod tests {
         let details = evaluator.take_detail_rows();
         println!("明细行数 = {}", details.len());
         c.check(!details.is_empty(), "明细行通道有产出");
-        // 明细行 CSV 列数与 bench 表头一致
+        // 明细行 CSV 列数与 ga_detail.csv 落盘表头一致
+        // 2026-09-17 修正断言：14d756a 起 SimFitnessEvaluator 的明细行在
+        // outcome_to_row（31 列标准行）之后追加 deck 字符串（ga_optimize.rs 落盘
+        // 表头同为 RESULTS_HEADER + "deck"，主代码两处严格对齐）；本断言漏算
+        // 该列导致误报，补上 +1。
         if let Some((_, _, _, row)) = details.first() {
             c.check(
-                row.len() == bench::RESULTS_HEADER.len(),
-                "明细行列数与 RESULTS_HEADER 一致"
+                row.len() == bench::RESULTS_HEADER.len() + 1,
+                "明细行列数 = RESULTS_HEADER + deck 列"
             );
         }
         // 全 None 个体（初始个体 0）在真实评估里 fitness 应等于其 mean_score

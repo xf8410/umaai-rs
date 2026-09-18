@@ -601,8 +601,12 @@ mod tests {
 
     /// 着色档位：与首选差距 `<30`/`<100`/`<300`/其余 → 亮绿/绿/黄/灰
     ///
-    /// 测文本内是否嵌入对应 ANSI 真彩色码：`bright_green`=`\e[92m`，
-    /// `green`=`\e[32m`，`yellow`=`\e[33m`，自定义灰=`\e[38;2;128;128;128m`。
+    /// 测文本内是否嵌入对应 ANSI 码：`bright_green`=`\e[92m`，
+    /// `green`=`\e[32m`，`yellow`=`\e[33m`，自定义灰=真彩 `\e[38;2;128;128;128m`。
+    /// 2026-09-17：colored 升级 3.1.1（随 875dd2c 合并进 Cargo.lock）后，在
+    /// `COLORTERM` 不含 truecolor/24bit 的环境（CI/无终端）会把 TrueColor 按
+    /// 欧氏最近色降级为 ANSI 16 色，灰 (128,128,128)→BrightBlack=`\e[90m`。
+    /// 档位映射守门的语义是「灰色系」，两种编码均判通过（前 3 档 16 色码不受影响）。
     /// `no-color` feature 下 colored 编译期禁用颜色，无法覆盖，测试跳过。
     #[test]
     fn test_color_thresholds() {
@@ -611,18 +615,23 @@ mod tests {
             return;
         }
         colored::control::SHOULD_COLORIZE.set_override(true);
-        let cases = [
-            (10.0, "\u{1b}[92m"),    // |gap|<30：亮绿
-            (29.9, "\u{1b}[92m"),    // 边界内侧：亮绿
-            (30.0, "\u{1b}[32m"),    // 边界外侧（|gap| 恰为 30）：绿
-            (50.0, "\u{1b}[32m"),    // |gap|<100：绿
-            (200.0, "\u{1b}[33m"),   // |gap|<300：黄
-            (500.0, "\u{1b}[38;2;128;128;128m") // |gap|>=300：真彩色灰
+        let cases: [(f64, [&str; 2]); 6] = [
+            (10.0, ["\u{1b}[92m", ""]),          // |gap|<30：亮绿
+            (29.9, ["\u{1b}[92m", ""]),          // 边界内侧：亮绿
+            (30.0, ["\u{1b}[32m", ""]),          // 边界外侧（|gap| 恰为 30）：绿
+            (50.0, ["\u{1b}[32m", ""]),          // |gap|<100：绿
+            (200.0, ["\u{1b}[33m", ""]),         // |gap|<300：黄
+            (500.0, ["\u{1b}[38;2;128;128;128m", "\u{1b}[90m"]) // |gap|>=300：灰（真彩或降级 BrightBlack）
         ];
-        for (gap, want_ansi) in cases {
+        for (gap, [want_ansi, fallback_ansi]) in cases {
             let line = format_reason_line(format!("rival {gap}"), gap);
             println!("gap={gap:+}: {line:?}");
-            assert!(line.contains(want_ansi), "gap={gap} 应嵌入 {want_ansi:?}，实际 {line:?}");
+            let ok = line.contains(want_ansi)
+                || (!fallback_ansi.is_empty() && line.contains(fallback_ansi));
+            assert!(
+                ok,
+                "gap={gap} 应嵌入 {want_ansi:?}（或降级 {fallback_ansi:?}），实际 {line:?}"
+            );
         }
         colored::control::SHOULD_COLORIZE.unset_override();
     }

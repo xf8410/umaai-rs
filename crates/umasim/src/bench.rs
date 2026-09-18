@@ -794,8 +794,12 @@ average = [1, 0, 1, 1, 2]
     // 2026-09-17 二次重抓：GA 方向 9 旋钮组合档定稿进入 preset（pt_rate Y1 56/
     // pt_tradeoff 37/超拉面 35/弱位覆盖 35/友情 0.4/hint 8/max_sac 200/
     // ramen_window 0.15/ck 0.15），同种子 68118→70138。
-    const BASELINE_SCORE: i32 = 70138;
-    const BASELINE_FIVE: [i32; 5] = [3337, 2445, 2200, 1246, 1348];
+    // 2026-09-17 三次重抓（fork master）：上游合并 875dd2c（9 旋钮 preset 定稿
+    // + 评估核心/trainer/policy 行为变化）叠加本 fork 评分新口径（f1ac423），
+    // 同种子 70138→92393。基线锚点与 genetic_optimizer 的 MASTER_ANCHOR 同口径
+    // （同卡组/种子/trainer），两处实测值一致（92393）互相印证。
+    const BASELINE_SCORE: i32 = 92393;
+    const BASELINE_FIVE: [i32; 5] = [3337, 2445, 2107, 1230, 1251];
 
     /// 把三个地区 id 格式化成与决策日志 `action_desc` 相同的 `地区[a,b,c]`。
     fn region_desc(regions: [usize; 3]) -> String {
