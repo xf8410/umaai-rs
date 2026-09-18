@@ -33,11 +33,23 @@ pub struct DecisionLogRow {
     /// 决策耗时（微秒）
     pub elapsed_us: u64,
     /// 各候选评分分解（手写策略填充；随机基线为空）
-    pub score_breakdown: Option<String>
+    pub score_breakdown: Option<String>,
+    /// 决策时刻五维快照（速/耐/力/根/智，"/" 分隔；无快照为空串）
+    pub five_status: String,
+    /// 决策时刻技能点
+    pub skill_pt: i32,
+    /// 决策时刻当年剧本 PT（RMJ 结算后归零重计）
+    pub scenario_pt: i32,
+    /// 决策时刻当年累计吃面次数
+    pub eat_count: i32,
+    /// 决策时刻体力
+    pub vital: i32,
+    /// 决策时刻已成功 RMJ 年数
+    pub rmj_done: usize
 }
 
 /// CSV 列名（与 [`DecisionLogRow`] 字段一一对应）
-const CSV_HEADER: &str = "seed,turn,stage,candidates,action_index,action_desc,elapsed_us,score_breakdown";
+const CSV_HEADER: &str = "seed,turn,stage,candidates,action_index,action_desc,elapsed_us,score_breakdown,five_status,skill_pt,scenario_pt,eat_count,vital,rmj_done";
 
 /// 决策日志集合（每次决策追加一行）
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -91,6 +103,12 @@ impl DecisionLogRow {
         ];
         let breakdown = self.score_breakdown.as_deref().map(csv_escape).unwrap_or_default();
         cols.push(breakdown);
+        cols.push(csv_escape(&self.five_status));
+        cols.push(self.skill_pt.to_string());
+        cols.push(self.scenario_pt.to_string());
+        cols.push(self.eat_count.to_string());
+        cols.push(self.vital.to_string());
+        cols.push(self.rmj_done.to_string());
         cols.join(",")
     }
 }
@@ -138,11 +156,20 @@ mod tests {
             action_index: 2,
             action_desc: "吃面/新潟, 速度".into(),
             elapsed_us: 123,
-            score_breakdown: None
+            score_breakdown: None,
+            five_status: "100/200/300/400/500".into(),
+            skill_pt: 120,
+            scenario_pt: 5400,
+            eat_count: 3,
+            vital: 70,
+            rmj_done: 1
         };
         let line = row.to_csv_row();
         println!("单行 CSV: {line}");
-        assert_eq!(line, "42,5,RamenSelect,4,2,\"吃面/新潟, 速度\",123,");
+        assert_eq!(
+            line,
+            "42,5,RamenSelect,4,2,\"吃面/新潟, 速度\",123,,100/200/300/400/500,120,5400,3,70,1"
+        );
 
         let mut log = DecisionLog::new();
         log.record(row);
@@ -175,7 +202,13 @@ mod tests {
             action_index: 0,
             action_desc: "速度训练".into(),
             elapsed_us: 5,
-            score_breakdown: Some("speed=100".into())
+            score_breakdown: Some("speed=100".into()),
+            five_status: "350/0/0/0/0".into(),
+            skill_pt: 0,
+            scenario_pt: 0,
+            eat_count: 0,
+            vital: 100,
+            rmj_done: 0
         });
         log.save_to(&path)?;
 

@@ -52,6 +52,26 @@ impl<T> LoggingTrainer<T> {
     pub fn take_records(&self) -> DecisionLog {
         std::mem::take(&mut *self.log.borrow_mut())
     }
+
+    /// 决策时刻的游戏状态快照（五维/技能点/当年剧本PT/当年吃面数/体力/已成RMJ年数）
+    fn snapshot(game: &RamenGame) -> (String, i32, i32, i32, i32, usize) {
+        let five = game
+            .uma
+            .five_status
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        let rmj_done = game.ramen.rmj_results.iter().filter(|&&ok| ok).count();
+        (
+            five,
+            game.uma.skill_pt,
+            game.ramen.scenario_pt,
+            game.ramen.eat_count,
+            game.uma.vital,
+            rmj_done
+        )
+    }
 }
 
 impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
@@ -73,6 +93,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
             let is_super_ramen_select = actions
                 .get(idx)
                 .is_some_and(|a| matches!(a.operation, Operation::SuperRamenSelect(_)));
+            let (five_status, skill_pt, scenario_pt, eat_count, vital, rmj_done) = Self::snapshot(game);
             let row = DecisionLogRow {
                 seed: self.seed,
                 turn: game.turn(),
@@ -91,7 +112,13 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 action_index: idx,
                 action_desc: actions.get(idx).map(|a| a.to_string()).unwrap_or_default(),
                 elapsed_us,
-                score_breakdown: self.inner.last_breakdown()
+                score_breakdown: self.inner.last_breakdown(),
+                five_status: five_status,
+                skill_pt,
+                scenario_pt,
+                eat_count,
+                vital,
+                rmj_done
             };
             self.log.borrow_mut().record(row);
         }
@@ -113,6 +140,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 })
                 .collect::<Vec<_>>()
                 .join(" / ");
+            let (five_status, skill_pt, scenario_pt, eat_count, vital, rmj_done) = Self::snapshot(game);
             let row = DecisionLogRow {
                 seed: self.seed,
                 turn: game.turn(),
@@ -121,7 +149,13 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 action_index: idx,
                 action_desc: explain,
                 elapsed_us,
-                score_breakdown: None
+                score_breakdown: None,
+                five_status,
+                skill_pt,
+                scenario_pt,
+                eat_count,
+                vital,
+                rmj_done
             };
             self.log.borrow_mut().record(row);
         }
@@ -145,6 +179,7 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 })
                 .collect::<Vec<_>>()
                 .join(" / ");
+            let (five_status, skill_pt, scenario_pt, eat_count, vital, rmj_done) = Self::snapshot(game);
             let row = DecisionLogRow {
                 seed: self.seed,
                 turn: game.turn(),
@@ -153,7 +188,13 @@ impl<T: Trainer<RamenGame>> Trainer<RamenGame> for LoggingTrainer<T> {
                 action_index: idx,
                 action_desc: format!("事件#{} {}: {}", event.id, event.name, explain),
                 elapsed_us,
-                score_breakdown: None
+                score_breakdown: None,
+                five_status,
+                skill_pt,
+                scenario_pt,
+                eat_count,
+                vital,
+                rmj_done
             };
             self.log.borrow_mut().record(row);
         }

@@ -255,7 +255,13 @@ fn main() -> Result<()> {
                 action_index: d.selected,
                 action_desc: format!("{}{}", d.selected_desc, detail_tail),
                 elapsed_us: 0,
-                score_breakdown: Some(candidates_desc)
+                score_breakdown: Some(candidates_desc),
+                five_status: String::new(),
+                skill_pt: 0,
+                scenario_pt: 0,
+                eat_count: 0,
+                vital: 0,
+                rmj_done: 0
             });
         }
         let log_path = out_dir_path.join(format!(
