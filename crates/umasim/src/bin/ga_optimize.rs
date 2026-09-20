@@ -36,14 +36,14 @@ use serde::Deserialize;
 use umasim::card_pool::SsrPool;
 use umasim::genetic_optimizer::{
     GENE_COUNT, GENE_SPECS, GaGenome, GaOptimizer, GaParams, FitnessEvaluator,
-    SimFitnessEvaluator, select_screen_builds
+    SimFitnessEvaluator, EvalTrainerKind, select_screen_builds
 };
 use umasim::{
     bench::{self, RESULTS_HEADER, load_player_builds},
     game::InheritInfo,
     gamedata::{GAMEDATA, RamenRegionStrategy, init_global_with_config},
     global,
-    trainer::ParamOverride,
+    trainer::{ParamOverride, RamenSearchStages},
     utils::{get_workspace_root, load_game_config},
 };
 
@@ -118,9 +118,12 @@ fn random_uma_from_db(workspace_root: &std::path::Path) -> Result<u32> {
 
 /// CLI 解析：GA 协议参数全部可调（缺省 = design.md 定稿值）
 /// 返回 (GaParams, GaBenchConfig, out_dir, exclude_chara_ids)
-fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>, Vec<std::path::PathBuf>)> {
+fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) -> Result<(GaParams, GaBenchConfig, String, Vec<u32>, Vec<std::path::PathBuf>, String, usize, String)> {
     let mut exclude_charas: Vec<u32> = Vec::new();
     let mut seed_genome_paths: Vec<std::path::PathBuf> = Vec::new();
+    let mut eval_trainer: String = "recommended".to_string();
+    let mut eval_search_n: usize = 8192;
+    let mut eval_stages: String = "all".to_string();
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
@@ -185,6 +188,15 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                 let cid: u32 = bench::parse_value(&mut parser, "exclude-chara")?;
                 exclude_charas.push(cid);
             }
+            Arg::Long("eval-trainer") => {
+                eval_trainer = bench::parse_value(&mut parser, "eval-trainer")?;
+            }
+            Arg::Long("eval-search-n") => {
+                eval_search_n = bench::parse_value(&mut parser, "eval-search-n")?;
+            }
+            Arg::Long("eval-stages") => {
+                eval_stages = bench::parse_value(&mut parser, "eval-stages")?;
+            }
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: ga_optimize [--pop N] [--gens N] [--elitism N] [--k N] [--crossover F]\n\
@@ -195,7 +207,9 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
                      \x20                 [--lambda-race F] [--none-ratio F]\n\
                      \x20                 [--uma ID] [--friend ID] [--out DIR]\n\
                      \x20                 [--exclude-chara ID] ...（可传多次）\n\
-                     缺省 = design.md 定稿协议；马娘/友人/继承因子读 bench_config.toml\n\
+                     [--eval-trainer recommended|mcts] [--eval-search-n N]\n\
+                     \x20 [--eval-stages all|train|ramen|special|region|super,...]\n\
+                     \x20 缺省 = design.md 定稿协议；马娘/友人/继承因子读 bench_config.toml\n\
                      本体卡自动剔除：--uma 的 chara_id（gameId/100）自动加入排除\n\
                      ⚠️ 全量协议每代约 5280 局、40 代约 21 万局，跑前确认预算"
                 );
@@ -206,7 +220,7 @@ fn apply_cli(mut params: GaParams, mut cfg: GaBenchConfig, mut out_dir: String) 
             }
         }
     }
-    Ok((params, cfg, out_dir, exclude_charas, seed_genome_paths))
+    Ok((params, cfg, out_dir, exclude_charas, seed_genome_paths, eval_trainer, eval_search_n, eval_stages))
 }
 
 /// 基因表 preset 锚点快照 → TOML 文本（None = 该位 preset 不可单值表示）
@@ -415,8 +429,37 @@ fn main() -> Result<()> {
     let workspace_root = get_workspace_root()?;
     std::env::set_current_dir(&workspace_root)?;
 
-    let (params, cfg, out_dir_rel, mut exclude_charas, seed_genome_paths) =
+    let (params, cfg, out_dir_rel, mut exclude_charas, seed_genome_paths,
+         eval_trainer_str, eval_search_n, eval_stages_str) =
         apply_cli(GaParams::default(), load_ga_bench_config(&workspace_root)?, "ga_logs".to_string())?;
+
+    // 构造评估训练器种类
+    let eval_trainer_kind = match eval_trainer_str.as_str() {
+        "recommended" => EvalTrainerKind::Recommended,
+        "mcts" => {
+            let stages = if eval_stages_str == "all" {
+                None  // None = RamenSearchStages::all()
+            } else {
+                Some(RamenSearchStages::parse(&eval_stages_str)
+                    .with_context(|| format!("--eval-stages 解析失败: {}", eval_stages_str))?)
+            };
+            EvalTrainerKind::Mcts { search_n: eval_search_n, stages }
+        }
+        other => anyhow::bail!("--eval-trainer 未知值: {other}（可用 recommended|mcts）"),
+    };
+    match &eval_trainer_kind {
+        EvalTrainerKind::Recommended => {
+            println!("评估训练器: recommended（手写策略）");
+        }
+        EvalTrainerKind::Mcts { search_n, stages } => {
+            let stages_desc = match stages {
+                None => "all".to_string(),
+                Some(s) => format!("train={} ramen={} special={} region={} super={}",
+                    s.train, s.ramen_select, s.special_select, s.region_select, s.super_ramen_select),
+            };
+            println!("评估训练器: mcts search_n={} stages={}", search_n, stages_desc);
+        }
+    }
 
     // 自动剔除育成马娘本体卡：chara_id = gameId / 100
     let uma_chara_id = cfg.uma / 100;
@@ -521,7 +564,8 @@ fn main() -> Result<()> {
         .map(|cards| cards.iter().map(|c| (c.idrank, c.full_name.clone())).collect())
         .collect();
     let mut evaluator = SimFitnessEvaluator::new(cfg.uma, cfg.friend, inherit, params.clone(), pool)
-        .context("构造 SimFitnessEvaluator 失败")?;
+        .context("构造 SimFitnessEvaluator 失败")?
+        .with_eval_trainer_kind(eval_trainer_kind);
 
     // --seed-genome：外部参数包（override_to_toml 快照）归一化为基因组注入种群，
     // 与进化个体同马池同卡组配对（CRN），用于 GA 考场口径的参数对比。

@@ -39,7 +39,8 @@ use crate::bench::{self, GameOutcome};
 use crate::game::InheritInfo;
 use crate::trainer::local_ramen_trainer::ParamOverride;
 use crate::card_pool::{CardSelection, SsrPool};
-use crate::trainer::{LoggingTrainer, RecommendedRamenTrainer};
+use crate::trainer::{LoggingTrainer, RamenMctsTrainer, RamenSearchStages, RecommendedRamenTrainer};
+use crate::search::SearchConfig;
 
 /// preset 基线值（repair 与 preset 基因组锚点用）。
 ///
@@ -607,6 +608,93 @@ pub trait FitnessEvaluator {
     fn pool(&self) -> &SsrPool;
 }
 
+/// 评估训练器种类：GA 适应度评估时用的 Trainer。
+///
+/// - `Recommended`：手写推荐策略（原行为，~1ms/局）
+/// - `Mcts`：MCTS 搜索训练员（search_n 控制搜索次数，stages 控制搜索阶段）
+///
+/// 默认 `Recommended`，保持现有行为完全不变。
+#[derive(Debug, Clone)]
+pub enum EvalTrainerKind {
+    /// 手写推荐策略（原行为）
+    Recommended,
+    /// MCTS 搜索训练员
+    Mcts {
+        /// 每动作搜索次数
+        search_n: usize,
+        /// 搜索阶段（None = all）
+        stages: Option<RamenSearchStages>,
+    },
+}
+
+impl Default for EvalTrainerKind {
+    fn default() -> Self {
+        EvalTrainerKind::Recommended
+    }
+}
+
+/// 评估训练器枚举包装：让 `LoggingTrainer` 可以统一包装两种 Trainer。
+///
+/// 内部按 variant 转发到 `RecommendedRamenTrainer` 或 `RamenMctsTrainer`。
+/// 仅在 `SimFitnessEvaluator::run_level` 内使用，不暴露到公共 API。
+enum EvalTrainer {
+    Rec(RecommendedRamenTrainer),
+    Mcts(RamenMctsTrainer),
+}
+
+impl crate::game::Trainer<crate::game::ramen::RamenGame> for EvalTrainer {
+    fn select_action(
+        &self,
+        game: &crate::game::ramen::RamenGame,
+        actions: &[<crate::game::ramen::RamenGame as crate::game::Game>::Action],
+        rng: &mut rand::prelude::StdRng,
+    ) -> anyhow::Result<usize> {
+        match self {
+            Self::Rec(t) => crate::game::Trainer::select_action(t, game, actions, rng),
+            Self::Mcts(t) => crate::game::Trainer::select_action(t, game, actions, rng),
+        }
+    }
+
+    fn select_choice(
+        &self,
+        game: &crate::game::ramen::RamenGame,
+        choices: &[Vec<crate::gamedata::EventChoice>],
+        rng: &mut rand::prelude::StdRng,
+    ) -> anyhow::Result<usize> {
+        match self {
+            Self::Rec(t) => crate::game::Trainer::select_choice(t, game, choices, rng),
+            Self::Mcts(t) => crate::game::Trainer::select_choice(t, game, choices, rng),
+        }
+    }
+
+    fn select_event_choice(
+        &self,
+        game: &crate::game::ramen::RamenGame,
+        event: &crate::gamedata::EventData,
+        choices: &[Vec<crate::gamedata::EventChoice>],
+        rng: &mut rand::prelude::StdRng,
+    ) -> anyhow::Result<usize> {
+        match self {
+            Self::Rec(t) => crate::game::Trainer::select_event_choice(t, game, event, choices, rng),
+            Self::Mcts(t) => crate::game::Trainer::select_event_choice(t, game, event, choices, rng),
+        }
+    }
+
+    fn last_decision(&self) -> Option<crate::output::DecisionInfo> {
+        match self {
+            Self::Rec(t) => t.last_decision(),
+            Self::Mcts(t) => t.last_decision(),
+        }
+    }
+
+    fn last_breakdown(&self) -> Option<String> {
+        match self {
+            Self::Rec(t) => t.last_breakdown(),
+            Self::Mcts(t) => t.last_breakdown(),
+        }
+    }
+}
+
 /// 模拟评估器：100% 复用 `bench::run_seeded`，rayon 按局并行。
 ///
 /// 布局基因改造后，每个个体自带布局（comp_counts）和配卡（card_sel），
@@ -624,7 +712,9 @@ pub struct SimFitnessEvaluator {
     counts: EvalCounts,
     detail_rows: Vec<DetailRow>,
     /// 基因组样本（真实评估一次记一行；与 detail 同源，供 NN 代理模型训练）。
-    genome_rows: Vec<GenomeRow>
+    genome_rows: Vec<GenomeRow>,
+    /// 评估训练器种类（默认 Recommended = 原行为不变）
+    eval_trainer_kind: EvalTrainerKind
 }
 
 impl SimFitnessEvaluator {
@@ -650,7 +740,16 @@ impl SimFitnessEvaluator {
             detail_rows: Vec::new(),
             genome_rows: Vec::new(),
             friend_idrank: friend,
+            eval_trainer_kind: EvalTrainerKind::default(),
         })
+    }
+
+    /// 设置评估训练器种类（默认 Recommended，保持现有行为不变）。
+    ///
+    /// MCTS 模式下：每局新建 `RamenMctsTrainer`，GA 基因覆盖通过 fallback 应用。
+    pub fn with_eval_trainer_kind(mut self, kind: EvalTrainerKind) -> Self {
+        self.eval_trainer_kind = kind;
+        self
     }
 
     /// 运行一个级别下的全部局并聚合（纯计算，不改自身状态）。
@@ -685,10 +784,32 @@ impl SimFitnessEvaluator {
         let outcomes: Vec<GameOutcome> = jobs
             .into_par_iter()
             .map(|r| {
-                let trainer = LoggingTrainer::new(
-                    RecommendedRamenTrainer::with_overrides_for_rollout(ov),
-                    0
-                );
+                // 按 eval_trainer_kind 构造训练器：
+                // - Recommended: 原行为，手写策略 + GA 基因覆盖
+                // - Mcts: MCTS 搜索训练员，GA 覆盖应用到 fallback（rollout 基策）
+                //
+                // 取舍说明：RamenMctsTrainer 没有 with_overrides_for_rollout，
+                // GA 基因覆盖应用到其 fallback（RecommendedRamenTrainer）。
+                // 这意味着：门控关的阶段 + 事件选项 + 搜索 rollout 基策都受 GA 参数影响，
+                // 而门控开的阶段（如 train）走 MCTS 搜索、不受 GA 参数直接影响。
+                // 这是最合理的接法：GA 优化的参数本就是手写策略参数，
+                // MCTS 搜索的 SearchConfig 参数（search_n 等）由 --eval-search-n 控制。
+                let inner = match &self.eval_trainer_kind {
+                    EvalTrainerKind::Recommended => {
+                        EvalTrainer::Rec(RecommendedRamenTrainer::with_overrides_for_rollout(ov))
+                    }
+                    EvalTrainerKind::Mcts { search_n, stages } => {
+                        let mut mcts = RamenMctsTrainer::new(
+                            SearchConfig::default().with_search_n(*search_n)
+                        );
+                        mcts.fallback = RecommendedRamenTrainer::with_overrides_for_rollout(ov);
+                        if let Some(st) = stages {
+                            mcts = mcts.with_stages(*st);
+                        }
+                        EvalTrainer::Mcts(mcts)
+                    }
+                };
+                let trainer = LoggingTrainer::new(inner, 0);
                 bench::run_seeded(
                     self.uma,
                     &deck,
