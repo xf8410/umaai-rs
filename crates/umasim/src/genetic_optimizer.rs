@@ -583,14 +583,24 @@ pub struct EvalCounts {
 /// 明细行：（评估级别，基因组哈希，适应度，单局 CSV 行 = `bench::outcome_to_row` 31 列）。
 pub type DetailRow = (EvalLevel, u64, f64, Vec<String>);
 
+/// 基因组样本行：（评估级别，基因组哈希，适应度，77 基因原始值）。
+/// 仅真实评估（缓存未命中）记一行，与 detail 行同源去重；负值基因 = None
+/// （保留 preset），落盘统一编码 -1。供 NN 代理模型训练数据收集（ga_genomes.csv）。
+pub type GenomeRow = (EvalLevel, u64, f64, Vec<f32>);
+
 /// 适应度评估器抽象（GA 主循环只依赖本 trait；模拟评估与测试 mock 各有一实现）。
 pub trait FitnessEvaluator {
     /// 评估指定基因组+布局+配卡选择在指定级别下的适应度（内部按 (组合键, 级别) 缓存去重）。
     /// `key` = genome_hash ⊕ comp_hash ⊕ card_sel_hash（调用方组合）。
+    /// `genome` = 该个体基因组（供收集基因组样本的实现使用，不参与缓存键）。
     /// `comp_counts` = 该个体的 5 属性普通卡数量分布（合计 5、单类 ≤ 3）。
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard>;
+    fn evaluate(&mut self, key: u64, genome: &GaGenome, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard>;
     /// 取走自上次调用以来积累的单局明细行（GA 逐代落盘后清空，防内存膨胀）。
     fn take_detail_rows(&mut self) -> Vec<DetailRow>;
+    /// 取走自上次调用以来积累的基因组样本行（默认空实现：mock 场景不收集）。
+    fn take_genome_rows(&mut self) -> Vec<GenomeRow> {
+        Vec::new()
+    }
     /// 累计评估计数。
     fn counts(&self) -> EvalCounts;
     /// 获取 SSR 卡池引用（配卡基因初始化用；mock 实现返回空池）。
@@ -612,7 +622,9 @@ pub struct SimFitnessEvaluator {
     params: GaParams,
     cache: HashMap<(u64, EvalLevel), ScoreCard>,
     counts: EvalCounts,
-    detail_rows: Vec<DetailRow>
+    detail_rows: Vec<DetailRow>,
+    /// 基因组样本（真实评估一次记一行；与 detail 同源，供 NN 代理模型训练）。
+    genome_rows: Vec<GenomeRow>
 }
 
 impl SimFitnessEvaluator {
@@ -636,6 +648,7 @@ impl SimFitnessEvaluator {
             cache: HashMap::new(),
             counts: EvalCounts::default(),
             detail_rows: Vec::new(),
+            genome_rows: Vec::new(),
             friend_idrank: friend,
         })
     }
@@ -744,13 +757,16 @@ impl SimFitnessEvaluator {
 }
 
 impl FitnessEvaluator for SimFitnessEvaluator {
-    fn evaluate(&mut self, key: u64, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
+    fn evaluate(&mut self, key: u64, genome: &GaGenome, ov: &ParamOverride, comp_counts: &[usize; 5], card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
         if let Some(card) = self.cache.get(&(key, level)) {
             self.counts.cache_hits += 1;
             return Ok(*card);
         }
         let (card, rows) = self.run_level(key, ov, comp_counts, card_sel, level)?;
         self.detail_rows.extend(rows.into_iter().map(|r| (level, key, card.fitness, r)));
+        // 基因组样本：与 detail 行同源（缓存命中不记录，真实评估一次记一行），
+        // 供 NN 代理模型训练数据收集（ga_genomes.csv 落盘）
+        self.genome_rows.push((level, key, card.fitness, genome.0.clone()));
         match level {
             EvalLevel::Screen => self.counts.screen_evals += 1,
             EvalLevel::Full => self.counts.full_evals += 1,
@@ -762,6 +778,10 @@ impl FitnessEvaluator for SimFitnessEvaluator {
 
     fn take_detail_rows(&mut self) -> Vec<DetailRow> {
         std::mem::take(&mut self.detail_rows)
+    }
+
+    fn take_genome_rows(&mut self) -> Vec<GenomeRow> {
+        std::mem::take(&mut self.genome_rows)
     }
 
     fn counts(&self) -> EvalCounts {
@@ -1173,7 +1193,7 @@ impl GaOptimizer {
             // 1) 初筛：尚无任何评估值的个体全部过初筛
             for ind in pop.iter_mut() {
                 if ind.full.is_none() && ind.screen.is_none() {
-                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.ov, &ind.comp_counts, &ind.card_sel, EvalLevel::Screen)?);
+                    ind.screen = Some(evaluator.evaluate(ind.key, &ind.genome, &ind.ov, &ind.comp_counts, &ind.card_sel, EvalLevel::Screen)?);
                 }
             }
 
@@ -1192,7 +1212,7 @@ impl GaOptimizer {
             });
             for &i in order.iter().take(promotion_slots) {
                 if pop[i].full.is_none() {
-                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].ov, &pop[i].comp_counts, &pop[i].card_sel, EvalLevel::Full)?);
+                    pop[i].full = Some(evaluator.evaluate(pop[i].key, &pop[i].genome, &pop[i].ov, &pop[i].comp_counts, &pop[i].card_sel, EvalLevel::Full)?);
                 }
             }
 
@@ -1221,7 +1241,7 @@ impl GaOptimizer {
             }
 
             // 4) holdout 复验：本代冠军、不参与选择（缓存按 (key, level) 去重）
-            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.ov, &best_ind.comp_counts, &best_ind.card_sel, EvalLevel::Holdout)?;
+            let gen_holdout = evaluator.evaluate(best_ind.key, &best_ind.genome, &best_ind.ov, &best_ind.comp_counts, &best_ind.card_sel, EvalLevel::Holdout)?;
 
             // 5) 停滞计数：全程最优精评值严格高于代初快照才算提升
             let improved = match (best.as_ref().map(|b| b.0), prev_best_fitness) {
@@ -1284,6 +1304,7 @@ impl GaOptimizer {
         let final_key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let final_holdout = evaluator.evaluate(
             final_key,
+            &best_genome,
             &best_override,
             &best_comp_counts,
             &best_card_sel,
@@ -1418,7 +1439,7 @@ mod tests {
     }
 
     impl FitnessEvaluator for MockEvaluator {
-        fn evaluate(&mut self, key: u64, _ov: &ParamOverride, _comp_counts: &[usize; 5], _card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
+        fn evaluate(&mut self, key: u64, _genome: &GaGenome, _ov: &ParamOverride, _comp_counts: &[usize; 5], _card_sel: &CardSelection, level: EvalLevel) -> Result<ScoreCard> {
             if let Some(card) = self.cache.get(&(key, level)) {
                 self.counts.cache_hits += 1;
                 return Ok(*card);
@@ -1760,7 +1781,7 @@ mod tests {
         let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let ov = decode(&genome)?;
         let hits_before = e.counts.cache_hits;
-        let _ = e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
+        let _ = e.evaluate(key, &genome, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
         c.check(e.counts.cache_hits == hits_before + 1, "重复 (key, level) 评估命中缓存");
 
         // 晋升语义：每代精评后至少 elitism 个个体持有精评卡（full_count 为累计持有数，
@@ -1801,8 +1822,8 @@ mod tests {
         let sh = card_sel.hash_key();
         let key = gh ^ ch.wrapping_mul(0x9e3779b97f4a7c15) ^ sh.wrapping_mul(0x517cc1b727220a95);
         let ov = decode(&genome)?;
-        e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
-        e.evaluate(key, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?; // 缓存命中，不产明细
+        e.evaluate(key, &genome, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?;
+        e.evaluate(key, &genome, &ov, &comp_counts, &card_sel, EvalLevel::Screen)?; // 缓存命中，不产明细
         let rows = e.take_detail_rows();
         let mut c = Checks::new();
         println!("明细行数 = {}", rows.len());
@@ -2081,6 +2102,17 @@ mod tests {
                 row.len() == bench::RESULTS_HEADER.len() + 1,
                 "明细行列数 = RESULTS_HEADER + deck 列"
             );
+        }
+        // 基因组样本通道：真实评估一次记一行（缓存命中不重复），基因数 = GENE_COUNT
+        let genome_samples = evaluator.take_genome_rows();
+        println!("基因组样本行数 = {}", genome_samples.len());
+        c.check(!genome_samples.is_empty(), "基因组样本通道有产出");
+        let real_evals = evaluator.counts().screen_evals
+            + evaluator.counts().full_evals
+            + evaluator.counts().holdout_evals;
+        c.check(genome_samples.len() == real_evals, "基因组样本行数 = 真实评估次数");
+        if let Some((_, _, _, genes)) = genome_samples.first() {
+            c.check(genes.len() == GENE_COUNT, "基因组样本基因数 = GENE_COUNT");
         }
         // 全 None 个体（初始个体 0）在真实评估里 fitness 应等于其 mean_score
         // （无比赛失败、RMJ 全成时无惩罚项；若有惩罚则 fitness < mean_score，

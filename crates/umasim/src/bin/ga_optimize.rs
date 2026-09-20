@@ -19,6 +19,8 @@
 //!
 //! - `ga_generations.csv`：逐代摘要（最优/均值适应度、精评个体数、缓存命中、σ、停滞计数、holdout）
 //! - `ga_detail.csv`：逐局明细（评估级别 + 基因组哈希 + 适应度 + bench 31 列标准行 + deck 列）
+//! - `ga_genomes.csv`：基因组样本（每个真实评估个体 1 行：哈希 + 级别 + 适应度 + 77 基因原始值，
+//!   None=-1；缓存命中不重复记录），供 NN 代理模型训练数据收集
 //! - `best_genome.toml`：最优基因组的覆盖层 Some 子集（preset 快照，可直接人工评审）
 //! - `preset_baseline.toml`：基因表 preset 锚点快照（None 表示该位 preset 不可单值表示）
 //!
@@ -495,6 +497,14 @@ fn main() -> Result<()> {
         .collect();
     bench::write_csv(&out_dir.join("ga_generations.csv"), &gen_header, &[])?;
     bench::write_csv(&out_dir.join("ga_detail.csv"), &detail_header, &[])?;
+    // 基因组样本表头 = 哈希/级别/fitness + g0..g76（与 GenomeRow 落盘格式严格对齐）
+    let genome_header_owned: Vec<String> = ["genome_hash", "level", "fitness"]
+        .iter()
+        .map(|s| s.to_string())
+        .chain((0..GENE_COUNT).map(|i| format!("g{i}")))
+        .collect();
+    let genome_header: Vec<&str> = genome_header_owned.iter().map(String::as_str).collect();
+    bench::write_csv(&out_dir.join("ga_genomes.csv"), &genome_header, &[])?;
 
     // 构造评估器（卡组与 bench_base 同源同序：CardPickOpts::default() + make_deck）
     let pool = SsrPool::load_filtered(&exclude_charas).context("加载 SSR 卡池失败")?;
@@ -565,6 +575,30 @@ fn main() -> Result<()> {
         .collect();
     bench::write_csv(&out_dir.join("ga_detail.csv"), &detail_header, &detail_rows)?;
 
+    // 基因组样本落盘（GA 结束后一次性取走；每条真实评估一行，缓存命中不重复）
+    let genome_samples = evaluator.take_genome_rows();
+    let genome_rows: Vec<Vec<String>> = genome_samples
+        .into_iter()
+        .map(|(level, key, fitness, genes)| {
+            let mut row = vec![
+                format!("{key:016x}"),
+                level.tag().to_string(),
+                format!("{fitness:.6}")
+            ];
+            // None 基因（负值 = 保留 preset）统一编码 -1；其余原值 6 位小数
+            row.extend(genes.iter().map(|g| {
+                if *g < 0.0 {
+                    "-1.000000".to_string()
+                } else {
+                    format!("{g:.6}")
+                }
+            }));
+            row
+        })
+        .collect();
+    bench::write_csv(&out_dir.join("ga_genomes.csv"), &genome_header, &genome_rows)?;
+    println!("基因组样本 {} 条", genome_rows.len());
+
     // 最优基因组快照
     std::fs::write(out_dir.join("best_genome.toml"), override_to_toml(&report.best_override))
         .context("写 best_genome.toml 失败")?;
@@ -625,8 +659,8 @@ fn main() -> Result<()> {
         .collect::<Vec<_>>()
         .join(" ");
     println!("末 5 代最优: {best5}");
-    println!("产物: {}/ga_generations.csv, {}/ga_detail.csv, {}/best_genome.toml, {}/preset_baseline.toml",
-        out_dir_rel, out_dir_rel, out_dir_rel, out_dir_rel);
+    println!("产物: {}/ga_generations.csv, {}/ga_detail.csv, {}/ga_genomes.csv, {}/best_genome.toml, {}/preset_baseline.toml",
+        out_dir_rel, out_dir_rel, out_dir_rel, out_dir_rel, out_dir_rel);
 
     // 无结果保护：理论上 run() 已保证 best 存在
     let _: GaGenome = report.best_genome;
