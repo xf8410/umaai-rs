@@ -818,8 +818,11 @@ average = [1, 0, 1, 1, 2]
     // + 评估核心/trainer/policy 行为变化）叠加本 fork 评分新口径（f1ac423），
     // 同种子 70138→92393。基线锚点与 genetic_optimizer 的 MASTER_ANCHOR 同口径
     // （同卡组/种子/trainer），两处实测值一致（92393）互相印证。
-    const BASELINE_SCORE: i32 = 92393;
-    const BASELINE_FIVE: [i32; 5] = [3337, 2445, 2107, 1230, 1251];
+    // 2026-10 同步 upstream/master：吸收上游 policy 调优（cap=0.0 等第12轮验收值）
+    // + PT 口径修复，行为回到旧口径并对齐上游（上游同种子 67720），重抓 92393→62918，
+    // 五维 [3337,2445,2107,1230,1251]→[3337,1900,2081,983,1563]。
+    const BASELINE_SCORE: i32 = 62918;
+    const BASELINE_FIVE: [i32; 5] = [3337, 1900, 2081, 983, 1563];
 
     /// 把三个地区 id 格式化成与决策日志 `action_desc` 相同的 `地区[a,b,c]`。
     fn region_desc(regions: [usize; 3]) -> String {

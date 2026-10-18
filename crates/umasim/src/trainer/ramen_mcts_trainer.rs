@@ -1450,14 +1450,17 @@ mod tests {
         // 变化 + 9 旋钮 preset 定稿）叠加 fork 评分新口径（f1ac423），同卡组同种子
         // 65741→78476，五维 [3337,2216,2200,1073,1214]→[3337,2174,1614,1109,1433]，
         // skill_pt 8254→7327，searched_count 55→53（搜索行为随之变化），基准重抓。
-        c.check(score == 78476, "评分与改动前逐位相同");
+        // 2026-10 同步 upstream/master 后回到旧口径对齐上游，重抓 78476→57520，
+        // 五维 [3337,2174,1614,1109,1433]→[3337,1865,2074,951,981]，skill_pt 7327→7276，
+        // searched_count 53→62。
+        c.check(score == 57520, "评分与改动前逐位相同");
         c.check(
-            game.uma.five_status == [3337, 2174, 1614, 1109, 1433],
+            game.uma.five_status == [3337, 1865, 2074, 951, 981],
             "五维与改动前逐位相同"
         );
-        c.check(game.uma.skill_pt == 7327, "技能点与改动前逐位相同");
+        c.check(game.uma.skill_pt == 7276, "技能点与改动前逐位相同");
         c.check(game.ramen.scenario_pt == 0, "剧本 PT 与改动前逐位相同");
-        c.check(searched == 53, "searched_count 与改动前逐位相同");
+        c.check(searched == 62, "searched_count 与改动前逐位相同");
         c.finish()
     }
 
