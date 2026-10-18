@@ -43,6 +43,22 @@ pub struct SearchConfig {
     /// - false: 均匀分配搜索次数给每个动作（当前方式）
     pub use_ucb: bool,
 
+    /// 是否启用 Hyperband 多保真度预算调度（SuccessiveHalving）
+    ///
+    /// - true: 淘汰式多保真调度——每轮给存活动作加一组预算，按加权分
+    ///   淘汰到 1/[`hyperband_eta`]，几何收敛到只剩 1 个最优动作；
+    ///   总预算低于均匀分配，用"先粗筛后精筛"换算力。
+    /// - false: 关闭（默认）
+    ///
+    /// 优先级高于 [`use_ucb`](Self::use_ucb)：两者都为 true 时走 Hyperband。
+    pub use_hyperband: bool,
+
+    /// Hyperband 淘汰率（每轮保留 1/eta，eta >= 2）
+    ///
+    /// eta 越大淘汰越激进（更省预算）但低预算阶段误淘汰风险越高。
+    /// 默认 3（每轮保留 1/3）。
+    pub hyperband_eta: usize,
+
     /// UCB 每组搜索次数
     ///
     /// UCB 分配时，每次给选中的动作增加的搜索次数。
@@ -105,6 +121,8 @@ impl Default for SearchConfig {
             policy_delta: 100.0,
             // UCB 参数（默认启用，使用UCB分配）
             use_ucb: true,
+            use_hyperband: false,
+            hyperband_eta: 3,
             search_group_size: 256,
             search_cpuct: 1.0,
             expected_search_stdev: 2200.0,
@@ -157,6 +175,18 @@ impl SearchConfig {
     /// 启用/禁用 UCB 搜索分配
     pub fn with_ucb(mut self, enabled: bool) -> Self {
         self.use_ucb = enabled;
+        self
+    }
+
+    /// 启用/禁用 Hyperband 多保真度预算调度
+    pub fn with_hyperband(mut self, enabled: bool) -> Self {
+        self.use_hyperband = enabled;
+        self
+    }
+
+    /// 设置 Hyperband 淘汰率（每轮保留 1/eta）
+    pub fn with_hyperband_eta(mut self, eta: usize) -> Self {
+        self.hyperband_eta = eta;
         self
     }
 

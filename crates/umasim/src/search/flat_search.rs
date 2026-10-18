@@ -499,7 +499,9 @@ where
         let _diag_guard = crate::output::diagnostic::DiagGuard::suppress();
         // 成本探针的计时起点：探针关闭时**不取**时钟，避免为不用的数字付钟表开销
         let probe_started = self.probe.as_ref().map(|_| Instant::now());
-        let collected = if self.config.use_ucb {
+        let collected = if self.config.use_hyperband {
+            self.search_successive_halving(game, actions, radical_factor, &seeds, &rollout)?
+        } else if self.config.use_ucb {
             self.search_ucb(game, actions, radical_factor, &seeds, &rollout)?
         } else {
             self.search_uniform(game, actions, &seeds, &rollout)?
@@ -820,6 +822,79 @@ where
         }
 
         Self::warn_failures(&collected, "UCB");
+        Ok(collected)
+    }
+
+    /// Hyperband 多保真度预算调度（SuccessiveHalving）
+    ///
+    /// 每轮给存活动作各加一组预算（[`SearchConfig::search_group_size`]），按当前
+    /// 加权分淘汰到 1/[`SearchConfig::hyperband_eta`]，几何收敛到只剩 1 个最优动作。
+    /// 总预算低于均匀分配，用「先粗筛（低预算、多候选）后精筛（高预算、少候选）」
+    /// 换算力。这是 P0 决策面预算调度的第一种新算法。
+    ///
+    /// CRN 配对沿用 UCB 的「不等样本」口径：存活动作在 `0..min(n_a, n_b)` 上完全
+    /// 配对，多出的部分 unpaired；被淘汰动作停在已计划次数，不继续消耗种子。
+    /// 排名仅用 [`ActionResult::weighted_mean`] 的 `score` 轴，与终局排序口径一致。
+    fn search_successive_halving<F, T>(
+        &self, game: &G, actions: &[G::Action], radical_factor: f64, seeds: &RolloutSeeds, rollout: &F
+    ) -> Result<Vec<CandidateAccum<T::Stats>>>
+    where
+        T: TerminalRecord,
+        F: Fn(&G, &G::Action, u64) -> Result<RolloutOutcome<T>> + Sync
+    {
+        let num_actions = actions.len();
+        let record = self.config.record_ordered_rollouts;
+        ensure!(
+            self.config.search_group_size > 0,
+            "search_group_size 不能为 0（Hyperband 分配会死循环）"
+        );
+        let group_size = self.config.search_group_size.min(self.config.search_n).max(1);
+        let eta = self.config.hyperband_eta.max(2);
+        let use_parallel = self.use_parallel_simulation();
+
+        // 第一阶段：每个动作先搜一组（并行，offset=0 天然完全配对）
+        let run_initial = |action: &G::Action| -> Result<CandidateAccum<T::Stats>> {
+            let mut acc = CandidateAccum::<T::Stats>::new(record);
+            self.simulate_many(game, action, group_size, seeds, 0, &mut acc, rollout, "")?;
+            Ok(acc)
+        };
+        let mut collected: Vec<CandidateAccum<T::Stats>> = if use_parallel {
+            actions.par_iter().map(run_initial).collect::<Result<Vec<_>>>()?
+        } else {
+            actions.iter().map(run_initial).collect::<Result<Vec<_>>>()?
+        };
+
+        // 各候选已计划次数（种子偏移口径，同 search_ucb；不等于 CandidateAccum::planned
+        // 观测值，后者仅在探针开启时记账）
+        let mut planned = vec![group_size; num_actions];
+        let mut alive: Vec<usize> = (0..num_actions).collect();
+
+        // 淘汰式多轮迭代：跑一组 → 淘汰到 1/eta，直到只剩 1 个或预算触顶
+        while alive.len() > 1 {
+            if alive.iter().any(|&i| planned[i] >= self.config.search_n) {
+                break;
+            }
+            // 本轮存活动作各加一组预算（淘汰判据串行，组内 simulate_many 并行）
+            for &i in &alive {
+                let offset = planned[i];
+                self.simulate_many(
+                    game, &actions[i], group_size, seeds, offset, &mut collected[i], rollout, "[Hyperband]"
+                )?;
+                planned[i] += group_size;
+            }
+
+            // 淘汰：按加权分降序，保留 top ceil(alive/eta)（至少 1 个以免死循环）
+            let mut ranked = alive.clone();
+            ranked.sort_by(|&a, &b| {
+                let va = collected[a].score.weighted_mean(radical_factor);
+                let vb = collected[b].score.weighted_mean(radical_factor);
+                vb.partial_cmp(&va).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let keep = ((ranked.len() + eta - 1) / eta).max(1);
+            alive = ranked[..keep].to_vec();
+        }
+
+        Self::warn_failures(&collected, "Hyperband");
         Ok(collected)
     }
 
@@ -1530,6 +1605,105 @@ mod tests {
             );
         }
         println!("UCB 下候选重排导致 {diff}/{} 个动作统计不同", normal.len());
+        Ok(())
+    }
+
+    /// 回归基准配置（Hyperband 路径）
+    ///
+    /// `use_hyperband=true` 时优先于 `use_ucb`。`group_size` 取小值以免单次搜索过久。
+    fn regression_config_hyperband() -> SearchConfig {
+        SearchConfig::default()
+            .with_search_n(16)
+            .with_ucb(true)
+            .with_hyperband(true)
+            .with_hyperband_eta(3)
+            .with_search_group_size(4)
+    }
+
+    /// 回归 5：Hyperband 路径下同一 seed 两次搜索必须一致
+    #[test]
+    fn test_search_hyperband_reproducible() -> Result<()> {
+        let a = capture_with(regression_config_hyperband(), 42, false)?;
+        let b = capture_with(regression_config_hyperband(), 42, false)?;
+        for (i, (x, y)) in a.iter().zip(b.iter()).enumerate() {
+            println!("动作 {i}: n={} mean={:.6} | n={} mean={:.6}", x.n, x.mean, y.n, y.mean);
+        }
+        assert_eq!(a, b, "Hyperband 路径下同一 seed 两次搜索结果必须一致");
+        Ok(())
+    }
+
+    /// Hyperband 省预算验证：总样本数必须显著低于均匀分配（正确性门槛）
+    ///
+    /// 均匀分配每个候选固定 search_n 次，总预算 = actions × search_n；
+    /// Hyperband 逐轮淘汰到 1/eta，被淘汰动作停在低预算。此测试断言淘汰确实
+    /// 起作用（总成功样本数 < 均匀分配），否则「多保真调度」名不副实。
+    #[test]
+    fn test_search_hyperband_budget_reduced() -> Result<()> {
+        let uniform = capture_with(regression_config(), 42, false)?;
+        let hb = capture_with(regression_config_hyperband(), 42, false)?;
+        let total_uniform: u32 = uniform.iter().map(|d| d.n).sum();
+        let total_hb: u32 = hb.iter().map(|d| d.n).sum();
+        println!(
+            "总预算 均匀={total_uniform} vs Hyperband={total_hb}（动作数={}）",
+            uniform.len()
+        );
+        for (i, (u, h)) in uniform.iter().zip(hb.iter()).enumerate() {
+            println!(
+                "动作 {i}: 均匀 n={} mean={:.2} | Hyperband n={} mean={:.2}",
+                u.n, u.mean, h.n, h.mean
+            );
+        }
+        assert!(
+            total_hb < total_uniform,
+            "Hyperband 必须省预算：{total_hb} 应 < {total_uniform}"
+        );
+        Ok(())
+    }
+
+    /// Hyperband vs UCB vs 均匀分配 的分配器对比（诊断，不断言）
+    ///
+    /// 同一拉面根局面 + 同 seed 下三种分配各跑一遍，打印 best_action、
+    /// 各动作加权分排序与总预算，供判断 Hyperband 省预算后是否保住最优动作。
+    #[test]
+    fn test_search_allocator_comparison() -> Result<()> {
+        let seeds = [42u64, 7, 2026, 555, 777];
+        let n = 256usize;
+        let group = 64usize;
+        for seed in seeds {
+            println!("\n===== seed={seed} =====");
+            let mut bests = [0usize; 3];
+            for (slot, cfg) in [
+                SearchConfig::default().with_search_n(n).with_ucb(false),
+                SearchConfig::default().with_search_n(n).with_ucb(true).with_search_group_size(group),
+                SearchConfig::default()
+                    .with_search_n(n)
+                    .with_hyperband(true)
+                    .with_hyperband_eta(3)
+                    .with_search_group_size(group)
+            ].iter().enumerate() {
+                let (game, actions) = ramen_root()?;
+                let search: FlatSearch<RamenGame> = FlatSearch::new(cfg.clone());
+                let mut rng = StdRng::seed_from_u64(seed);
+                let out = search.search(&game, &actions, &mut rng)?;
+                let rf = out.radical_factor;
+                let total: u32 = out.action_results.iter().map(|r| r.0.count()).sum();
+                let mut ranked: Vec<(usize, f64, u32)> = out.action_results.iter().enumerate()
+                    .map(|(i, r)| (i, r.0.weighted_mean(rf), r.0.count()))
+                    .collect();
+                ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                let order = ranked.iter()
+                    .map(|(i, s, c)| format!("{i}({s:.0}/{c})"))
+                    .collect::<Vec<_>>().join(" > ");
+                let name = ["uniform", "ucb", "hyperband"][slot];
+                println!("[{name:9}] best={} total_n={total} | {order}", out.best_action_idx);
+                bests[slot] = out.best_action_idx;
+            }
+            println!(
+                "best: uniform={} ucb={} hyperband={} | {}",
+                bests[0], bests[1], bests[2],
+                if bests[0] == bests[2] { "hyperband 与 uniform 同选" } else { "hyperband 偏离 uniform" }
+            );
+        }
         Ok(())
     }
 
