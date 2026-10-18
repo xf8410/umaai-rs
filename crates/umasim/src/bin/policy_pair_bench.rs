@@ -105,7 +105,7 @@ mod tests {
     /// 重复实验键必须在开跑前报错，保证统计样本不会静默重复或覆盖。
     #[test]
     fn rejects_ambiguous_pair_keys() -> Result<()> {
-        let source = include_str!("../../../../experiments/validated_policy/final-check.json");
+        let source = include_str!("../../../../scripts/validated_policy/final-check.json");
         let mut manifest: Manifest = serde_json::from_str(source)?;
         ensure!(validate_manifest(&manifest).is_ok(), "冻结清单合法");
         manifest.variants.push(manifest.variants[0].clone());

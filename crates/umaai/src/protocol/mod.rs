@@ -209,7 +209,9 @@ impl GameStatusBase {
             race_bonus: 0,
             flags,
             career_races: data.zip_races(),
-            win_races: 0
+            win_races: 0,
+            bought_grades: 0,
+            bought_cost: 0
         };
         // 设置比赛状态
         for t in &self.race_history {
