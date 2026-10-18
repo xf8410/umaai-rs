@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ digest.meta.uma_name }} 育成复盘 #game{{ digest.meta.game }} · umaai_review</title>
+<style>
+  :root { --fg:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f6f8fb; --card:#ffffff; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:14px; font-family:"Segoe UI","Microsoft YaHei",sans-serif;
+         color:var(--fg); background:var(--bg); }
+  .wrap { max-width:1080px; margin:0 auto; }
+  h1 { font-size:21px; margin:0 0 8px; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:0; }
+  @media (max-width:820px) { .cols { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px;
+          padding:8px 12px; }
+  .card .k { font-size:11.5px; color:var(--muted); margin-bottom:2px; }
+  .card .k2 { margin-top:10px; }
+  .card .v { font-size:18px; font-weight:600; margin-top:2px; word-break:break-all; }
+  .card .v .luck { font-size:12.5px; font-weight:600; margin-left:10px; }
+  .luck-good { color:#16a34a; }
+  .luck-bad { color:#dc2626; }
+  .luck-flat { color:var(--muted); }
+  .sub2 { margin-top:4px; font-size:11.5px; color:var(--muted); }
+  .span2 { grid-column: 1 / -1; }
+  .card ul { margin:1px 0 0; padding-left:17px; }
+  .card li { margin:2px 0; font-size:12px; line-height:1.45; }
+  .chips { margin-top:5px; display:grid; grid-template-columns:repeat(3,1fr); gap:4px 6px; }
+  .chip { display:block; background:#f1f5fb; border:1px solid #d7dfee;
+          border-left-width:3px; border-radius:6px; padding:3px 9px;
+          white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          font-size:12px; font-weight:500; color:#27354f; }
+  .uma { font-size:16px; font-weight:600; margin:4px 0 0; color:#0f172a; }
+  .tag { display:inline-block; font-size:10px; font-weight:500; color:#b45309;
+         background:#fef3c7; border:1px solid #fcd34d; border-radius:8px;
+         padding:0 7px; margin-left:7px; vertical-align:2px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:8px;
+            padding:10px 12px; }
+  h2 { font-size:14px; margin:0 0 6px; color:#111827; }
+  svg { max-width:100%; height:auto; display:block; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th, td { border:1px solid var(--line); padding:2px 6px; text-align:left;
+           vertical-align:top; }
+  th { background:#f1f5f9; }
+  tr:nth-child(even) td { background:#fafafa; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .sev-warn { color:#b45309; font-weight:600; }
+  .sev-info { color:#2563eb; }
+  footer { color:var(--muted); font-size:11.5px; line-height:1.5; margin-top:6px; }
+  .note { color:var(--muted); font-size:11.5px; margin:4px 0 0; }
+  .foot { color:var(--muted); font-size:11.5px; margin-top:10px; text-align:center;
+          line-height:1.5; }
+{% if has_bg %}  /* 背景装饰：输出目录存在 yayoi.png 时自动启用（skill 只需复制图片，无需改 HTML） */
+  body::before { content:""; position:fixed; inset:0; z-index:-1;
+                 background:url("yayoi.png") center/cover no-repeat; opacity:0.5; }
+  :root { --card:rgba(255,255,255,0.7); }
+{% endif %}</style>
+</head>
+<body><div class="wrap">
+
+<h1>{{ digest.meta.uma_name }} 育成复盘（#game{{ digest.meta.game }}）</h1>
+
+{% set span_clones = digest.clones and not digest.inherit %}
+{% set span_inherit = digest.inherit and not digest.clones %}
+<div class="cols">
+  <div class="card">
+    <div class="v">{% if digest.meta.final_score is not none %}终局估分 {{ digest.meta.final_score }}（{{ digest.meta.rank or "—" }}）{% else %}终局估分 —{% endif %}
+      <span class="luck {% if digest.meta.total_luck_end is none %}luck-flat{% elif digest.meta.total_luck_end >= 0 %}luck-good{% elif digest.meta.total_luck_end < -2000 %}luck-bad{% else %}luck-flat{% endif %}">{% if digest.meta.total_luck_end is not none %}{% if digest.meta.total_luck_end >= 0 %}+{% endif %}{{ digest.meta.total_luck_end | round | int }}（{% if digest.meta.total_luck_end >= 0 %}好运局{% elif digest.meta.total_luck_end < -2000 %}差运局{% else %}平运局{% endif %}）{% else %}—{% endif %}</span></div>
+    <div class="uma">{{ digest.meta.uma_name }}{% if digest.meta.is_qiezhe %}<span class="tag">切者×1.1</span>{% elif digest.meta.is_xiao_qie %}<span class="tag">小切×1.04</span>{% endif %}</div>
+    <div class="chips">
+      {% for c in digest.meta.deck %}{% set tc = "#94a3b8" %}{% if c.card_type == 0 %}{% set tc = "#1f77b4" %}{% elif c.card_type == 1 %}{% set tc = "#ff7f0e" %}{% elif c.card_type == 2 %}{% set tc = "#2ca02c" %}{% elif c.card_type == 3 %}{% set tc = "#d62728" %}{% elif c.card_type == 4 %}{% set tc = "#9467bd" %}{% elif c.card_type == 5 %}{% set tc = "#ec4899" %}{% elif c.card_type == 6 %}{% set tc = "#06b6d4" %}{% endif %}<span class="chip" style="border-left-color:{{ tc }}">{{ c.name }} · {{ c.limit_break }}破</span>{% endfor %}
+    </div>
+    <div class="k k2">总结</div>
+{% if narrative.summary %}{{ narrative.summary | safe }}{% else %}<!-- NARRATIVE:summary -->{% endif %}
+    <div class="sub2">快照 {{ digest.meta.snapshots }} · 决策行 {{ digest.meta.decision_rows }} · 来源 {{ digest.meta.final_source }}</div>
+  </div>
+  <section><h2>图1 · 五维属性</h2>{{ chart_status | safe }}
+  <div class="note">逐年训练次数 / 五维净增 / 运气归属见同目录 brief.md §1.2</div>
+  </section>
+  <!-- 行序（用户 2026-10-09 拍板，图号按显示顺序）：估分卡(含总结)|图1 → 图2|叙述卡(总体+走势+检查项) → 图3|图4 → 分身|继承 -->
+  <section><h2>图2 · 运气走势</h2>{{ chart_luck | safe }}</section>
+  <div class="card"><div class="k">总体</div>
+{% if narrative.overview %}{{ narrative.overview | safe }}{% else %}<!-- NARRATIVE:overview -->{% endif %}
+  <div class="k k2">运气走势</div>
+{% if narrative.luck_trend %}{{ narrative.luck_trend | safe }}{% else %}<!-- NARRATIVE:luck_trend -->{% endif %}
+  <div class="k k2">检查项</div>
+{% if narrative.findings %}{{ narrative.findings | safe }}{% else %}<!-- NARRATIVE:findings -->{% endif %}</div>
+  <section><h2>图3 · 训练分布</h2>{{ chart_actions | safe }}</section>
+  <section><h2>图4 · 心情走势</h2>{{ chart_motivation | safe }}
+  <div class="note">{{ motivation_note }}</div>
+  </section>
+{% if digest.clones %}
+  <section{% if span_clones %} class="span2"{% endif %}>
+  <h2>分身彩圈</h2>
+  <table>
+    <tr><th>类别</th><th>新增分身</th><th>落得意位</th><th>被训练</th>
+        <th>随机（好运气）</th><th>规则（好策略）</th></tr>
+    <tr><td>地区分身</td>
+        <td class="num">{{ digest.clones.region.new_clones }}</td>
+        <td class="num">{{ digest.clones.region.rainbow_clones }}</td>
+        <td class="num">{{ digest.clones.region.trained_clones }}</td>
+        <td class="num">{{ digest.clones.region.rainbow_luck }}</td>
+        <td class="num">{{ digest.clones.region.rainbow_strategy }}</td></tr>
+    <tr><td>超级拉面分身</td>
+        <td class="num">{{ digest.clones.super_ramen_clones.new_clones }}</td>
+        <td class="num">{{ digest.clones.super_ramen_clones.rainbow_clones }}</td>
+        <td class="num">{{ digest.clones.super_ramen_clones.trained_clones }}</td>
+        <td class="num">{{ digest.clones.super_ramen_clones.rainbow_luck }}</td>
+        <td class="num">{{ digest.clones.super_ramen_clones.rainbow_strategy }}</td></tr>
+  </table>
+  <div class="note">随机落得意位＝好运、规则带入＝好策略；逐次明细见同目录 brief.md §5.3</div>
+  </section>
+{% endif %}
+{% if digest.inherit %}
+  <section{% if span_inherit %} class="span2"{% endif %}>
+  <h2>继承质量（参考值 {{ digest.inherit.reference_value or "—" }}）</h2>
+  <table>
+    <tr><th>回合</th><th>继承属性</th><th>偏差</th></tr>
+    {% for c in digest.inherit.contributions %}
+    <tr><td class="num">{{ c.turn }}</td><td class="num">{{ c.five_status_sum }}</td>
+        <td class="num">{% if c.deviation is not none %}{{ c.deviation }}{% else %}—{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  <div class="note">{{ digest.inherit.dev_note }}</div>
+  </section>
+{% endif %}
+</div>
+
+<div class="foot">
+  umaai_review 生成 · 马娘 {{ digest.meta.uma_name }}（{{ digest.meta.uma_id }}）·
+  结束方式 {{ digest.meta.end_reason }}{% if digest.meta.start_turn > 0 %} ·
+  中途接管（起始回合 {{ digest.meta.start_turn }}）{% endif %} ·
+  执行推断一致率 {{ overview.match_rate }}%
+</div>
+</div></body></html>

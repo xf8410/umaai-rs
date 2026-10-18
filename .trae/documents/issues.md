@@ -2,6 +2,82 @@
 
 本文件用于记载较复杂问题（需要用户协助解决的）的解决过程。
 
+## URA 段（turn≥72）比赛收益系统性低估 —— 71→72 运气分大跳
+
+- **日期**：2026-10-07
+- **状态**：已解决
+- **问题描述**：日志 `logs/game6261` 在 turn 71→72 之间运气分出现约 −1013 的大跳（`turn_delta` ≈ −1083），远超 `mcts_turn_bonus`(70)/回合 的正常量级。用户初判为「turn72_2 训练本身差」或「中间事件多算/漏算」。
+- **排查过程**：
+  1. **排除训练质量**：turn72_2 所选动作高于自身基线、5 个候选全部同步下移 → 非训练问题；逐项实测五维 / RMJ / `scenario_pt` 等协议字段也均无法解释 ~1000 分落差。
+  2. **终局对拍**（自建工具 `ramen_turn_inspect --rollout`，复刻生产 rollout 循环 `fork_for_rollout → apply_root_action → while next(){run_stage} → on_simulation_end`，用 `RamenTerminalStats` 汇总 25 维终局）：从 71_2 出发 n=8 均值 **70103.88**；从 72_2 出发三者中最高的「智训练」**69197.00**，差 ~900（且证实 MCTS 在 72_2 选智训练是对的）。
+  3. **逐决策点轨迹对拍**（`--n 1 --trace`）：两侧 turn72 状态几乎相同、turn 73 起动作序列逐位一致，**唯一差异**是比赛加成 `A=155 / B=55`（差恰好 +100），对应 turn73 比赛收益 `+18×4 / +171pt` vs `+11×4 / +104pt`（比值 2.55:1.55）。
+  4. **根因**：`race_bonus` 只作用于**比赛**五维收益（`base/action.rs` 乘 `(100+race_bonus)/100`，不影响训练）；`umasim` 内部模拟在 turn 72 `run_begin` 执行 `uma.race_bonus += finals_effect.base.saihou`（+100）；而协议重放 `GameStatusRamen::into_game` 走 `parse_basegame`——`parse_uma` 把 `race_bonus` 清零、只累加支援卡 `saihou` → 55，且 `game6261_turn72_2.json` **不含 `raceBonus` 字段**，无从恢复。旁证：真机 URA 段比赛实测 `[+0,+30,+30,+30,+30]` 与 ×2.55 口径一致（非 ×1.55），说明真机加了这 +100、是重放漏了。
+- **解决方案**：新增 `RamenGame::apply_super_ramen_saihou()`——**幂等**（`turn>=72` 且 `ramen.super_ramen` 为 `Some` 时 +`finals_effect.base.saihou`），由新增的非序列化标记 `RamenGame::super_ramen_saihou_applied`（不进 `RamenState`）保证「模拟路径」与「重放路径」合计只生效一次；`run_begin` 的一次性加成改为调用该方法（不再写死 `turn==72`）；`into_game` 在 `super_ramen` 落位后补调一次。
+- **验证**：`test_replay_applies_super_ramen_race_bonus` 显示 game6261_turn72_2 的 `race_bonus` 由 55 → **155**（=卡片 55 + 超级拉面 100）；`test_apply_super_ramen_saihou_idempotent` 覆盖二次调用 / `turn<72` / 未选超级拉面；`luck_replay` 重放 game6261（search-n 512）turn 72 的 `turn_delta` 由 ≈ −1083 收敛到 **−388**（回归正常波动区间，同局其它回合亦有 ±600）；`umasim` lib **436** passed、`umaai` lib **66** passed；纯模拟路径数值不变（golden 基线未动）。
+- **备注**：诊断用的一次性改动（`luck_probe.rs` / `ramen_turn_inspect.rs`）已在验证后 `git checkout` 还原。
+
+## 第 1 年地区选择的运气分 +1300 假跳升（链式推进漏加 NPC 人头）
+
+- **日期**：2026-10-03
+- **状态**：已解决
+- **问题描述**：日志 `logs/game6251` 第 2–3 回合（第一次地区选择）运气分出现约 +1000 的跳升：turn2 的 `total_luck` 达 +1393.67、`turn_delta` +1280.22（旧构建；用当前代码 `luck_replay` 重放同样复现 turn2 ≈ +1294），远超 `mcts_turn_bonus`(70)/回合 的正常量级。
+- **排查过程**：
+  1. **定位到「选区前 vs 选区后」**：`turn_delta` = T(turn2 选区后,真实帧) − T(turn2 选区前,回放) ≈ +1280（raw）。选区前基线由 `region_select` 候选（其候选本身就是"选中该地区后 rollout 到终局"的期望）按局数加权得到；turn1 因链式中间项 + 地区选择不算运气分而没有显示点，跳变全压到 turn2。先排除"选到好地区"：最优候选 62447 vs 加权 62328 只差 118。
+  2. **自洽模拟对照**：手写推进到 turn2 `RegionSelect` 根局面，与"应用地区后推进到 turn2 Train"局面在同一批 CRN 种子下配对，期望差仅 +68（≈1 回合 bonus）；逐回合轨迹 turn1→turn2 为 −141。说明 +1200 **不是**"选区前天生低估"。
+  3. **在线帧 vs 模拟状态直接对比**：用 `into_game` 加载 game6251 的 turn1_2 / turn2_4 帧，构造 R1（链式推进到 turn2 RegionSelect）、R2_frame（真实帧→Train）、R2_chain（模拟选区后→Train），同种子 rollout 得 `frame − chain = +1420`。全字段 diff 定位首个实质差异是 `distribution` 与**人头列表**：frame `persons.len=12`（含 5 个 `Npc`），chain `persons.len=7`（无 NPC）；把 frame 的 distribution 移植进 chain 时直接 panic（`index out of bounds: len 7, index 8`）。
+  4. **因果确认**：frame 去掉 NPC 人头 → 63566→62134（−1432）；chain 补上 5 个 NPC → 62146→63506（+1359）；另换 distribution / `feeling_queue` / `feeling_slot` 均只有 ±50 量级影响 → **真凶是 NPC 人头有无**。
+  5. **代码根因**：`manage_persons_on_turn_start` 用「是否存在 `ScenarioCard`（友人卡人头）」当「已补过友人卡+NPC」的判据。纯模拟 `newgame` 的 `init_persons` 刻意不加友人卡，守卫成立；但协议层 `into_game` 重建 turn<2 帧时**已把友人卡建成 ScenarioCard 人头** → turn2 守卫误判 → 整批跳过 `add_friend_and_npcs` → 链式推进出的 turn2 局面少 5 个 NPC，而 C# 的 turn2 帧走 `into_game`（`turn>=2`）正常带 5 NPC（12 人头）。NPC 参与训练值计算，故选区前（模拟）期望系统性偏低 → 运气分假跳升。
+- **解决方案**：`manage_persons_on_turn_start` 改为幂等逐个补齐——turn≥2 时友人卡与 5 个 NPC 各自独立判存在性、缺则补；记者同理（turn≥12）；`add_friend_and_npcs` 拆出 `add_friend_card` / `add_npcs`（原入口保留为薄包装，既有调用点不动）。新增守门单测 `test_turn2_backfills_npcs_when_friend_already_present`。
+- **验证**：帧对照 `frame − chain` +1420.29 → +20.30，chain 人头 7→12；`luck_replay` 重放 game6251 的 turn2 `total_luck` +1294.62 → −44.49（跳升消失）；`umasim` lib 398 passed（唯一失败 `test_color_thresholds` 为 ANSI 环境问题，与本次无关）、`umaai` lib 64 passed；钉死纯模拟基线的 `test_combined_gate_off` 仍绿 → bench / 自对弈数值逐位不变。
+- **备注**：影响面仅限「从 turn<2 帧链式推进到 turn2」的路径（在线链路 / `luck_replay` / 第 1 年地区选择的搜索根）。协议层 `into_game` 的 turn<2=7、turn 2..=12=12 人头布局，与纯模拟的人头顺序（友人卡 / 理事长下标）仍存在差异，本次未动。诊断用的一次性探针与临时输出已在验证后清理。
+
+## 缺模型时 ONNX 测试静默通过 + 图输出契约晚报错
+
+- **日期**：2026-09-23
+- **状态**：已解决
+- **问题描述**：`saved_models/` 不入库，`test_ramen_nn_select_action_opening` 在缺模型时直接 `return Ok(())`，没有模型的机器上测试「通过」但什么都没验；另外 `RamenNnTrainer::load` 只校验旁车 JSON 声明的维度，图本身输出个数 / dtype / 形状不对时要到第一次推理才报错。
+- **排查过程**：接入拉面杯网络时需要在任何机器上都能跑的加载与分支测试，梳理出依赖真实权重的只有「数值性质」类断言，加载契约与执行分支与权重无关。
+- **解决方案**：新增 `testsupport/onnx_fixture.rs` 当场生成最小 ONNX 模型（含可钉住某个地区组合的常数输出模型），加载契约与客户端地区分支测试改用它；依赖真实权重的测试标 `#[ignore]`，显式运行时缺模型即报错；`load` 时校验图输出契约（单输出 / f32 / `[batch, 245]`）。
+- **备注**：真实模型测试显式运行：`cargo test -p umasim --release --lib --features onnx -- --ignored`。
+
+## 合宿/满体力「一选休息」回归复测（未复现）
+
+- **日期**：2026-09-21
+- **状态**：已解决（结论 = 未复现，d9374e8 合宿诀窍修复有效；新增观测工具）
+- **问题描述**：9-17 修复「合宿训练诀窍全 MAX」（此前合宿训练被系统性低估 3 诀窍/回合，是「高体力一选休息」的根因）后，验证新 build `spd2_sta0`（无耐卡 [2,0,1,1,1]）与 `speed_wisdom` 在 search_n=4096 的 MCTS 模式下是否仍存在「合宿期间或在体力>休息目标门限时一选休息」。
+- **排查过程**：
+  1. **观测缺口补齐**：决策日志无「决策时体力」、bench_base 无 build 过滤——`DecisionLogRow` 追加 `vital` 列（开发格式列尾演进）、`bench_base --builds` 过滤、新增 `scripts/analyze_rest_picks.py`（合宿回合按 `is_xiahesu`（[36,40)∪[60,64)）、体力分桶按 `vital_rest=45` / `rest_target_vital=55`，剔除单候选决策点）；
+  2. **MCTS 参数 = 生产口径**（train,ramen,region + UCB + radical 1.4，只覆盖 `--search-n 4096`），2 build ×10 局（base_seed=61444）；手写推荐 preset 同种子对照；
+  3. **结果**（MCTS 20 局 / 手写 20 局）：
+     - 合宿期「一选休息」（整局合宿全部选休息）：**MCTS 0/20 局、手写 0/20 局**；MCTS 合宿休息仅 3 次（vital 24–49，均低于休息目标线），手写合宿休息全落在 vital≤45 守门桶；
+     - 体力>55 休息：MCTS 4/20 局各 1 次（≈0.35% 决策点，vital 57–68，均非合宿）；**手写 0 次**；
+     - 其余 MCTS 休息全部 vital≤55（其中 14 次 vital≤45），属合理低体力休息。
+- **解决方案**：无策略改动；观测工具入库（决策日志 vital 列、`--builds`、审计脚本），审计口径与规则层同源，后续同类排查直接复用。
+- **备注**：高体力偶发休息（4 次）属搜索估值边界而非系统性「一选」，如需收紧可对具体决策点 dump「休息 vs 最优训练」候选分差；两 build 在 turn≈18 出现多局休息扎堆（6/20 局、体力各异）起因待查；`policy_pair_bench` 测试目标编译失败（`include_str!` 指向 9-19 已迁移的 `experiments/validated_policy/final-check.json`）为既有问题，与本次无关。
+
+## 协议层 `failureRateBias` 语义反（game421 turn 25+ 反复推「不吃面+休息」的根因）
+
+- **日期**：2026-09-21
+- **状态**：已解决（协议层两处反向 + 补回归）
+- **问题描述**：game421 在线 MCTS 在 turn 25 拿到「擅长训练」buff 后（`failureRateBias = -2`，表示失败率降低 2%），turn 38/60/62/63 反复推荐「不吃面+休息」——回合 61 vital 108/108 仍推休息，玩家直观不合理。9-21 复测时 bench 数据未复现（仅 4/20 局高体力偶发），怀疑真实玩家局与 bench 数据有差异，但根因不明。
+- **排查过程**：
+  1. **排除状态还原错**：`ramen_turn_inspect` 对 turn 61 重建的 RamenGame 与在线逐字段一致（vital=108/108、scenario_pt=3750、regions=[10,11,17]、persons 羁绊全 100），重跑选"不吃面" mean=63045 vs 在线 63055（搜索均值正常噪声）；
+  2. **新增 `rest_pair_probe` 单回合 CRN 配对探针**（22 候选完整组 / 21 候选屏蔽"不吃面"组，4096 rollout）：turn 61 "不吃面"领先任何吃面 **+351 分**、turn 62 领先 **+645 分**——稳定的估值偏差，非噪声；
+  3. **排除"回合空转换后续高均值"估值假说**——该假说不能解释 fix 后 449/223 的反向；
+  4. **顺藤摸瓜**：`game421_turn25.json` 起 `failureRateBias = -2` 恒定（buff 来源正确），[protocol/mod.rs:148-149](file:///f:/UmaAI_Active/umaai-rs/crates/umaai/src/protocol/mod.rs#L148-L149) 解析侧 `failure_rate_bias < 0 → bad_trainer=true`——与 `traits.rs:509-515` 内部 `good_trainer → bias=-2.0`（降低失败率）相反，**buff 被读成"不擅长训练"**；
+  5. **连锁影响**：`calc_training_failure_rate` 看到 `bad_trainer=true` → 加 +2 失败率 bias → MCTS 在 turn 25+ 任何回合的 Train 阶段估值都把训练失败率人为抬高 → 高体力回合（vital 88~108）选训练 → 失败代价（腰斩体力 + 没五维）显著 → 期望收益比"休息"低 → 推休息；
+  6. **同时发现导出方向也反**（[protocol/mod.rs:278-284](file:///f:/UmaAI_Active/umaai-rs/crates/umaai/src/protocol/mod.rs#L278-L284)）：`good_trainer → failure_rate_bias=2`（写出 +2），与内部语义反向——会让 AI 模拟结果回传到游戏 UI 时再反向一次。
+- **解决方案**：
+  1. 解析侧 `< 0 → good_trainer=true`、`< 0 → bad_trainer=false`（两条件同步反向）；
+  2. 导出侧 `good_trainer → -2`、`bad_trainer → 2`（与解析对称）；
+  3. 新增回归 `test_failure_rate_bias_parse`（三组 frb=-2/+2/0 × 期望 good/bad）；
+  4. 注释明确：上游约定 `>0`=不擅长训练、`<0`=擅长训练，与 `traits.rs:calc_training_failure_rate` 同源。
+- **验证**：turn 61 `rest_pair_probe` 修复后「不吃面」63457 落后最佳吃面 63906 **−449 分**（原 +351）；turn 62「不吃面」63395 落后 63618 **−223 分**（原 +645）。MCTS 在 turn 61 改选"吃面/札幌-速"、turn 62 改选"吃面/函馆-耐"，完全符合玩家直觉。`cargo test --release -p umaai --lib` 41 passed / 0 failed（含新增回归）。
+- **备注**：
+  - **改变拉面 MCTS 估值口径**：turn 25 起的所有 Train 决策点估值都会重排（之前被 buff 反向误导），预期 bench 配对基线、sampler 根局面、教师数据需重抓；但**实际数值走向是好的**——训练失败率估值从人为偏高变正确，MCTS 选训练概率应当上升；
+  - 9-21 合宿复测的 4/20 局高体力休息属搜索估值边界（非本次 bug），仍保留观察；
+  - game421 在线原汁记录保留 `logs/game421/`（包含修复前错的决策 + `rest_pair_turn{61,62}_after.log` 修复后搜索对比）。
+
 ## ga_lab 最优策略合并（2026-09-17）：组合交互 / weakboost 反模式 / 年度前瞻参数被支配
 
 - **日期**：2026-09-17
@@ -670,3 +746,49 @@
   4. **capd（残余收益折扣）**：`cap_discount_weight` 实际只是 0/非 0 开关（数值无意义），capd150/200 与 base 逐位一致
 - **解决方案**：三方向全部关闭，手写 preset 维持现状。保留两处无害性改动：①豁免 scoped 语义修正（默认 MAX 不豁免，行为逐位不变，修复原实现"整个门放开"的与文档意图不符）；②补齐 trd/trdsh/trds 实验 token（文档声明过但从未实现）与解析单测。
 - **备注**：智卡3 的 3.4k 分差主要为配卡天花板（速/耐/力/根弱位），非策略失误；若要继续增量，剩余方向在 MCTS 侧（智向 build 的 pt_favor_rate 交互）或新系数（hint/羁绊对智向 build 差异化定价）。
+
+
+## 赛程差的马娘「第三年友人出行走不完」（2026-09-21）：配额 vs 风味收支 / 走完硬门限的代价
+
+- **日期**：2026-09-21
+- **状态**：已解决（配额定档 + 完成硬门限，已入 preset 与配置项）
+- **问题描述**：手写策略的友人出行跨年配额原为 `[0,2,5]`（第 3 年补满 5 次），但第三年必赛多的马娘（如生野狄杜斯 8 场必赛）实测有 ~20% 的对局走不完第 5 次，玩家在真人局上反馈更明显；需要判断"第五次走不完"的成因、以及"必须走完"要付多少分。
+- **排查过程**：
+  1. **纠正年份口径**：拉面剧本的年界是 turn `<24` / `24-47` / `48-71`（`current_year()` 与年度归档一致），此前按 11-34/35-58 分年会得出"第三年只有 4 个自由回合"的错误结论。按正确口径第三年自由回合中位数 16 个，**配额不是被回合数卡住**。
+  2. **配额只解一半**：`friend_outing_within_pacing` 只有硬上限；开大上限并不会用满（第 2 年 cap=3 时 53-61% 的局用满、cap=4 时仅 25-29% 用满），说明限制来自动态估值与风味闸门。
+  3. **路径拆解**（决策日志新增路径标注）：第 2 年友人出行 66% 走"低体力守门→替代休息"（Δ 均值约 −1000，机会成本≈0），第 3 年只有 31% 走该路径、69% 是自由打分胜出（Δ 均值 +400~+490，真实替代训练）——**第三年出行贵在替代训练，不是缺回合**。
+  4. **真瓶颈是隐藏风味收支**：第三年固定风味全部落在夏合宿（turn 60-63），结束后库存被顶到上限 4，替代休息路径要求 `special_feeling ≤ 2`，需等到 turn 65-68 才第一次开窗；第三年可出行窗口因此只剩 5-6 个。实测每局真正溢出的风味仅 0.4 左右（74% 的局为 0），即"少走一次"损失约 1.4 点风味。
+  5. **量化各条代价**（700 局/单元，同 build 同 seed 配对）：配额提前（`[0,3,5]`、第 2 年 2→3）在噪声内（+44 / −51）；第 1 年开配额在葛城王牌上硬亏 −628（t=−8.6）；第三年"强制补足"项自身在狄杜斯上 −159（t=−3.35）、葛城王牌 −35（不显著）。
+- **解决方案**：
+  1. 跨年配额定档 `[0,3,5]`（第 1 年不启用；第 2 年放宽以消化低成本休息替代；第 3 年补满）。
+  2. 新增配置项 `friend_complete_required`（默认开）：开启时隐藏风味闸门不再阻断出行（完成优先于风味利用），且"剩余出行次数 ≥ 剩余可出行回合数"（可出行回合按本人赛程排除必赛、夏合宿 60-63、超级拉面 72-77）即强制出行；该检查每回合重做，窗口够就一定能补足。
+  3. 该开关同步到 MCTS 的 fallback 与 rollout 基策（`FlatSearch::with_rollout_trainer`），保证搜索内部评估与正式策略同口径；`bench_base` 同口径读取。
+  4. 离线工具补齐观测：逐年友人出行次数、用满标记、出行时隐藏风味溢出量（结果 CSV 新列），便于后续回归。
+- **验证**：`umasim` lib 392 测试 + `umaai` 40 测试全绿；默认配置下 `bench_base` 实测 5 次走完率 100%（35 局冒烟）。
+- **备注**：狄杜斯仍有约 0.4% 的局走不完——那些局第三年剩余可出行窗口少于剩余次数（赛程把窗口压到 2 个以下），属结构性上限；若要进一步逼近，只能动第三年吃面/风味节奏，代价需另测。存量快照基线（score/五维/rollout 均值/MCTS 整局）随 preset 变更重抓。
+
+
+## 终局评分缺「游戏结局事件」（2026-09-30）：末快照时刻 → 独立终局帧信道
+
+- **日期**：2026-09-30
+- **状态**：已解决（umaai 侧已实现；插件端方案已定稿，待 Windows 实现）
+- **问题描述**：复盘报告的终局评分（`digest.meta.final_score`，口径 = `Uma::calc_score`）取自末份快照，而末快照停在**末回合比赛之前**（拉面 `turn77_2` 是比赛决策帧），因此少算：末回合比赛奖励、剧本 `401407` 育成结束（五维 +40 / SP +200 / hint 2）、通用 `5011`（五维 +5 / SP +20）、友人结束 `830305105`（速/耐/智 +15 / SP +50）。实测缺口 ≈ **2700 分**（game6243 62639→≈65378、game1430 62550→≈65209，缺口 2739 / 2659）。
+- **排查过程**：
+  1. **末快照时刻定位**：73/75/77 三个比赛回合的快照都不含该回合胜场（`raceHistory` 到下一回合才补齐）→ 快照在比赛之前；game6243 的 158 份快照止于 `turn77_2`，无第 3 份、无 turn≥78 的帧（同时期 turn47 能有 `_6`，排除序号/写入问题）。
+  2. **缺哪些事件**：从 `gamedata/scenario_ramen.json` 起出 `401407`（+40/+200）；`events.json` 的 `5011`（+5/+20）；剧本友人表 `830305105`（+15/+15/+15/+50）；末回合比赛按 `race_career`（+7/全维、+67pt）× 比赛加成。逐维复算与模拟探针逐位吻合（`luck_probe` 从 turn76_2 跑到终局：耐 2162+40+15+5+11=2233、根 1089+40+5+11=1145、智 2338+40+15+5+11=2409）。
+  3. **模拟路线可行性**：从 turn76_2 起跑的整局模拟会走完结局事件（得分 65586），但从末快照 turn77_2 起跑**不会**——`into_game` 直接写 `stage=Train` 不走 Begin，turn 77 的 `add_mandatory_events`（5011/401407/友人结束）从未排队，实测 63230 vs 65586（差 2356）。该缺口只在「需要 T(77)/末回合运气读数」时才需修（比赛回合单候选不挂 luck，故 CSV 目前不显形）。
+  4. **评分表口径差异**：小黑板 `Database.StatusToPoint`（显示值索引、2501 段）与 umaai `five_status_final_score`（减半前索引、3399 段）在显示值 0..2000 逐位相等；2001 起 host 已按实测校准下调（−1 → −305），故两局报告五维分偏高 239 / 203——换表会整体位移 bench 基线，另开一拍。**（2026-10-06 已落地：以 host 2501 项表为源、经 `raw[r] = ura[cut(r)]` 展开为 raw 表 3802 项，见该日 changelog；`Ramen_AI_0.2/` 与 `umaai-review-skill/data/` 副本本轮未同步）**
+  5. **方案对比**（用户拍板）：插件端真机终局帧 ＞ 模拟推算。`/finish` 的 `trained_chara.rank_score` 被排除（属性/SP/Hint 已转成技能，超出 AI 评估轴）；`SkillTipsResponseAnalyzer` 提供了同一帧的现成判据（`state is 2 or 3 && unchecked 为空`）与端点注册样板（`check_event` / `load` 两条 wildcard，因玩家可能在终局画面退出重进）。
+- **解决方案**：
+  1. **新信道**：插件在终局帧单独写 `finalScore.json`（固定名、扁平 payload、不带判别字段），**不写** `thisTurn.json`；umaai 监听改白名单 `{thisTurn.json, finalScore.json}`、队列元素带 basename，按文件名分流。
+  2. **umaai 侧**：`FinalScorePayload` 扁平结构（五维/上限/剩余技能点/继承增量）；`record::on_final` 校验剧本与局号（防上一局残留）→ 落 `logs/game{id}/game{id}_final.json` → 打包 → 关局。
+  3. **打包时机**：末回合只写 meta + 出图，zip 推迟到终局帧；末回合已见而终局帧未到 → 切局/退出兜底打包（保证完整一局必有 zip）；中途停止局不变（保留目录不打包）。
+  4. **复盘**：`pack` 识别终局帧角色（不进 timeline），`digest` 优先用真机帧算分，`meta.final_source` 标注来源，`criteria` / 简报按来源分流措辞。
+  5. **插件端方案文档**：`URA_Plugins/SendGameStatusPlugin/docs/finalScore.md`（字段契约、挂接判据、首份不覆盖策略、待实测清单）。
+- **对抗审查修复（review 面板确认 4 条）**：
+  1. **重启重放会覆盖已归档 zip（critical）**：归档状态原先只活在进程内的 `final_zipped`，而插件目录里的 `thisTurn.json` / `finalScore.json` 是固定名、育成结束不删除——umaai 在结算画面重启时 producer 启动兜底会把残留文件推入队列，重建 `logs/game{id}/` 后用残数据打包、覆盖掉完整归档（复现：第一轮 5 条目包 → 第二轮 4 条目、丢掉 luck_trend.svg 与其余回合）。修复：归档状态改为**跨进程可判定**（`logs/game{id}.zip` 存在即已归档）——残留快照不重建目录、残留终局帧不落盘、打包分支跳过覆盖；回归用例断言重启重放后 zip 逐字节不变。
+  2. **坏终局帧被当权威分（major）**：五维/上限原先 `#[serde(default)]`，缺字段落 0 会让 `min(五维, 上限)` 把五维分整体清零，却仍标 `final_source=final_frame`（复现：完整帧 75865 → 缺 limit 15434）。修复：三字段改契约必填（缺失即解析失败）+ `is_usable()` 第二道闸（全 0 判不可用），umaai 侧忽略并告警、复盘侧回落末快照。
+  3. 另两条为同一根因的重复报告；审查期间探针测试（`zz_probe_tests`）已由审查代理移除，仅在 `urafile.rs` 留下一处探针用例，已改写为正式用例（`producer_startup_fallback_pushes_residual_files`）并修正线程收尾。
+  4. 两条被判为不成立（refuted）：`skillPtSpent` 负数导致 `total_pt` 溢出（当前取值恒非负）、`unwrap_or(-1)` 的牌位映射（非本次改动，既有代码）。
+- **验证**：`umaai` lib 62 测试 + `umaai_review` 49 测试全绿；新增用例覆盖终局帧解析（含必填字段与全 0 坏帧）、白名单入队与按文件去重、归局不符忽略、打包时机（终局帧/兜底）、重启重放不覆盖归档、评分来源优先级（末快照 62639 → 真机帧 64761，口径注记含来源）。
+- **备注**：待 Windows 实测确认三件事——终局帧实际端点（check_event/load）、`state` 取值、同局首份是否最完整（`skill_point` 是否单调不增）；另确认终局帧五维相对末快照是否为 +60（= 含友人结束）。未做：Hint 与已学技能分补齐（`skill_tips_array` / `skill_array` 数据已在同帧，成本极低）、`thisTurn.json` 的 `inheritGains` 移除（五维分表换 host 校准版已于 2026-10-06 落地）。

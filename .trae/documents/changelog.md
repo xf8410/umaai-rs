@@ -2,7 +2,134 @@
 
 本文件用于简要记录每次任务的修改内容。记录应尽量精简，每条修改一行，不包含代码细节。
 
+## 2026-10-09
+- **复盘口径：五维偏低与补维建议（用户拍板）**：不得仅因某维终局偏低就建议玩家「加强该维训练」——「能训练的属性」依赖携带卡组，卡组未携带的维（如力/根）偏低是客观事实；补维只从三条路给建议：练对应主属性（练速补力 / 练耐补根 / 练根补速力）、换副属性更强的支援卡、改进种马继承更多对应属性。落点三处：SKILL.md 归因口径新增条目 + 六问 Q1 要点、metrics_glossary 新增「五维偏低与补维建议」节（含底部归因口径摘要行）、brief 模板 §1.1 五维表下加判读注记（渲染测试补断言）；game6263 复盘实测口径生效（根 1090 按卡组结构归因、改进建议走三条补维路径）
+- **报告排版调整（用户两点拍板）**：① 图1 五维属性移入头部「终局估分」卡内（卡组 chips 之后、快照小字之前，原独立 section 删除、图1-图3 编号保留不动）；② 新增图4 心情走势——干劲 1-5 固定档位回合末阶梯折线（紫）+ 绝好调档浅绿底带 + 掉落红点 / 回升绿点，图下 `.note` 自动生成掉干劲区间文字解释（`MoodEpisode` 状态机：一次下降起、回到下降前水平止为一段，连降合并取最低值，无掉落输出「全程干劲无下降」）。网格行序变为：估分卡(含图1)|总体卡、图2|图3、图4|走势检查项卡、分身|继承；SKILL.md 叙述占位位置表同步（并注明图4 与区间注记由 bin 自动生成）。测试新增掉干劲区间切分 4 形态用例与模板渲染断言（图1 入卡、图4 注记入文；55 项全过）；exe 重编，发布仓 SKILL / 模板 / exe 已同步
+- **报告布局重排与图号重编（game6263 反馈，用户逐轮拍板）**：① **图号按显示顺序重编**——运气走势 图3→图2、训练分布 图2→图3（五维=图1、心情走势=图4 不变），阅读顺序即 1→2→3→4，SKILL「与图3 关注点对应」等全部引用同步；② **图1 五维属性拆出估分卡**、独立图卡居估分卡右侧；③ **叙述段重组**——原「总体 / 总结」双段卡拆散：总结并入终局估分卡（chips 之后间隔开），「总体 / 运气走势 / 检查项」三段合卡与图2 同排。最终行序：估分卡(含总结)|图1 → 图2|叙述卡 → 图3|图4 → 分身|继承；中途试过列流两栏（图表全左、图1 右栏开头平衡高度）两版，实测效果不佳回滚未入库。report.rs 模块注释 / note_svg 降级文案 / 测试断言同步（行序断言 1<2<3<4，55 项全过）；发布仓模板与 SKILL 已同步（模板级改动，exe 无需重编）
+- **彩圈没吃到的候选评分鉴别 + 报告主标题（用户两点拍板）**：① **「分身彩圈没有点」不再一律当事实报**——可能是点了候选评分更强的训练。`clones.rs` 新增 `miss_pick_note`（对比当回合 Train 决策候选评分：实际动作候选 ≥ 彩圈位训练 = 「选了更强训练，正常取舍」；反之为「真错过」；彩圈位训练不在候选表 = 正常取舍；实际动作候选外 = 降级只报事实），`region_detail_rows` 扩参接收 exec/dec、`Some(false)` 分支接鉴别文案；单测 5 形态覆盖（56 项全过）。口径落 SKILL.md 分身条目、metrics_glossary 新增「彩圈没吃到 ≠ 失误」节、brief 模板 §5.3 引导行三处；game6263 实测 3 次没吃到的领先 729~1304 分、全为正常取舍。② **报告主标题**改为「马娘名 育成复盘（#game编号）」（h1 与 title 同步替换原「单局复盘 · game{id}」），渲染断言同步。exe 重编，发布仓 SKILL / metrics_glossary / 模板 / exe 已同步
+
+## 2026-10-08
+- **报告网页排版全面重构（game6263 反馈多轮迭代，用户逐轮拍板，报告 39KB → 27.5KB）**：① **布局**——全页归一为单一两栏网格（同行等高对齐、奇数末格跨栏 `span2`、窄屏退单栏），页面宽 1080px、全面紧凑化（卡片间 gap 取消、padding / 行高收紧）；头部双卡：左卡「终局估分 X（等级）」（措辞「终局AI侧估分（略高于实际分数）」+ 运气分判语按性质分色：好绿 / 差红 / 平灰）+ 快照 / 决策行 / 来源小字，右卡马娘 16px 加粗（切者 / 小切琥珀药丸标签）+ 卡组 chips **2×3 等宽网格**、按 `card_type` 着色（0速蓝/1耐橙/2力绿/3根红/4智紫/5友粉/6团青；minijinja 无 `startswith` 方法，改数字判色）；四段叙述卡化（总体+总结合一卡、运气走势+检查项合一卡，走势条目带图上 ①-⑥ 关注点锚点）；**去折叠**、**删口径速览卡**（判据全文在 digest.context.criteria）、**删决策明细表**（指向 decisions.csv）；生成方 / 马娘 / 结束方式 / 一致率移页尾尾注；背景图模式 `yayoi.png` opacity **0.5**、卡片不透明度 **0.7**。② **图1 五维属性**——属性-上限横条（条 / 刻度 = 终局真实值）+ 上限竖线 + 触顶标注 + 技能PT 加粗独立行；数值标签**只列显示值**（真实值 > 1200 部分减半，`timeline.five_status_display`；标签形如「2219 触顶」）；无图例与口径说明行、删图下训练画像表格（指向 brief §1.2）。③ **图2 训练分布**——分年 3 横条分段堆叠（第 3 年含超拉期及后续；比赛 / 治病 / 未知合并「比赛/其他」青色）+ 第 4 行**「吃面后训练」**（吃面后训练维选择，含超拉、只看训练不看面）；无推断口径说明行。④ **图3 运气走势**——双轴 470 半宽（累计折线 + 回合 Δ 柱）+ 关注点编号 ①-⑥（top_gain/top_loss 各前 3 去重按回合升序）+ 正 / 负底色带（按累计运气符号分 run）——编号解释归走势文字，图内不注记。⑤ **表格**——分身彩圈「类别」去括号描述、继承质量表头「继承属性」。SKILL.md 叙述纪律与占位位置表同步；测试断言更新（helper 补 `five_status_display`）；模板经 `find_template` 磁盘定位（exe 目录 / 工作区祖先，改模板无需重建 exe）；发布仓模板 + exe 已同步
+- **复盘措辞与训练画像（game6263 复盘反馈，用户五点拍板）**：① 终局评分口径改为「AI 端按实际终局五维与技能点估算，**略高于小黑板与实际分**」（PT 折算高于实际买分）——score/digest/brief/report 模板/SKILL/metrics_glossary/persona/replay_review 全部同步；② 年界等位置标记**检测保留**、读法从「降级或跳过」改「按性质归因」（跨年假跳 2026-10 修复后已基本消除）；③ 执行偏离重新定性「**偏离主要是选了 2-3 选**」——`ExecRow` 新增 `alt_candidate`（实际动作命中候选表 #2 起时自动标注编号，finding 证据与 brief §6「对应候选」列同步）；④ 超级拉面期分身彩圈不做文字分析（数据留表格）；⑤ **新增训练画像块**（`profile.rs` → digest `training`）：逐年训练次数（推断实际动作）/ 五维净增（年段差分）/ 运气归属（回合合计 Δ 计入当回合训练维；自选 swing 与学技能回合剔除归 `luck_program`、非训练回合归 `luck_other`）——供「属性成长曲线」处分析**增长先后顺序**（先耐后速等）与「涨运气的训练类型」，report 图1 下加同源表格、brief 增 §1.2；测试补 2 项（对应候选标注 / 训练画像分桶）。exe / 模板 / skill 文档已同步发布仓，game6263 复盘按新口径重出
+
+## 2026-10-07
+- **拉面 PT 上层口径修正**：① 吃面 PT 增量 / `eat_count += 1` 回到 `ground_ramen_effects`（吃面当刻）立即入账（**回退** 2026-09 的「延后到 NextTurn」），训练阶段 `calc_ramen_training_effect` 一律按**吃面后** PT 取 `ramen_pt_effect` / `region_bonus` 档位——实机对拍 `logs/game6261` turn47_2→47_3：本回合吃面 +600 后 `scenario_pt` 立刻抬升且档位按新值生效；`umaai` 重放侧直接透传协议 `scenario_pt`（删除 `restore_pre_eat_pt` 反查）；② `region_bonus` 档位由 `scenario_pt/300` 改为 `/1000`（上限 5 档；实测第 3 年 `active_effect_array` 反推 pt=500→0 / 1650→3 / 2300→5 / 3000→7）；③ `region_bonus` 只计入友情、**不计入 `pt_bonus`**；④ PT 上层友情**剔除 RMJ 结算部分**（新增 `RamenTrainingEffect::rmj_youqing`，PT 乘子用 `youqing - rmj_youqing`；属性上层仍用完整友情）。4 个 golden 基线（bench / flat_search / ramen_mcts_trainer×2）重抓，历次重抓记录抽到 `.trae/documents/golden_baselines.md`；memo 同步订正
+- **修复 URA 段比赛收益低估（turn 72 一次性赛后加成丢失）**：`race_bonus` 只作用于比赛五维收益，`umasim` 内部模拟在 turn 72 `run_begin` 会 `race_bonus += finals_effect.base.saihou`(+100)，但协议重放 `into_game` 走 `parse_basegame` 仅累加支援卡 `saihou`（帧不含 `raceBonus`）→ 线上 turn≥72 的比赛收益被系统性低估（×1.55 而非 ×2.55），表现为 game6261 的 71_2→72_2 运气大跳（`turn_delta` ≈−1083）。新增幂等方法 `RamenGame::apply_super_ramen_saihou()`（`super_ramen_saihou_applied` 非序列化标记保证 `run_begin` 与 `into_game` 两条路径合计只加一次），重放路径在 `super_ramen` 落位后补调。`luck_replay` 复测 turn 72 `turn_delta` 收敛到 −388，纯模拟数值不变
+- **新增拉面地区候选预过滤 `ramen_region_prune_topk`（默认 0 = 不剪枝）**：仅对 `RegionSelect` 生效，按手写地区先验（与 rollout 基策同源）降序只保留前 K 个候选进入 MCTS（手写 argmax 强制并入，结果不劣于纯手写该点）；第 3 年 `C(10,3)=120` 为全局最大候选集，是主要作用点。`MctsConfig` / `OverrideMctsConfig` / `SearchConfig` 三层接线，`ramen_mcts_pair_bench` 增 `--region-prune-topk` 开关
+- **UCB 探索标尺 `expected_search_stdev` 15000 → 2500**：按实测 region 单条 rollout 分数 σ≈2.4k 标定（原值约 6×σ，探索项过强、浪费 rollout）。A/B（6 世界配对，search_n=8192）得分 Δ=+283±502（不显著），单局耗时 143.3s → 69.5s；`default_config.toml` 改值、断言与文档注释同步
+- **马娘数据订正**：`umaDB.json` 若干 `raceNote` 文案订正；三后冠路线马娘 `races` 31 → 30，`raceNote` 改为「第一年底选择樱花赏(+第二年女王杯)」
+- **清理失效测试**：删除 `reason.rs::test_color_thresholds`（着色门限已被「按分排序 + 与首选分差着色」取代）
+- **umaai_review 口径对齐近两周上游改动（复盘引擎 + skill）**：① 终局评分计入切者（能人）×1.1 / 小切（勤勉好学）×1.04 的 PT 项加成——快照路径读 `baseGame.isQieZhe`/`isXiaoQie`，终局帧无该标志从末快照代入；digest `meta` 增 `is_qiezhe`/`is_xiao_qie`、`timeline` 增逐回合同名字段（定位获得切者回合）；② digest criteria 重写——删去已修复的两条「已知 bug」（支援卡连续事件进度未统计〔2026-10-01 `apply_key_events` 修复〕、RMJ 结算时机双重结算〔2026-10-01 修复〕），改记残余偏差（RMJ 结算结果按每年成功假设补齐）与**录制年代注记**（按局包内容自动判定：末快照无 keyEvents → 旧录制曲线系统性略偏低；turn2 回合合计 Δ≥+1000 → 2026-10-03 前的链式推进漏 NPC 假跳；turn72 合计 Δ≤−800 → 2026-10-07 前的 URA 赛后加成丢失假跳，game6261 实测 −1083 命中）；③ 评分口径注记删「努力家」改述为切者/小切与已学技能分（点技能前口径），删已失效的「不含 Hint 折算」；brief `score_line`、report 模板口径速览同步。单测补 3 项（切者系数交叉验证 / 标志解析 / 年代注记检出）
+- **umaai-review-skill 同步**：SKILL.md / metrics_glossary / pitfalls / uma_specific / probe_prompts / persona 按上条删改已修复判据，新增「获得切者跳升＝真实好运」「旧局包假跳」归因口径；pitfalls 修正重复的 26 号编号（必赛胜负→27），发布仓独有的「背景图先拷再跑」条目（原 27 号）回填源仓重编为 28 号；exe 重编同步；自带 gamedata 整包刷新至当前版（此前 8 个文件 7 个落后——旧五维评分表在显示值 ≥2001 区间整体偏低、umaDB 三后冠 `races` 31→30 未同步），BUNDLED 重新盖章
+- **修复 keyEvents 年代注记误报（game6263 实测）**：录制年代判定原看**末快照** keyEvents——实测 game6263（当晚新录制）末快照 turn77_2 为空数组而前 142 份非空（末帧收尾特例、turn 0 同理天然为空）→ 新局被误标「2026-10-01 前录制」。改为 `TimelineResult.key_events_seen`（任一快照非空即视为对齐），digest 注记条件同步；补「末帧空、前份非空」用例
+
+## 2026-10-06
+- **修复 PT 上段上限口径**：PT 上段上限由 `100 + status_limit + pt_limit` 改为 `100 + pt_limit`（属性仍为 `100 + status_limit`）。超级拉面选项 `training_limit_options` 的 +100 源自「○○以外獲得上限+100」，属属性口径，不该叠加进 PT 上限（此前 turn72 速训练 PT 上限被算成 300、显示 346pt，实际 200、263pt）。同时补齐：普通回合吃面的 `ramen_basic_effect.status_limit`（「獲得上限アップ」，Y2 +20 / Y3 +40）对属性与 PT 上限**同值生效**，故 PT 上限也吃这 20/40。三处公式（`apply_ramen_training_effect` / `apply_ramen_training_value` / `RamenGame::calc_training_value`）同步，`calc_normal_effect` 把 `basic.status_limit` 同时累加到 `pt_limit`，并补 turn72 回归单测、普通回合 PT 上限单测与 memo 口径修正；4 个 golden 基线（bench / flat_search / ramen_mcts_trainer×2）随行为变更重抓
+- **五维评分表改用 URA `StatusToPoint`**：`gamedata/constants.json` 的 `five_status_final_score` 由本地表（raw 索引 3399 项）换为 UmamusumeResponseAnalyzer 的权威表——以显示值索引的 2501 项 `StatusToPoint` 为源，经 `raw[r] = ura[cut(r)]` 展开回未减半索引，长度 3802（raw 0..3801）。显示值 0..2000（raw 0..2800）两表逐位相等，差异仅在显示值 ≥2001（raw ≥2802），AI 端此前在该区间整体偏高（如显示值 2250 高 273 分、≥2300 越界饱和）。新增生成脚本 `scripts/gen_five_status_final_score.py`（含一致性断言），`config.rs` 字段与 `status_final_score` 文档注释同步；只手写策略的 marginal gain 随表变化，决策路径与 4 个 golden 基线一并重抓。**其它副本（`Ramen_AI_0.2/`、`umaai-review-skill/data/`）本轮未同步**
+
+## 2026-10-05
+- **NN rollout 研究工具链交接**：拉面续跑基策改为可装载共享网络的包装器，支持绝对回合窗口、友人完成门限与推理观测，先装网络再设门限不再冲掉网络；保留原有构造写法，默认仍为推荐手写策略
+- **搜索严格失败与批量后端**：网络续跑默认严格模式，部分 rollout 失败直接报错；新增可选批量 rollout 后端接口与原始结果表（不支持的配置与缺项一律报错），以及搜索 / 决策成本探针
+- **NN 决策三段接口**：网络决策拆成准备 / 推理 / 选动作，单候选免推理，value 反归一化解码
+- **固定根实验工具 `ramen_root_bench`**：CPU 两种并行参考、GPU 波次后端（Python 侧车）、policy 缓存 / 自适应批 / CUDA Graph、叶截断与混合路由、整局接线；生产教师按配置接入友人门限，不被当前模式消费的参数一律直接拒绝
+- **研究口径固定**：新增评分口径覆盖与生效参数报告模块；采样空间支持具名版本解析与枚举，并补同角色卡组合法性过滤
+- **对拍与导出脚本**：新增侧车、逐 rollout / 逐决策比较脚本及测试、集成 ONNX 导出脚本、GPU 前向探针
+- **测试不依赖本地权重**：缓存生命周期与叶响应坏行拒绝改用现场生成的 ONNX fixture；需真实资产的 GPU 混合路由测试默认忽略
+- **交接文档**：新增 NN rollout 交接说明（范围、口径、最小复现、资产要求、历史勘误与本次验收记录）
+
+## 2026-10-04
+- **修复超级拉面效果误叠加试食会加成**：超级拉面期间原先错误地把「吃面」专属的拉面 PT 效果与基础效果按最高档一并叠加，实际应只保留「第 3 年 RMJ 结算效果 + finals_effect」；同时接入超级拉面选项覆盖的 4 个训练位属性 / PT 上限加成。bench / 整局 / rollout 基准随之重抓，memo 口径同步
+- **终局帧显示新增评分与等级**：umaai 收到终局帧时，除五维 / 技能点外再按终局评分口径现算并显示评分与等级（数据未初始化时跳过该段，不阻断记录），补单元测试
+- **协议文档补训练等级内点击数来源**：真机不下发等级内点击数，注明由插件侧按逐回合历史回数（剔除训练失败 / 合宿）
+- **`mcts_turn_bonus` 标定实测**：用 `ramen_mcts_pair_bench` 跑 8 build × 3 seed 共 24 局配对（生产参数），全局 Δ≈5159（折算每回合 ≈66、95% CI 约 57~76），确认现有 70 在区间内略偏高；结论记入 project_context
+
+## 2026-10-03
+- **修复 turn2 链式推进漏加 NPC 人头**：`manage_persons_on_turn_start` 原用「已存在友人卡（ScenarioCard）人头」判「已补过友人卡+NPC」，而协议层重建的 turn<2 帧已含友人卡 → turn2 整批跳过、链式推进出的 `turn2` 局面少 5 个 NPC；改为友人卡 / NPC 各自按存在性幂等补齐（`add_friend_and_npcs` 拆为 `add_friend_card` + `add_npcs`），新增守门单测
+- **修复第 1 年地区选择的运气分假跳升**：上一项使「选区前」（模拟状态）比「选区后」（真实帧）训练期望低约 1400，运气分在 turn2 出现 +1300 假跳升；补上 NPC 后消失（纯模拟数值不变）
+- **决策帧白名单化**：`into_game` 只派发识别出的决策帧——`event` 与 `playing_state` 5/46/48 改为**与 turn 无关**地先判（此前开局 turn 0/1 的 event 帧会被派成 `Train` 硬算）；未识别帧不再 fallback 到 `Train`，一律不派发（保留 `Begin`），宁可本帧不算
+- **`load` 与 `command` 同等派发**：载入响应同样携带完整回合状态（实测有 `load + ps=1` 需出推荐），不再跳过
+- **新增「刚选区未刷新帧」跳过**：turn 2/24/48 且 `playing_state=1`、非比赛、`train_feeling_type` 全 0（插件先发的未刷新帧）不派发；其它回合全 0 属夏合宿 / 比赛 / 数据错误，不跳
+- **三处同源判定同步**：协议 dispatch / `classify_begin_reason` / `timeline::stage_of` 判定次序与分支逐条对齐，文件头规则表与判定次序注释重写
+- **地区选择不算运气分**：`region_select` 决策不挂 luck 快照与 `action_luck`（该回合期望评分会因 **RMJ 结算事件触发时机的模拟差异**大幅跳变），并**不推进基线**——运气分停留在上一次真正显示时的状态，这段跳变整段跳过；human 行在缺 `current_terminal_baseline` 时也不再打误导行
+- **决策理由输出结构性去重**：`emit_decision_reason` 删掉 `verbose` 下的 `info!` 上屏（只发原始数据经 `reason_sink`），`verbose` 改 `!json_mode`（仅推开摘要日志）；链式决策的**中间项**理由改由 human 路径在 emit 前取走 `reason_slot` 后 `println!`——两个动作都只剩 print，且 `region_select` 等无评分 fallback 行一并覆盖
+- **决策行改醒目配色（用户）**：无搜索评分的「选择…（手写逻辑 / 神经网络 / 自选比赛守门）」由品红改为红底亮黄
+- **文案与数据（用户）**：特殊生涯比赛提示加 `>>> <<<` 包裹；支援卡导出脚本 `SpecialRaces` 的 note 与唯爱赛程（30 + 44）更新
+- **测试同步**：region onnx 用例断言改为「不挂 luck 快照 / `nn_hint` 保留」；`classify_begin_reason` 用例补 `event` 优先分支
+
+## 2026-10-02
+- **版本号提升至 0.14.2（用户）**：`umaai` / `umasim` 包版本提升，`Cargo.lock` 同步
+- **新增特殊生涯比赛开局提示**：`UmaData` 新增 `race_note`（读 `UmaDB` 的 `raceNote`），`Uma::explain_race_note` 生成蓝底亮黄文案；`umaai` 检测到新局时（温泉 / 拉面）经 stderr 提示，不走 stdout（不污染 JSON 流）；补单元测试
+- **修复 human 模式决策理由双打印**：trainer 的 `verbose` 改为仅在 `--json` 模式打开（human 模式已由 sink 渲染同一份文字，避免重复上屏）
+- **数据更新（用户）**：`cardDB` / `umaDB` 支援卡与马娘名称中文化，`text_data_dict` 同步新一批马娘 / 支援卡 / 活动文本
+
+## 2026-10-01
+- **马娘状态改计数语义 + 新增小切**：协议层 `isPositiveThinking` / `isLucky` 改为计数键 `PositiveThinkingCount` / `LuckyCount`，新增 `isXiaoQie`（小切，状态 40）；`UmaFlags` 同步改为 `positive_thinking_count` / `lucky_count` 并新增 `xiaoqie`（旧帧缺字段缺省 0 / false）
+- **切者 / 小切评分加成与互斥**：终局评分（`calc_score`）的 PT 项按切者 ×1.1、小切 ×1.04 放大——只乘 PT 项，不动 PT 数量口径与搜索选择轴；局内获得切者时清掉小切（小切为局外获得），三处「获得切者」入口统一走 `gain_qiezhe()`
+- **心情盾接入掉心情**：掉心情优先消耗心情盾次数，盾为 0 才真掉心情；干劲增减统一经 `Uma::add_motivation`；`lucky_count` 暂不参与逻辑（仅展示与透传）
+- **终局帧补总 Hint 等级**：`FinalScorePayload` 新增 `totalHints`，终局评分按真机帧口径启用（旧帧缺省 0）
+- **拉面 rollout 基策可切换（用户）**：新增 `RamenRolloutTrainer` 枚举（生产默认仍为手写推荐策略、行为不变）与 `rollout_evaluator="nn"` 实验档、`nn_rollout_probe` 数据采集探针；`main.rs` 的 leaf-eval 开关隔离到非拉面剧本
+- **场景数据补 `friend_first_event`（用户）**：温泉 / 拉面剧本记录友人首次点击的真实事件 ID，`apply_key_events` 用它把小黑板 `keyEvents` 归一到模拟内事件历史
+- **数据与导出脚本更新（用户）**：`cardDB` / `umaDB` / 场景 JSON 与支援卡导出脚本同步
+- **文档与基准**：新增 NN 与 MCTS 配合的老版模拟器对照分析；拉面 rollout 均值基准因切者评分加成重抓
+- **修复训练等级重复计算**：协议 `trainLevelCount` 已含剧本（RMJ）加的等级，导入侧不再按年份重复补 `train_level_bonus`（局内 RMJ 结算仍逐次 +1）；训练等级恢复与游戏内实际等级一致。NN 该位特征改用「已结算且成功的 RMJ 次数」，与旧训练分布逐位一致，代码内标注了后续重训时的切换点
+- **测试整理**：删除两个永不返回的手工监听用例（`tests::test_watch` / `tests::test_urafile`）；文件监听用例修掉 lib / bin 同名临时目录互踩（目录加 pid、等待 1s→3s）；`test_turn_mask` 改用配置注入初始化（`race_grades` 迁出后为空导致越界）并补断言
+- **文档同步**：`ramen_protocol_v2.md` 的状态字段口径更新为计数 + 小切 + `trainLevelCount` 已含剧本加成；`replay_review.md` 归因项同步新字段名
+
+## 2026-09-30
+- **新增终局帧信道**：小黑板新增独立文件 `finalScore.json`（育成结束·点技能前的真机终局数据）；umaai 监听改为白名单 + 队列带文件名，按文件名分流——终局帧不进决策链路（不派发解析、不发 compute 事件）
+- **终局帧协议结构**：扁平无外壳（五维/上限/剩余技能点/继承增量），校验剧本与局号；继承增量仅供复盘分析（后续从 `thisTurn.json` 移除）
+- **打包时机调整**：末回合第 2 份快照只写 meta + 出图，zip 推迟到终局帧到达（包内含终局数据）；末回合已见而终局帧未到 → 切局/退出兜底打包，保证「完整一局必有 zip」；中途停止局仍保留目录
+- **复盘终局评分改用真机终局帧**：优先用局包内终局帧（含全部结局事件），缺失回落末快照；`meta` 增 `final_source` 标注来源，`criteria` 与简报按来源分流措辞
+- **归档幂等（不覆盖已归档局）**：`logs/game{id}.zip` 存在即视为该局已归档——残留快照不再重建目录、残留终局帧不再落盘、打包分支也不再覆盖（umaai 在结算画面重启时插件目录仍留着上一局的固定名文件）
+- **终局帧字段收紧**：五维/上限/技能点改为契约必填（缺字段直接判解析失败），并加「全 0 即不可用」第二道闸——坏帧回落末快照口径而不是静默按 0 打分
+- **文档**：插件端终局帧方案与字段契约落 `SendGameStatusPlugin/docs/finalScore.md`（挂接判据 / 写入方式 / 待实测清单，待 Windows 实现）
+
+## 2026-09-24
+- **新增拉面杯神经网络可选项**：`ramen_trainer_policy` 可选 `mcts`（默认，行为不变）/ `mcts_nn_hint`（执行不变，每步另显示网络的推荐）/ `nn`（整局动作决策交给网络、不搜索，以分数换速度）；umaai 新增 `onnx` feature，未开 feature 或缺模型时启动报错
+- **网络模型加载加固**：加载时校验 ONNX 图输出契约，并按固定 batch 编译（更快，输出逐位不变）
+- **无搜索评分决策的来源标注**：网络模式下的决策照实显示为「神经网络」或「自选比赛守门」而非「手写逻辑」；luck 挂载改为合并决策自带的附加信息而不是覆盖
+- **测试**：新增生成式 ONNX 测试模型，网络装配与客户端输出流程测试不再依赖未入库的权重；依赖真实权重的测试改为默认忽略、显式运行缺模型即报错
+
+## 2026-09-23
+- **persona 约束微调（用户）**：执行偏离一律只作校验说明、不数落部下（不再限于 AIRedirector 自动局）
+- **执行推断训练阈值下修 13→12**：新局数据（game1444）验证发现开局低等级训练的属性增量可低于文档实测下限（turn 0 智训练 +12 被误判未知），下修后该局一致率回升且原校准局不受影响；另将「继承回合前一回合的执行窗口受继承落地污染」记入口径速查的已知限制
+- **新增单局复盘分析引擎 `umaai_review`（crate + bin）**：对局包解包与角色识别（两种布局通吃）、快照只反序列化取字段、决策 CSV 按表头解析与链推断、gamedata 多级解析与降级，产出 digest.json（紧凑强类型 schema）与 report.html（minijinja 外置模板 + 自绘 SVG 三图三表，零 JS）
+- **实际执行动作推断**：AI 建议与实际执行逐回合对照，分类口径经实测校准（必赛回合兜底判比赛、主增量阈值判训练以覆盖智训练不耗体力、体力回升判休息），game6234 一致率与文档校准吻合，偏离全部为真实偏离
+- **检查项引擎**：伪波动标记（年界 / 继承 / RMJ 自动检测 / 开局第 1 年地区选择；turn 72 双属性既标记也计入超拉统计）、超级拉面期盈亏判定、坏手法已验证三项与训练失败候选清单；运气分读法口径写入 digest（已知 bug 与固定波动区）
+- **继承质量分析**：窗口取前一回合末至继承回合首并剥离前一回合行动贡献，game6234 两次继承实测与文档逐位一致
+- **分身彩圈观测口径修正**：彩圈判定改为分身新增落位（剔除本体占位假象）、A/B 两类分开统计、B 类只统计训练卡，有效彩圈按随机（好运气）/ 规则（好策略）二分来源
+- **新增 Trae skill `umaai_review`**：六问通俗化叙事框架、马娘玩家术语优先、归因口径（输赛掉干劲与超拉连亏归运气）、语气基调（LG 档鼓励、坏局减负、继承根因点到为止）、篇幅纪律；附口径速查与可选秋川理事长人设（删除即回退默认口吻）
+- **文档同步**：replay_review.md 更名与口径对齐实现现状（CLI、彩圈、伪波动、报告结构、进度）；project_context 补 crate 与 skill 结构
+- **决策理由显示新增「候选高于首选」颜色档（用户）**：候选均值高于中选策略时红底亮黄高亮提示估值不一致，首选行样式同步调整，附 colored 输出临时验证脚本；text_data_dict 数据更新（用户）
+- **执行推断口径升级（用户）**：训练判定改分年分段阈值（第 1 年取训练基础值表最低主维，第 2 年起固定 12）并要求非大回复，休息判定体力阈值提至 +25，继承窗口锚点标注「继承混合」不参与一致率；replay_review.md 口径段同步
+- **A 类彩圈吃到判定**：分身明细新增 used 字段——彩圈新增回合的当回合训练命中彩圈位即吃到收益；训练匹配改前缀匹配以兼容「继承混合」后缀（此前漏判）
+- **五维显示值换算**：timeline 全序列新增显示值字段（真实值超 1200 的部分减半折算），报告概览卡改用显示值口径
+- **报告模板瘦身 + 叙述回填机制**：移除决策明细表与检查项表、口径说明简化为速览；模板留 4 个叙述占位标记，由 skill 回填总体 / 运气走势 / 检查项与偏离 / 总结四块（继承与分身叙述写在数据表后），卡片改为可折叠默认展开
+- **skill 叙事纪律迭代（多轮用户反馈）**：全胜战绩不提、安抚性元话语不出口、玩家已知口径不解释、自选比赛两类分开、干劲恢复写具体动作、超拉彩圈只报汇总；结构化数据表格化、口径备注分条、运气数字带符号、digest 读取踩坑入档；persona 精简并同步元话语禁令
+- **报告背景图装饰（用户素材）**：yayoi.png 入 skill reference；skill 回填报告时铺 20% 透明度背景、前景卡片调 70% 透明度
+- **测试修复**：pack 测试临时目录并行互删竞争改为按测试命名隔离
+
+## 2026-09-21
+- **修复协议层 `failureRateBias` 语义反问题**：解析侧 `failureRateBias < 0 → good_trainer=true`（曾与上游相反，buff 被读成"不擅长训练"，MCTS 估值时 `calc_training_failure_rate` 加 +2 失败率人为偏高）、导出侧 `good_trainer → -2` 同步反向——与 `traits.rs:calc_training_failure_rate` 内部 `good_trainer → bias=-2` 同源；game421 turn 25+ 反复推「不吃面+休息」（vital 88~108 全休息）的根因，实测 turn 61 `rest_pair_probe` 不吃面领先 +351 → 落后 −449，turn 62 +645 → 落后 −223。补回归 `test_failure_rate_bias_parse`（三组 frb/-2/+2/0 钉解析方向）
+- **新增在线单局决策日志的高体力休息审计脚本**：`scripts/analyze_rest_picks_online.py`（与 `scripts/analyze_rest_picks.py` 互补：前者跑批决策日志、本工具吃 `logs/game{id}/decisions.csv` + 回合 thisTurn.json 还原 vital），决策时体力从快照反查；与 `rest_pair_probe` 共同补齐「高体力休息」类排查链路
+- **新增 `rest_pair_probe` 单回合诊断 bin**：对单回合 thisTurn.json 跑两遍 FlatSearch——A) 完整合并候选（含「不吃面」），B) 仅吃面候选（屏蔽不吃面）——CRN 共享种子 4096 rollout，输出两组的每候选 mean / n / 选中，用于隔离"不吃面 vs 吃面"在终局估值上的真实差距（game421 turn 61 修复前 +351、修复后 −449）
+- **合宿/满体力「一选休息」回归复测（未复现）**：spd2_sta0 / speed_wisdom ×10 局（search_n=4096 生产口径、同种子）：合宿期 MCTS 无整局全休息、高体力（>休息目标线）休息仅约 0.35% 决策点、手写对照零次——9-17 合宿诀窍修复后未复现；新增 `scripts/analyze_rest_picks.py` 审计入口（合宿回合/体力分桶休息率，与规则层判定同口径）
+- **决策日志/跑批观测增强**：决策日志追加「决策时体力」列（开发格式列尾演进，手动录制路径占位）；bench_base 新增 `--builds` 过滤（与 `--deck` 互斥）；bench mcts 档补接友人完成硬门限（与在线生产同口径，原漏接）
+- **友人出行跨年配额定档 `[0,3,5]` + 新增「5 次必须走完」配置项**：preset 由 `[0,2,5]` 改为 `[0,3,5]`（第 1 年不启用、第 2 年放宽到 3 以消化提前的休息替代、第 3 年补满）；新增 `friend_complete_required`（`game_config.toml` / `gamedata/default_config.toml`，默认开）＝完成硬门限，开启时隐藏风味闸门不再阻断出行、剩余次数达到剩余可出行回合数即强制出行，保证 5 次走完；该开关经 `main.rs` 同时作用于 MCTS 的 fallback 手写策略与搜索 rollout 基策，`bench_base` 同口径读取。实测（700 局/单元同种子配对）：走完率 77%/92%→99.6%/100%，相对旧 `[0,2,5]` 配对差 −114/−86（不显著），硬门限项自身净代价 −159/−35
+- **新增友人出行实验 token 与观测列**：token `fcap`（跨年配额）/`fov3`（第三年风味闸门）/`furg3`+`frem3`（第三年强制补足）/`freq`·`freqoff`（完成硬门限）；决策日志给友人出行加「决策路径（恢复/常规）+ 次优动作与分数差」标注，用于区分"替换休息"与"替换训练"；结果 CSV 新增逐年友人出行次数、用满标记、隐藏风味溢出浪费等观测列
+- **重抓 preset 变更影响的整局快照**：`test_yearly_observability`（score/五维）、`test_ramen_three_stage_action_unchanged`（rollout 均值表）、MCTS gate-off 整局快照与 SpecialSelect 调用数、两处超级拉面选项断言；跨年配额单测改为钉 `[0,3,5]`
+
+## 2026-09-19
+- **MCTS vs 手写整局配对基准（固化评估入口）**：新增 `ramen_mcts_pair_bench` bin——同 (build, 种子, 局号) 下 MCTS 训练员与正式推荐手写策略各跑整局（共享规则主种子强行配对，两局 `rule_seed` 不一致即报错），配对差 Δ = 评分_mcts − 评分_handwritten 逐局落 CSV + 按 build/全局的均值、SE、95% CI、胜负汇总；MCTS 参数默认**取生产实际值**（game_config `[mcts]` + `ramen_search_stages`，与在线构造同款），`--search-n` 等覆盖仅限对照实验；bin 内冒烟测试（配对守卫 / 同参两次逐位可复现 / CSV 结构），project_context / tests_overview 同步
+- **experiments/validated_policy 迁至 scripts/validated_policy**：`scripts/` 是官方脚本区，挪过来与 `plot_*.py`、`bench_commit_compare.py` 同级；内容不变
+- **生产训练员门控含 region**：`gamedata/default_config.toml` 的 `ramen_search_stages` 由 `train,ramen` 改为 `train,ramen,region`——第 1 年地区（turn 2）和第 2/3 年地区（turn 23/47）纳入搜索，与 online 路径同款
+- **`bench_commit_compare.py` 加 `--force-bench / --bench-runs`**：两版都有 perf_probe 时也可强制走 bench 模式（手写整局遍历全部 player_builds、同 seed 配对、同时输出耗时与评分配对），bench 默认局数 100；补充 example 命令
+- **AGENTS.md 工作纪律微调**：精简对话规则段、删除独立的「需求澄清」条目（融入「项目特定上下文」）；明确 commit 前必读 git log + project_context + changelog 的项目启动纪律；文档清单与更新纪律同步精简
+- **region 决策点 top-K 候选 dump 工具**：新增 `ramen_region_topk` bin——手写策略推进到 region 决策点（turn 2/23/47）后跑 FlatSearch，输出 top-K 候选的 (mean, stdev, count, weighted_mean, was_chosen) CSV + top1-top2 mean gap / stdev 中位数 / mean vs radical 排序差异汇总；MCTS 参数默认取生产实际值，bin 内冒烟测试（推进到 RegionSelect + dump 结构）——用途：研究 region 门控纳入搜索后 top 选项的均值差与方差分布；首轮扫测 3 turn × 7 build × 3 seed = 63 region 点：top1-top2 Δmean 中位数 ≤ 0.6%，top1 vs top2 stdev 差 ±5% 且正负不定（**top-K 候选方差无系统差异**），radical 加权排序 vs mean 排序在 21 个 (turn, build) 组合中有 5 个出现内部 swap（多在第 3 年 power_wisdom/wisdom/speed_wisdom 等 build）
+
 ## 2026-09-17
+- **拉面杯逐卡 Hint 精确估值（可选）**：把固定 Hint 价值换成按卡面 Hint 等级与剩余可得的逐人头精确折算，默认关闭；一批全新 160 副随机卡组独立验收随机组 +174.0 [+153.0,+195.0]、预设 +77.7、固定卡组 −121.0 未证实，定位与 supermode3 同为“随机卡组可选”，关闭路径逐位不变。
+- **拉面杯可选策略与验证**：新增近属性上限的连续技能PT估值和按终盘缺口选择超级拉面范围的可选开关，保留默认行为；提供固定/随机卡组配对工具、冻结复现配置、结果分析及边界回归，注明固定卡组和线上/MCTS适用限制。
 - **ga_lab 最优策略合并（默认卡组）**：game_config 卡组切换 GA 通解骨架（速2耐1智2：待兼诗歌剧/千明代表/名将怒涛/优秀素质/青春永驻 + 骏川手纲），8 马 340 局同种子配对显著（Δ+516，t=3.36）
 - **ga_lab 最优策略合并（9 旋钮组合档进 preset）**：已满位普通/超拉面 PT 定价上调（16→37 / 0→35）、弱位覆盖查表→35 直值、友情词条 1.5→0.4、掌握度 6→8、牺牲上限 140→200、拉面窗 0.10→0.15、剧本PT前瞻 0→0.15、Y1 pt_rate 16→56——4 马×2 种子块 420 局配对 Δ+1394 t=12.55（8/8 单元显著）；ramen_weak_train_boost 单测大负（−1017）明确不采纳
 - **bench_base 新增 `--deck` 覆盖卡组入口**：显式 idrank 串指定卡组跑批（跳过 preset builds，标签 custom_deck），配卡对照实验用
@@ -14,7 +141,10 @@
 - **重抓两个存量漂移基线**：`test_ramen_three_stage_action_unchanged`（7 组期望均值）与 `test_yearly_observability`（BASELINE_SCORE/FIVE）——最近策略调整与合宿诀窍修复后当前行为（干净 master 亦红，score/five 与本次改动逐位无关，纯同步）
 
 ## 2026-09-18
+- **拉面杯第十二轮组合档进 preset（默认值）**：把放宽搜索界后经两个独立随机卡组池验收的组合设为 `RecommendedRamenTrainer::new()` 默认值（近上限连续定价窗口、已满位三类 PT 定价、状态缺口/溢出强度、预留上限与口径、超级拉面自适应范围、外出基准分、逐卡 Hint 倍率），随机组相对上一版 preset +130.4/+147.6、相对更早的 base 累计约 +517/+552，固定卡组不显著；同步重抓受影响的 6 处冻结快照（其中 2 处进入 preset 前就已过期）、把预留口径单测改为显式钉 token 以免随 preset 漂移，并按新默认值刷新 final-check 期望表
+- **跨 commit CPU 耗时监测工具链**：新增 `perf_probe` bin（固定 Train 根整根搜索耗时 + 手写整局耗时，输出含根局面真实评分 `root_score` 记录两版评分区别）与 `scripts/bench_commit_compare.py`（worktree 检出两版构建、逐轮交替配对、probe/bench 双模式自动选择、gamedata 与搜索工作量一致性守卫、逐步 run.log）；`project_context.md` 新增「性能监测」节记录用法
 - **局末自动打包本局游戏记录**：umaai 末回合第 2 份快照（拉面 `turn77_2`）处理完写 meta + SVG 后，把 `logs/game{id}/` 打成 `logs/game{id}.zip`（包内条目相对原目录，去掉 `game{id}/` 外壳）并清理原目录——zip crate 依赖进 workspace；切局/退出兜底（`switch` / `process_exit`）不打包，中途停止局保留原目录方便人工排查；终端 stderr 绿色绝对路径（dunce 去 `\\?\`）+ `info!` 日志一份（json 模式友好）
+- **文档整理（重构完成后）**：完成重构的方案/草案文档移入 `.trae/documents/archive/`（拉面重构开发计划 / 上游三层架构建议 / main.rs 拆分 / RNG 重构 v2 / 在线对接计划 / AIRedirector 集成 / adapter_spec / handwritten_policy）；`project_context.md` 按 umasim/umaai 现状全面重写（模块结构、三流 RNG、搜索层、trainer 家族、config 五子结构、通道层细节）；AGENTS.md 相关文档链接同步为 archive 路径
 
 ## 2026-09-16
 - **第3年地区单/多点整局配对扫描**：新增 `region_y3_single_focus` 扫参入口；seed42×100 全 101 构成 + seed61444×50 复测——混合档显著负、纯单点档玩家真实 build 大亏（≈−1100，t≈−5）→ 不采纳，维持现有按 build 自适应公式
@@ -107,7 +237,7 @@
 - **Step 2 last_decision override 三 trainer**：DecisionInfo 加 candidate_n（与 scores 同长同截断供 luck 按局数加权）；MctsTrainer / RamenMctsTrainer / RamenHandwrittenTrainer override last_decision()；集成文档 §3.3.1 改"按局数加权"
 
 ## 2026-09-04
-- **吃面 PT 增量延后到 NextTurn**：`ground_ramen_effects` 不再立即 `scenario_pt += pt_gain` / `eat_count += 1`，训练阶段 `calc_ramen_training_effect` 用吃面前 PT 算 `ramen_pt_effect` / `region_bonus` 档位；PT 增量与 eat_count 在 `next()` 的 `NextTurn` 阶段（清空 `current_ramen` 之前）统一处理，RMJ 归档与 `check_rmj` 行为不变
+- **吃面 PT 增量延后到 NextTurn**：`ground_ramen_effects` 不再立即 `scenario_pt += pt_gain` / `eat_count += 1`，训练阶段 `calc_ramen_training_effect` 用吃面前 PT 算 `ramen_pt_effect` / `region_bonus` 档位；PT 增量与 eat_count 在 `next()` 的 `NextTurn` 阶段（清空 `current_ramen` 之前）统一处理，RMJ 归档与 `check_rmj` 行为不变。**（2026-10-07 回退：经实机对拍证伪，训练按吃面后 PT 取档位，见当日条目）**
 - **三处基线重抓 + 一条新守门**：`bench.rs` BASELINE_SCORE 64336→63870 / BASELINE_FIVE `[3337,2328,2200,1101,829]`→`[3337,2293,2200,1086,829]`、`flat_search.rs` 三阶段根搜索 7 候选 mean 重抓、`ramen_mcts_trainer` 两测试基线同步；新增 `test_eat_ramen_pt_gain_defers_to_next_turn` 钉「吃面 ground 后 scenario_pt 不变 / calc_ramen_training_effect 用吃面前 PT 算增量 / NextTurn 后累加」三条边界
 
 ## 2026-09-03

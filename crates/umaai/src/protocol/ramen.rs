@@ -25,16 +25,25 @@
 //!
 //! | turn | source | active_effect | playing_state | 含义 | stage |
 //! |---|---|---|---|---|---|
-//! | ≤ 1 | 任 | 任 | 1 | 剧本机制未启用（拉面机制 turn >= 2 才启动） | `Train` |
-//! | ≥ 2 | `event` | 任 | 1/5 | 事件回合，AI 暂不处理 | (warn + 不 dispatch) |
-//! | ≥ 2 | `command` | 空 | 1/5 | 当回合训练前，未吃面 | `RamenSelect` |
-//! | ≥ 2 | `command` | 有 | 1/5 | 当回合已吃面，写中间状态 `pending_ramen=Some(last_ramen)` | `Train` |
-//! | ≥ 2 | `special` | - | 45 | 地区选择 | `RegionSelect` |
-//! | ≥ 2 | `command` | - | 45 | 同上（source=special 暂未出现） | `RegionSelect` |
-//! | ≥ 2 | `command` | - | 46 | RMJ 结算，不处理 | (warn + 不 dispatch) |
-//! | ≥ 2 | `command` | - | 48 | RMJ 最终结算，不处理 | (warn + 不 dispatch) |
+//! | 任 | `event` | 任 | 任 | 待处理事件（check_event 带 story），AI 不进决策 | (不 dispatch) |
+//! | 任 | 任 | 任 | 5 / 46 / 48 | 事件 / RMJ 结算 / RMJ 最终结算 | (不 dispatch) |
+//! | 任 | 任 | 任 | 45 | 地区选择（`command` / `special` 两种 source 都出现） | `RegionSelect` |
+//! | 2 / 24 / 48 | `command` | 任 | 1 | 刚选区、`train_feeling_type` 全 0（ramen 数据未刷新） | (不 dispatch) |
+//! | ≤ 1 | `command` / `load` | 任 | 1 | 剧本机制未启用（拉面机制 turn >= 2 才启动） | `Train` |
+//! | ≥ 2 | `command` / `load` | 空 | 1 | 当回合训练前，未吃面 | `RamenSelect` |
+//! | ≥ 2 | `command` / `load` | 有 | 1 | 当回合已吃面，写中间状态 `pending_ramen=Some(last_ramen)` | `Train` |
+//! | ≥ 72 | 任 | 空 | 1 | 超级拉面回合但效果未生效，丢弃等下一条 | (不 dispatch) |
+//! | ≥ 72 | 任 | 有 | 1 | 超级拉面回合效果已生效 | `Train`（`combined_decision=true`） |
+//! | 其它 | 其它 | 任 | 任 | 未识别的帧 | (warn + 不 dispatch) |
 //!
-//! `source=special` 在 151 份样本中暂未出现，按 `command + playing_state=45` 兜底为 RegionSelect。
+//! **判定次序**：非决策帧（表头 2 行：`event` / ps 5·46·48）→ 刚选区未刷新帧
+//! （turn 2/24/48 + ps=1 + feeling 全 0）→ 数据获取不全 → `playing_state=45` → `turn <= 1`
+//! → 其余白名单。非决策帧与 turn **无关**，必须排在 `turn <= 1` 之前，否则开局（turn 0/1）的
+//! `event` 帧会被派成 `Train` 计算。
+//! 未识别的帧同样**不 dispatch**——宁可本帧不算（下一帧还会来），也不按 `Train` 硬算出一条
+//! 与当前状态不符的推荐。
+//!
+//! `source=special` 在样本中暂未出现，按 `playing_state=45` 兜底为 RegionSelect。
 //! 数据获取不全（turn 2..=71 且 `selected_regions` 全 0）→ warn + 不 dispatch。
 //!
 //! ## persons layout（adapter_spec §理事長、记者、NPC生成）
@@ -65,7 +74,9 @@ use umasim::{
         BasePerson,
         PersonType,
         ramen::{RamenGame, RamenStage, rules::NPC_CHARA_IDS}
-    }
+    },
+    gamedata::ramen::RAMENDATA,
+    global
 };
 
 /// 拉面剧本通信状态顶层结构
@@ -194,6 +205,10 @@ impl GameStatus for GameStatusRamen {
         //    distribution / unresolved_events(story) 均由 `parse_basegame` 落地。
         let mut game = RamenGame::from_base_game(base.parse_basegame(9001)?)?;
 
+        // 1.5 用协议 keyEvents 还原事件历史与友人首次点击状态
+        //     （详见 `GameStatusBase::apply_key_events`）
+        base.apply_key_events(&mut game.base, global!(RAMENDATA).friend_first_event);
+
         // 2. 构造 persons。按 spec §'理事長、记者、NPC生成' 的 layout：
         //   0..5 = deck 6 张（友人 chara_id=9001 / 其他友人改 OtherFriend）
         //   6 = 理事長（始终在场，turn=0 也有）
@@ -283,12 +298,20 @@ impl GameStatus for GameStatusRamen {
         } else {
             Some(ramen.super_ramen as usize)
         };
+        // 3.5 补超级拉面一次性赛后加成（race_bonus += finals_base.saihou）。
+        //     协议帧不含 `raceBonus`、`parse_basegame` 只从支援卡累计；且重放**不跑**
+        //     turn 72 的 `run_begin`（§5 dispatch 对 turn>=72 直接给 Train + combined_decision），
+        //     故必须在此补上——否则 URA 段比赛收益被系统性低估（×1.55 而非 ×2.55）。
+        //     `apply_super_ramen_saihou` 幂等：turn<72 或未选超级拉面时不生效，且合计最多一次。
+        game.apply_super_ramen_saihou();
         game.ramen.selected_regions = map_selected_regions(&ramen.selected_regions);
         game.ramen.current_ramen = if ramen.last_ramen < 0 || ramen.active_effect_array.is_empty() {
             None
         } else {
             Some(ramen.last_ramen as usize)
         };
+        // 协议 `scenario_pt` 即当年已累计的**吃面后**剧本 PT（实机在该帧训练时用的就是它，
+        // 见 logs/game6261 turn47_2→turn47_3：本回合吃面 +600 后档位立刻按新值算），直接透传。
         game.ramen.scenario_pt = ramen.scenario_pt;
 
         // 4. personDistribution 适配（adapter_spec §personDistribution 适配）：
@@ -303,42 +326,71 @@ impl GameStatus for GameStatusRamen {
         //    留此注释作为占位，等 is_hidden PR 合并后启用改写函数。
 
         // 5. Stage dispatch（adapter_spec §source / §playing_state 三方联合）。
-        //    先做数据获取不全检查（turn 2..=71 且 selected_regions 全 0），命中则 warn + 不 dispatch。
-        //    不 dispatch 时保留 `RamenStage::Begin`（newgame 默认值），由 main loop 识别并跳过。
+        //
+        // **白名单**：只有明确识别为「决策帧」的帧才派发阶段给 AI 计算；其余一律**不派发**
+        // （保留 `RamenStage::Begin` = newgame 默认值），由 main loop 识别后**整条决策链路跳过**
+        // （不列候选、不搜索、不算 luck）。宁可本帧不算（下一帧还会来），也不要按 Train 硬算出
+        // 一条与当前状态不符的推荐。
+        //
+        // `source` / `playing_state` 是插件侧的判定结果（见 `GameStatusSend_Base.ResolveSource`）：
+        // - `command`：玩家指令响应；`event`：待处理事件（check_event 带 story）；
+        // - `load`：载入响应（进育成 / 切屏回来）——**与 `command` 同等派发**：同样携带完整
+        //   回合状态，实测有 `load + ps=1` 需要出推荐的情况，故不做跳过；
+        // - `special`：`command` + `playing_state >= 10` 的特殊状态（只有 45 是地区选择）。
         let active_effect_count = ramen.active_effect_array.len();
-        let data_incomplete = (2..=71).contains(&base.turn)
+        let source = base.source.as_deref().unwrap_or("");
+        let playing_state = base.playing_state;
+        let turn = base.turn;
+        let data_incomplete = (2..=71).contains(&turn)
             && game.ramen.selected_regions.iter().all(|&r| r == 0);
-        if data_incomplete {
+
+        // 非决策帧：与 turn **无关**地跳过——必须在 `turn <= 1` 分支之前判定，
+        // 否则开局（turn 0/1）的 event 帧会被派成 `Train` 计算。
+        let non_decision = match (source, playing_state) {
+            ("event", _) => Some("source=event，本回合为事件回合"),
+            (_, 5) => Some("playing_state=5 事件回合"),
+            (_, 46) => Some("playing_state=46 RMJ 结算"),
+            (_, 48) => Some("playing_state=48 RMJ 最终结算"),
+            _ => None
+        };
+        // 「刚选区、训练数据还没刷新」帧：玩家刚选完地区时，插件先发一条 ramen 数据段
+        // 未刷新的帧（`command_feeling_info_array` 未下发 → `train_feeling_type` 全 0），
+        // 随后才发含完整数据的那条。此时按未刷新数据算出的推荐不可信，故跳过。
+        //
+        // 判定范围**只在选区发生的回合**（turn 2）与**选区后紧接的回合**（23 选区 → 24、
+        // 47 选区 → 48）：实测其它回合的 `train_feeling_type` 全 0 属于「本回合确实没有角标」
+        // （夏合宿 36-39 / 60-63 等）或数据错误，不能跳。
+        // `playing_state` 必须为 1：ps=45 是地区选择本身（其 feeling 同样全 0），必须算。
+        let feels_unrefreshed = playing_state == 1
+            && matches!(turn, 2 | 24 | 48)
+            && !base.is_racing
+            && ramen.train_feeling_type.iter().all(|&t| t == 0);
+
+        if let Some(reason) = non_decision {
+            log::info!("{reason}，跳过 AI 推荐");
+            // 不动 game.stage，保留 Begin 让 main loop 走 fallback
+        } else if feels_unrefreshed {
+            log::info!(
+                "turn={turn} 刚选择完地区、训练数据未刷新（train_feeling_type 全 0），跳过 AI 推荐"
+            );
+            // 不动 game.stage，保留 Begin；插件随后会再发一条含完整数据的帧
+        } else if data_incomplete {
             log::warn!(
-                "拉面协议数据获取不全：turn={} selected_regions 全 0（年份选择未到位）",
-                base.turn
+                "缺少地区选择信息，AI无法计算；需要回到大厅界面重进育成"
             );
             // 不动 game.stage，保留 Begin 让 main loop 走 fallback
-        } else if base.turn <= 1 {
+        } else if playing_state == 45 {
+            // 地区选择（`command` / `special` 两种 source 都按此处理）
+            game.stage = RamenStage::RegionSelect;
+        } else if turn <= 1 {
             // turn 0/1：剧本机制未启用（拉面机制 turn >= 2 才启动），直接进 Train。
             // 与 `RamenGame::next()` 内部短路（game.rs:124 turn < 2 跳 RamenSelect）口径一致：
             // 我们在 into_game 派发阶段提前派发，避免 main loop 走到 Distribute 后被 next() 短路时
             // 看不到本应有 RamenSelect 候选可选的语义。
-            log::info!("turn={} 剧本机制未启用，直接进 Train 阶段", base.turn);
+            log::info!("turn={turn} 剧本机制未启用，直接进 Train 阶段");
             game.stage = RamenStage::Train;
         } else {
-            let source = base.source.as_deref().unwrap_or("");
-            let playing_state = base.playing_state;
-            let turn = base.turn;
             match (source, active_effect_count > 0, playing_state) {
-                // event / playing_state=5 / 46 / 48：AI 不进决策循环
-                ("event", _, _) => {
-                    log::info!("source=event，本回合为事件回合，跳过 AI 推荐");
-                }
-                (_, _, 5) => {
-                    log::info!("playing_state=5 事件回合，跳过 AI 推荐");
-                }
-                (_, _, 46) => {
-                    log::info!("playing_state=46 RMJ 结算，跳过 AI 推荐");
-                }
-                (_, _, 48) => {
-                    log::info!("playing_state=48 RMJ 最终结算，跳过 AI 推荐");
-                }
                 // 超级拉面回合（turn >= 72）：
                 //   active_effect_array 空 → 直接丢包（按 spec §超级拉面回合处理），
                 //     等下一条数据；下一条数据会有 active_effect_array，是超级拉面激活后
@@ -356,9 +408,9 @@ impl GameStatus for GameStatusRamen {
                     let _ = src;
                     // 不 dispatch
                 }
-                // 普通训练回合：command + active_effect_array 有 → 已吃面，Train
+                // 普通训练回合：command / load + active_effect_array 有 → 已吃面，Train
                 //                                                  且构造中间状态 pending_ramen
-                ("command", true, 1) => {
+                ("command" | "load", true, 1) => {
                     game.stage = RamenStage::Train;
                     // 写中间状态：adapter_spec §source 'command + active_effect_array 有' →
                     //  构造 RamenAction::ramen_select(Some(last_ramen))，让 umaai 决策训练。
@@ -367,20 +419,21 @@ impl GameStatus for GameStatusRamen {
                         game.ramen.pending_ramen = Some(cur);
                     }
                 }
-                // 普通训练回合：command + active_effect_array 空 → 吃面前，给 RamenSelect 决策
-                ("command", false, 1) => {
+                // 普通训练回合：command / load + active_effect_array 空 → 吃面前，给 RamenSelect 决策
+                ("command" | "load", false, 1) => {
                     game.stage = RamenStage::RamenSelect;
                 }
-                // 地区选择：playing_state=45（source=special 在 151 样本中暂未出现）
-                (_, _, 45) => {
-                    game.stage = RamenStage::RegionSelect;
-                }
-                // 兜底：未识别的 playing_state → warn + fallback Train
-                (_, _, other) => {
-                    log::warn!(
-                        "未知 playing_state={other} source={source:?} active_effect={active_effect_count} turn={turn}，fallback 到 Train"
+                // `special` 且非 45：剧本特殊状态（非地区选择），AI 暂不处理
+                ("special", ..) => {
+                    log::info!(
+                        "source=special（playing_state={playing_state} 非地区选择），跳过 AI 推荐"
                     );
-                    game.stage = RamenStage::Train;
+                }
+                // 兜底：未识别的帧**不派发**（保留 Begin）——不再按 Train 硬算
+                (src, _, ps) => {
+                    log::warn!(
+                        "未识别的帧 source={src:?} playing_state={ps} active_effect={active_effect_count} turn={turn}，跳过 AI 推荐"
+                    );
                 }
             }
         }
@@ -388,9 +441,8 @@ impl GameStatus for GameStatusRamen {
         // 6. RMJ 派生状态恢复（协议快照不携带 → AI 侧按「每年成功 / 第 3 年大成功」假设补齐）
         //
         // 背景：`rmj_results`（年度 RMJ 结果，第 2/3 年常驻驱动 `ramen_success_effect` /
-        // `ramen_fail_effect`）与 `train_level_bonus`（RMJ 成功 → 训练等级 +1）只存在于
-        // 游戏内部状态，协议 JSON 没有对应字段。不补齐会让**第 2/3 年的每次 rollin**
-        // 系统性缺失训练等级加成与常驻成功效果——实测 turn23→24 的期望骤降
+        // `ramen_fail_effect`）只存在于游戏内部状态，协议 JSON 没有对应字段。不补齐会让
+        // **第 2/3 年的每次 rollin** 系统性缺失常驻成功效果——实测 turn23→24 的期望骤降
         // ~2300–3000 分（与随机种子无关，四局一致），且会拖低在线 AI 的决策质量。
         //
         // 依据：`check_rmj` 是纯函数（`scenario_pt >= ramen_success_pt[year]`），阈值
@@ -398,7 +450,12 @@ impl GameStatus for GameStatusRamen {
         // 成功、第 3 年大成功假设补齐（两者 `is_success()` 均为 true）。
         let rmj_done = rmj_done_count(base.turn, &game.stage);
         game.ramen.rmj_results = vec![true; rmj_done];
-        game.ramen.train_level_bonus = rmj_done as i32;
+        // `train_level_bonus` **不能**按年份一并补齐：协议的 `trainLevelCount` 是游戏内
+        // 真实训练等级折算（`4×(等级−1) + 当前等级内点击数`，见插件 `GameStatusSend_Base`），
+        // 已含已结算 RMJ 的 +1/+2 层；再补一次会让 `RamenGame::train_level()` 比实际等级
+        // 高 1~2 级（第 2 年 +1、第 3 年 +2，再被 Lv5 上限截断）。
+        // 置 0 表示「本次导入之后新增的加成」，局内 RMJ 结算照旧 `+= 1`（game/ramen/game.rs）。
+        game.ramen.train_level_bonus = 0;
 
         // 7. 新年窗口 scenario_pt 归一化（协议快照携带的是「上一年遗留值」）
         //
@@ -559,8 +616,12 @@ mod tests {
 
     /// 协议重建补齐 RMJ 派生状态（真实快照驱动）
     ///
-    /// 回归背景：`rmj_results` / `train_level_bonus` 协议不携带，缺失会让第 2/3 年
-    /// rollin 系统性缺少训练等级加成与常驻成功效果（turn23→24 期望骤降 ~2300–3000）。
+    /// 回归背景：`rmj_results` 协议不携带，缺失会让第 2/3 年 rollin 系统性缺少常驻
+    /// 成功效果（turn23→24 期望骤降 ~2300–3000）。
+    ///
+    /// `train_level_bonus` **不再**按年份补齐：协议 `trainLevelCount` 已是游戏内真实
+    /// 等级折算（含已结算 RMJ 的加成），再补会让训练等级高 1~2 级——回归见 mod.rs 的
+    /// `test_ramen_import_keeps_real_train_level`。
     #[test]
     fn test_into_game_restores_rmj_state() {
         use std::fs;
@@ -589,16 +650,29 @@ mod tests {
             }
         };
 
-        // 第 2 年快照：补 1 次（第 1 年 RMJ 成功）
+        // 第 2 年快照：rmj_results 补 1 次（第 1 年 RMJ 成功），但等级不再叠加
         if let Some(game) = load("game7075_turn24_2.json") {
+            let levels: Vec<usize> = (0..5).map(|t| game.train_level(t)).collect();
             println!(
-                "turn24_2: turn={} bonus={} rmj={:?}",
+                "turn24_2: turn={} bonus={} rmj={:?} count={:?} level={:?}",
                 game.turn(),
                 game.ramen.train_level_bonus,
-                game.ramen.rmj_results
+                game.ramen.rmj_results,
+                game.base.train_level_count,
+                levels
             );
-            assert_eq!(game.ramen.train_level_bonus, 1, "第 2 年应补 1 次 RMJ 成功加成");
             assert_eq!(game.ramen.rmj_results, vec![true], "第 2 年 rmj_results 应为 [true]");
+            assert_eq!(
+                game.ramen.train_level_bonus, 0,
+                "导入帧不应再补等级加成（协议 trainLevelCount 已含）"
+            );
+            for t in 0..5 {
+                assert_eq!(
+                    game.train_level(t),
+                    game.base.base_train_level(t),
+                    "训练等级应等于协议真实等级（count/4+1），不得再叠加 RMJ 加成"
+                );
+            }
         }
         // 第 1 年内快照：不应有 RMJ 结果
         if let Some(game) = load("game7075_turn13.json") {
@@ -606,18 +680,110 @@ mod tests {
             assert_eq!(game.ramen.train_level_bonus, 0, "第 1 年内不应有 RMJ 加成");
             assert!(game.ramen.rmj_results.is_empty(), "第 1 年内 rmj_results 应为空");
         }
-        // 新年窗口 scenario_pt：首回合未吃面（active_effect 空）→ 归零；已吃面 → 保留当年值
-        for (name, expect_pt) in [("game7075_turn24_2.json", 0), ("game7075_turn24_3.json", 400)] {
+        // 新年首回合 scenario_pt：未吃面（active_effect 空）→ 归零；已吃面 → 透传当年累计值
+        for (name, expect_pt) in [("game7075_turn24_2.json", 0), ("game7075_turn24_3.json", 0)] {
             if let Some(game) = load(name) {
                 println!("{name}: scenario_pt={} (期望 {expect_pt})", game.ramen.scenario_pt);
                 assert_eq!(game.ramen.scenario_pt, expect_pt, "{name} 新年窗口 scenario_pt 归一化不符");
             }
         }
-        // turn23 同回合边界：训练（结算前）→ 0；地区选择（结算后）→ 1
+        // turn23 同回合边界：训练（结算前）→ 0 次结算；地区选择（结算后）→ 1 次
         for (name, expect) in [("game7075_turn23_2.json", 0), ("game7075_turn23_4.json", 1)] {
             if let Some(game) = load(name) {
-                println!("{name}: stage={:?} bonus={}", game.stage, game.ramen.train_level_bonus);
-                assert_eq!(game.ramen.train_level_bonus, expect, "{name} RMJ 次数边界不符");
+                println!(
+                    "{name}: stage={:?} rmj={:?} bonus={}",
+                    game.stage, game.ramen.rmj_results, game.ramen.train_level_bonus
+                );
+                assert_eq!(game.ramen.rmj_results.len(), expect, "{name} RMJ 结算次数边界不符");
+                assert_eq!(game.ramen.train_level_bonus, 0, "{name} 导入帧不应补等级加成");
+            }
+        }
+    }
+
+    /// PT 校准复算 harness（无断言，仅打印全分量）
+    ///
+    /// 已知实测点（AI 复算 / 实机）：game6261 两例当前公式**逐位吻合**
+    /// （turn48_3 = 106 / turn57_2 = 133，含属性 22+29）；game6263 两例
+    /// PT 上层偏低恰好 +3（turn29_3: 119 vs 122 / turn60_2: 122 vs 125），
+    /// 属性与下层均正确。缺口未定位（面板 region_bonus 读数不服从
+    /// floor(pt/1000)，疑似按当年吃面次数走，详见与用户的对拍结论）。
+    /// 后续拿到新的实测点后改 `frames` 数组继续对拍。
+    #[test]
+    fn test_game6263_pt_calibration() {
+        use std::fs;
+
+        use crate::protocol::{ParsedGame, parse_game_by_scenario};
+        use umasim::{game::Game, gamedata::init_global};
+
+        fn calib_print(game: &RamenGame, name: &str, train: usize, actual_pt: i32) {
+            let buffs = game.calc_training_buff(train).expect("buffs");
+            let lower = game.default_calc_training_value(&buffs, train).expect("lower");
+            let value = game.calc_training_value(&buffs, train).expect("value");
+            let is_shining = game.shining_count(train) > 0;
+            let eff = umasim::game::ramen::effects::calc_ramen_training_effect(game, train, is_shining);
+            println!(
+                "{name}: train={train} shining={is_shining} level={}\n  \
+                 lower_pt={}  final_pt={}  actual={actual_pt}\n  \
+                 rmj={:?}  scenario_pt={}  current_ramen={:?}  motivation={}\n  \
+                 eff: xunlian={} youqing={} rmj_youqing={} pt_bonus={} pt_limit={} status_limit={}\n  \
+                 attrs: {:?}\n  \
+                 buffs: {}\n  \
+                 dist: {:?}\n  \
+                 persons: {:?}",
+                game.train_level(train),
+                lower.status_pt[5],
+                value.status_pt[5],
+                game.ramen.rmj_results,
+                game.ramen.scenario_pt,
+                game.ramen.current_ramen,
+                game.uma().motivation,
+                eff.xunlian,
+                eff.youqing,
+                eff.rmj_youqing,
+                eff.pt_bonus,
+                eff.pt_limit,
+                eff.status_limit,
+                value.status_pt,
+                buffs.explain(),
+                game.base.distribution,
+                (0..game.persons.len())
+                    .map(|i| format!(
+                        "{}:{:?}/t{}/f{}",
+                        i,
+                        game.persons[i].person_type,
+                        game.persons[i].train_type,
+                        game.persons[i].friendship
+                    ))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let workspace_root = umasim::utils::get_workspace_root().expect("workspace root");
+        let _ = std::env::set_current_dir(&workspace_root);
+        let _ = init_global();
+
+        for (dir_name, frames) in [
+            ("game6263", vec![
+                ("game6263_turn29_3.json", 1usize, 122i32),
+                ("game6263_turn60_2.json", 4usize, 125i32)
+            ]),
+            ("game6261", vec![
+                ("game6261_turn48_3.json", 1usize, 106i32),
+                ("game6261_turn57_2.json", 4usize, 133i32)
+            ])
+        ] {
+            let dir = workspace_root.join("logs").join(dir_name);
+            if !dir.is_dir() {
+                eprintln!("样本目录不存在：{}（跳过）", dir.display());
+                continue;
+            }
+            for (name, train, actual_pt) in frames {
+                let contents = fs::read_to_string(dir.join(name)).expect("read sample");
+                let game = match parse_game_by_scenario(&contents).expect("parse sample") {
+                    ParsedGame::Ramen { game, .. } => game,
+                    ParsedGame::Onsen(_) => panic!("样本应为拉面剧本")
+                };
+                calib_print(&game, name, train, actual_pt);
             }
         }
     }
@@ -648,6 +814,53 @@ mod tests {
         assert_eq!(if -1_i32 < 0 { None } else { Some(-1_i32 as usize) }, None);
         assert_eq!(if 0_i32 < 0 { None } else { Some(0_i32 as usize) }, Some(0));
         assert_eq!(if 2_i32 < 0 { None } else { Some(2_i32 as usize) }, Some(2));
+    }
+
+    /// 重放路径：turn>=72 的超级拉面帧必须把 `finals_effect.base.saihou` 计入 `race_bonus`
+    ///
+    /// 回归背景：协议帧不含 `raceBonus`，`parse_basegame` 只从支援卡累计；且重放不跑
+    /// turn 72 的 `run_begin`。若不补这 +100，URA 段三次比赛收益被系统性低估
+    /// （×1.55 而非 ×2.55），表现为 71_2→72_2 的运气大跳。
+    #[test]
+    fn test_replay_applies_super_ramen_race_bonus() {
+        use std::fs;
+
+        use crate::protocol::{ParsedGame, parse_game_by_scenario};
+
+        let workspace_root = umasim::utils::get_workspace_root().expect("workspace root");
+        let path = workspace_root
+            .join("logs")
+            .join("game6261")
+            .join("game6261_turn72_2.json");
+        if !path.is_file() {
+            eprintln!("样本不存在：{}（跳过本测试）", path.display());
+            return;
+        }
+        let _ = std::env::set_current_dir(&workspace_root);
+        let _ = umasim::gamedata::init_global();
+
+        let contents = fs::read_to_string(&path).expect("read sample");
+        let ParsedGame::Ramen { game, .. } = parse_game_by_scenario(&contents).expect("parse sample")
+        else {
+            panic!("样本应为拉面剧本");
+        };
+
+        assert!(
+            game.ramen.super_ramen.is_some(),
+            "turn72_2 应为超级拉面已选（super_ramen 非 None）"
+        );
+        let card_saihou: i32 = game.base.deck.iter().map(|c| c.effect.saihou).sum();
+        let saihou = global!(RAMENDATA).finals_effect.base.saihou;
+        assert!(saihou > 0, "finals_effect.base.saihou 应为正值");
+        println!(
+            "turn72_2: card_saihou={card_saihou}, super saihou={saihou}, race_bonus={}",
+            game.uma.race_bonus
+        );
+        assert_eq!(
+            game.uma.race_bonus,
+            card_saihou + saihou,
+            "重放 turn>=72 帧的 race_bonus 应 = 支援卡 sai_hou 之和 + 超级拉面一次性加成"
+        );
     }
 
     /// 151 份 turn import 样本驱动测试（实测 chara 6204 全 78 回合）
@@ -689,6 +902,7 @@ mod tests {
         let mut count_eaten_turns = 0usize; // last_ramen >= 0 + selected_regions 非零（年内吃面回合）
         let mut count_super_ramen_2 = 0usize; // super_ramen == 2（选了超级拉面档位 2）
         let mut max_scenario_pt: i32 = 0;
+        let mut max_scenario_pt_json: i32 = 0;
 
         for path in &files {
             let contents = fs::read_to_string(path).expect("read sample");
@@ -730,9 +944,7 @@ mod tests {
             };
 
             // 关键字段 round-trip 校验
-            // 1) scenario_pt 透传
-            assert_eq!(game.ramen.scenario_pt, scenario_pt_json, "{}: scenario_pt 不一致", path.display());
-            // 2) current_ramen 透传：仅在 last_ramen >= 0 且 active_effect_array 非空时生效
+            // 1) current_ramen 透传：仅在 last_ramen >= 0 且 active_effect_array 非空时生效
             //    （L311 改动：active_effect_array 为空时 current_ramen 置 None，即使 last_ramen 有效）
             let expected_current = if last_ramen_json < 0 || active_effect_empty {
                 None
@@ -740,6 +952,14 @@ mod tests {
                 Some(last_ramen_json as usize)
             };
             assert_eq!(game.ramen.current_ramen, expected_current, "{}: current_ramen 不一致", path.display());
+            // 2) scenario_pt：直接透传（协议帧即「吃面后」当年累计值）；
+            //    仅新年窗口 turn 24/48/72 未吃面帧在 step 7 归零
+            let expect_pt = if matches!(game.base.turn, 24 | 48 | 72) && active_effect_empty {
+                0
+            } else {
+                scenario_pt_json
+            };
+            assert_eq!(game.ramen.scenario_pt, expect_pt, "{}: scenario_pt 不一致", path.display());
             // 3) selected_regions 透传
             let expected_regions: [usize; 3] = [
                 selected_regions_json[0].max(0) as usize,
@@ -794,11 +1014,12 @@ mod tests {
                 count_super_ramen_2 += 1;
             }
             max_scenario_pt = max_scenario_pt.max(game.ramen.scenario_pt);
+            max_scenario_pt_json = max_scenario_pt_json.max(scenario_pt_json);
         }
 
         println!("解析成功：{} / {}", count_ok, files.len());
         println!("stage 分布：{count_stage:?}");
-        println!("max_scenario_pt = {max_scenario_pt}");
+        println!("max_scenario_pt = {max_scenario_pt}（协议原始 max = {max_scenario_pt_json}）");
         println!("年内吃面回合数={count_eaten_turns}");
         println!("选了超级拉面档位 2 的样本数={count_super_ramen_2}");
         assert_eq!(count_ok, files.len(), "所有样本必须 parse + into_game 成功");
@@ -813,8 +1034,10 @@ mod tests {
         // 不应再出现旧协议派发的 stage
         assert!(!count_stage.contains_key("Settlement"), "Settlement stage 已废弃（46/48 不 dispatch）");
         assert!(!count_stage.contains_key("SuperRamenSelect"), "SuperRamenSelect stage 不应自动派发");
-        // 协议文档约束：chara 6204 max scenario_pt = 7500（Y3 终值）
-        assert_eq!(max_scenario_pt, 7500, "实测 chara 6204 应在 Y3 终值 7500");
+        // 协议文档约束：chara 6204 协议原始 max scenario_pt = 7500（Y3 终值）
+        assert_eq!(max_scenario_pt_json, 7500, "实测 chara 6204 协议原始 scenario_pt 应在 Y3 终值 7500");
+        // scenario_pt 直接透传（仅在 turn 24/48/72 未吃面帧归一化为 0），故 game 侧 max 等于协议原始 max
+        assert_eq!(max_scenario_pt, max_scenario_pt_json, "scenario_pt 应直接透传协议值");
         // 至少有一个 super_ramen == 2 的样本（实测 turn72 起）
         assert!(count_super_ramen_2 >= 1, "应至少有 1 份 super_ramen=2 样本");
         // 至少有一个 source=event / playing_state=46 / 48 等不 dispatch 样本（落到 Begin）

@@ -1,6 +1,7 @@
 pub mod card_pool;
 pub mod bench;
 pub mod collector;
+pub mod exp_config;
 pub mod explain;
 pub mod game;
 pub mod gamedata;

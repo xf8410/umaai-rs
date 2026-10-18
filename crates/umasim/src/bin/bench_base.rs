@@ -103,6 +103,9 @@ struct BenchConfig {
     /// 用于配卡对照实验（如"默认卡组 vs GA 通解"同种子配对）。
     #[serde(default)]
     deck: Option<String>,
+    /// build 名过滤（None = bench_config.toml 全部 player_builds；与 --deck 互斥）
+    #[serde(default)]
+    builds: Option<Vec<String>>,
     /// mcts 专用：激进度上限
     ///
     /// 缺省 **0.0**（取普通均值）而非 `SearchConfig::default()` 的 50.0：
@@ -120,11 +123,6 @@ struct BenchConfig {
     /// 用于 GA 最优轮回放与育成过程报告（--log 决策日志）。与 tokens/region-weak-cover 互斥。
     #[serde(default)]
     genome_file: Option<String>,
-    /// 只跑指定名字的 player_builds 子集：`"speed,stamina,power_wisdom"`（逗号分隔）。
-    /// 用于与 GA 初筛口径对齐（select_screen_builds 选速/耐/智卡最多的 3 个 build）。
-    /// 未指定 = 跑全部 preset builds。名字须与 bench_config.toml [player_builds] key 一致。
-    #[serde(default)]
-    builds_filter: Option<String>
 }
 
 /// `search_n` 缺省值：小预算档，够跑通又不至于把跑批时间拖爆
@@ -171,7 +169,7 @@ impl Default for BenchConfig {
             deck: None,
             deck_spec: None,
             genome_file: None,
-            builds_filter: None
+            builds: None
         }
     }
 }
@@ -217,6 +215,11 @@ fn parse_deck_spec(s: &str) -> Result<[usize; 5]> {
 
 /// 解析 CLI 参数（`--key value` 或 `--key=value`），覆盖 bench 配置
 fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
+    // 可选覆盖：`BENCH_UMA` 环境变量指定马娘 ID（多马娘扫批免去反复改
+    // bench_config.toml；缺省不生效，与 mcts_profiler 的 `MCTS_PROFILER_*` 同类入口）
+    if let Ok(uma) = std::env::var("BENCH_UMA") {
+        cfg.uma = uma.parse().context("BENCH_UMA 解析失败")?;
+    }
     let mut parser = lexopt::Parser::from_env();
     while let Some(arg) = parser.next()? {
         match arg {
@@ -239,15 +242,25 @@ fn apply_cli(mut cfg: BenchConfig) -> Result<BenchConfig> {
             }
             Arg::Long("deck") => cfg.deck = Some(bench::parse_value(&mut parser, "deck")?),
             Arg::Long("deck-spec") => cfg.deck_spec = Some(bench::parse_value(&mut parser, "deck-spec")?),
-            Arg::Long("builds") => cfg.builds_filter = Some(bench::parse_value(&mut parser, "builds")?),
             Arg::Long("genome-file") => {
                 cfg.genome_file = Some(bench::parse_value(&mut parser, "genome-file")?)
+            }
+            Arg::Long("builds") => {
+                let text: String = bench::parse_value(&mut parser, "builds")?;
+                cfg.builds = Some(
+                    text.split(',')
+                        .map(str::trim)
+                        .filter(|p| !p.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                );
             }
             Arg::Long("help") | Arg::Short('h') => {
                 println!(
                     "用法: bench_base [--runs N] [--seed S] [--log] [--out DIR]
 \n                     	[--trainer random|handwritten|mcts]
 \n                     	[--deck 「id1,id2,id3,id4,id5[,friend]」]（覆盖卡组，跳过 preset builds）
+\n                     	[--builds b1,b2,...]（build 名过滤，与 --deck 互斥）
 \n                     	handwritten 专用: [--tokens TOKEN串]（如 --tokens rgn1 / rgn2 / reserve20）
 \n                     	                  [--region-weak-cover F]（覆盖地区弱位加分权重，与 --tokens 互斥）
 \n                     	mcts 专用: [--search-n N] [--search-stages train,ramen,...] [--search-ucb]
@@ -328,14 +341,12 @@ fn main() -> Result<()> {
 
     // 卡组来源：玩家 build 预置（每个 build 用代表卡自动生成卡组）
     let mut builds = load_player_builds()?;
-    if let Some(filter) = &cfg.builds_filter {
-        let names: Vec<&str> = filter.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        anyhow::ensure!(!names.is_empty(), "--builds 过滤列表为空");
-        builds.retain(|b| names.iter().any(|n| b.name == *n));
+    if let Some(names) = &cfg.builds {
+        builds.retain(|b| names.iter().any(|n| n == &b.name));
         anyhow::ensure!(
             !builds.is_empty(),
             "--builds 过滤后无匹配卡组: {}",
-            filter
+            names.join(", ")
         );
     }
     let data = global!(GAMEDATA);
@@ -376,11 +387,16 @@ fn main() -> Result<()> {
     }
 
     let pick = CardPickOpts::default();
+    // --deck / --deck-spec / --builds 三种卡组指定方式互斥（至多一个）
+    let n_specified = cfg.deck.is_some() as u8
+        + cfg.deck_spec.is_some() as u8
+        + cfg.builds.is_some() as u8;
     anyhow::ensure!(
-        cfg.deck.is_none() || cfg.deck_spec.is_none(),
-        "--deck 与 --deck-spec 互斥，只能选一个"
+        n_specified <= 1,
+        "--deck 与 --deck-spec / --builds 互斥，最多指定一个"
     );
     // --deck / --deck-spec 覆盖模式：只跑一组自定义卡组；否则按 preset builds 自动拉卡
+    // （--builds 过滤只作用于 preset 路径）
     let deck_jobs: Vec<(String, [u32; 6])> = if let Some(ds) = &cfg.deck {
         vec![("custom_deck".to_string(), parse_deck_override(ds, cfg.friend)?)]
     } else if let Some(spec) = &cfg.deck_spec {
@@ -394,6 +410,7 @@ fn main() -> Result<()> {
         let deck = sel.build_deck(&pool, &counts)?;
         vec![("custom_deck".to_string(), deck)]
     } else {
+        // builds 已在前面按 --builds 过滤（见 apply_cli 后 load_player_builds 的 retain）
         builds
             .iter()
             .map(|b| Ok((b.name(), b.make_deck(&pick, cfg.friend)?)))
@@ -454,16 +471,33 @@ fn main() -> Result<()> {
                             log_seed
                         )
                     } else if cfg.tokens.is_empty() {
-                        LoggingTrainer::new(RecommendedRamenTrainer::new(), log_seed)
+                        // 与生产同口径：`friend_complete_required` 决定是否对友人出行
+                        // 施加"5 次必须走完"的完成硬门限（token 里可用 freq/freqoff 覆盖）。
+                        LoggingTrainer::new(
+                            RecommendedRamenTrainer::new()
+                                .with_friend_complete_required(game_config.friend_complete_required),
+                            log_seed
+                        )
                     } else {
-                        LoggingTrainer::new(RecommendedRamenTrainer::with_tokens(&cfg.tokens)?, log_seed)
+                        // token 里显式给了 freq/freqoff 就尊重 token（供对照实验），
+                        // 否则与生产同口径取 game_config。
+                        let tok = RecommendedRamenTrainer::with_tokens(&cfg.tokens)?;
+                        let tok = if cfg.tokens.contains("freq") {
+                            tok
+                        } else {
+                            tok.with_friend_complete_required(game_config.friend_complete_required)
+                        };
+                        LoggingTrainer::new(tok, log_seed)
                     };
                     let outcome = bench::run_seeded(cfg.uma, &deck, &inherit, cfg.seed, run_idx, &trainer)?;
                     (outcome, trainer.take_records())
                 }
                 "mcts" => {
+                    // 与生产 main.rs 同口径：friend_complete_required 同时作用于
+                    // fallback 手写策略与搜索 rollout 基策
                     let mcts = RamenMctsTrainer::new(search_config.clone())
-                        .with_stages(search_stages);
+                        .with_stages(search_stages)
+                        .with_friend_complete_required(game_config.friend_complete_required);
                     let trainer = LoggingTrainer::new(mcts, log_seed);
                     let outcome = bench::run_seeded(cfg.uma, &deck, &inherit, cfg.seed, run_idx, &trainer)?;
                     (outcome, trainer.take_records())

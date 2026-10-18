@@ -139,37 +139,8 @@ impl Game for RamenGame {
 
         // NextTurn：回合边界逻辑
         if self.stage == RamenStage::NextTurn {
-            // 吃面 PT 增量 / eat_count += 1 延后到此阶段（在 `clear current_ramen`
-            // 之前），保证训练阶段的 `calc_ramen_training_effect` 用吃面前的
-            // `scenario_pt` 算 ramen_pt_effect / region_bonus 档位，PT 增量从
-            // 下一回合才参与档位计算。
-            if let Some(ramen_idx) = self.ramen.current_ramen {
-                let year_idx = (self.current_year() - 1) as usize;
-                // `next()` 返回 bool，不能 `?`；year_idx 在剧本三年内必合法，
-                // 此处仅做防御性 fallback。
-                match super::rules::calc_ramen_pt_gain(year_idx, self.ramen.eat_count) {
-                    Ok(pt_gain) => {
-                        self.ramen.scenario_pt += pt_gain;
-                        self.ramen.eat_count += 1;
-                        crate::diag!(
-                            ">> 吃面[{}] PT+{} (NextTurn 后置, 总计{})",
-                            ramen_idx,
-                            pt_gain,
-                            self.ramen.scenario_pt,
-                        );
-                    }
-                    Err(e) => {
-                        crate::diag!(
-                            ">> 吃面[{}] PT 增量计算失败 (year_idx={}, eat_count={}): {}",
-                            ramen_idx,
-                            year_idx,
-                            self.ramen.eat_count,
-                            e,
-                        );
-                    }
-                }
-            }
-
+            // 吃面 PT 增量 / eat_count 已在 `ground_ramen_effects`（吃面当刻）入账，
+            // 此处不再累加。
             // 清除当前回合的吃面状态
             self.ramen.current_ramen = None;
             // 防御性清空 pending
@@ -486,7 +457,7 @@ impl Game for RamenGame {
             5007 => {
                 if rng.random_bool(system_event_prob("qiezhe_normal")?) {
                     diag!(">> 获得【切者】");
-                    self.uma.flags.qiezhe = true;
+                    self.uma.flags.gain_qiezhe();
                 }
             }
             super::events::EVENT_FRIEND_UNLOCK => {
@@ -689,9 +660,11 @@ impl Game for RamenGame {
         let ramen_effect = super::effects::calc_ramen_training_effect(self, train, is_shining);
         let xunlian_mult = (100 + ramen_effect.xunlian) as f64 / 100.0;
         let youqing_mult = (100 + ramen_effect.youqing) as f64 / 100.0;
+        let pt_youqing_mult = (100 + ramen_effect.youqing - ramen_effect.rmj_youqing) as f64 / 100.0;
         let pt_bonus_mult = (100 + ramen_effect.pt_bonus) as f64 / 100.0;
+        // 上限口径独立：属性吃 status_limit，PT 只吃 pt_limit（「SP獲得上限+100」）
         let status_limit = 100 + ramen_effect.status_limit;
-        let pt_limit = 100 + ramen_effect.status_limit + ramen_effect.pt_limit;
+        let pt_limit = 100 + ramen_effect.pt_limit;
         // 3. 上层值：拉面 buff 带来的增量
         // - xunlian × youqing 对 status_pt[0..4]（5 个属性训练值，含副属性加成 buff.bonus）都生效
         // - pt_bonus 仅对 status_pt[5]（PT）单独生效
@@ -703,8 +676,8 @@ impl Game for RamenGame {
                 base_value.status_pt[i] += upper;
             }
         }
-        // PT 部分额外乘 pt_bonus
-        let pt_upper_raw = (base_value.status_pt[5] as f64 * xunlian_mult * youqing_mult * pt_bonus_mult) as i32
+        // PT 部分：友情剔除 RMJ 结算部分，并额外乘 pt_bonus
+        let pt_upper_raw = (base_value.status_pt[5] as f64 * xunlian_mult * pt_youqing_mult * pt_bonus_mult) as i32
             - base_value.status_pt[5];
         let pt_upper = pt_upper_raw.min(pt_limit).max(0);
         base_value.status_pt[5] += pt_upper;
@@ -846,7 +819,7 @@ impl RamenGame {
         format!("{mark}{name}")
     }
 
-    /// 落地所有"吃面后立即生效"的效果（不含 PT 增量）
+    /// 落地所有"吃面后立即生效"的效果
     ///
     /// 这是从原 `RamenAction::apply_ramen` + `apply_ramen_friendship` 抽出的统一入口，
     /// 把"选面 + 选隐藏"两个 Trainer 决策之后**所有立即生效**的效果整合到一起。
@@ -860,14 +833,10 @@ impl RamenGame {
     /// 立即生效的效果：
     /// 1. **消耗诀窍**（`consume_for_ramen`）
     /// 2. **设置 `current_ramen`**（标记吃了面，让 `ramen_basic_effect` / `ramen_region_effect` 在训练阶段生效）
-    /// 3. **生成分身**（地区拉面 id >= 5 + `deck_can_split`）
-    /// 4. **羁绊效果**（吃面或超级拉面回合的 `ramen_basic_effect.friendship`）
-    /// 5. **打印 buff 摘要 + distribution**（让玩家在选训练前看到效果）
-    ///
-    /// **PT 增量和 `eat_count += 1` 延后到 `NextTurn` 阶段**（在 `clear current_ramen`
-    /// 之前统一处理）。这样本回合训练阶段的 `calc_ramen_training_effect` 读到的
-    /// `scenario_pt` 仍是"吃面前"的 PT，确保 `ramen_pt_effect` / `region_bonus` 档位
-    /// 不会因为本次吃面立即跨档抬升（PT 增量从下一回合才参与档位计算）。
+    /// 3. **PT 增量 / `eat_count += 1`**（吃面即刻入账，训练阶段按吃面后 PT 取档位）
+    /// 4. **生成分身**（地区拉面 id >= 5 + `deck_can_split`）
+    /// 5. **羁绊效果**（吃面或超级拉面回合的 `ramen_basic_effect.friendship`）
+    /// 6. **打印 buff 摘要 + distribution**（让玩家在选训练前看到效果）
     ///
     /// **不执行 `operation`**（训练/比赛/休息等），这是 Train 阶段的职责。
     /// 不执行事件（hint 等），事件在 Train 阶段的 `do_train` 中触发。
@@ -881,11 +850,33 @@ impl RamenGame {
             let used_special = super::rules::consume_for_ramen(&mut self.ramen, ramen_idx, &targets)?;
             self.ramen.current_ramen = Some(ramen_idx);
 
-            crate::diag!(
-                ">> 吃面[{}]（PT 增量 / eat_count 延后到 NextTurn），消耗隐藏风味{}",
-                ramen_idx,
-                used_special
-            );
+            // 吃面 PT 增量 / eat_count 当刻入账：实机在此刻已把当年累计 PT 抬高，
+            // 本回合训练效果（`ramen_pt_effect` / `region_bonus` 档位）按吃面后 PT 取。
+            let year_idx = (self.current_year() - 1) as usize;
+            // 此处不能 `?`（吃面失败时调用方继续推进）；year_idx 在剧本三年内必合法，
+            // Err 仅作防御性 fallback。
+            match super::rules::calc_ramen_pt_gain(year_idx, self.ramen.eat_count) {
+                Ok(pt_gain) => {
+                    self.ramen.scenario_pt += pt_gain;
+                    self.ramen.eat_count += 1;
+                    crate::diag!(
+                        ">> 吃面[{}] PT+{} (总计{})，消耗隐藏风味{}",
+                        ramen_idx,
+                        pt_gain,
+                        self.ramen.scenario_pt,
+                        used_special
+                    );
+                }
+                Err(e) => {
+                    crate::diag!(
+                        ">> 吃面[{}] PT 增量计算失败 (year_idx={}, eat_count={}): {}",
+                        ramen_idx,
+                        year_idx,
+                        self.ramen.eat_count,
+                        e
+                    );
+                }
+            }
 
             // 生成分身（id >= 5 + deck_can_split）
             Self::distribute_region_clones(self, ramen_idx, rng)?;
@@ -1206,6 +1197,34 @@ impl RamenGame {
         }
     }
 
+    /// 应用超级拉面的**一次性**赛后加成（`finals_effect.base.saihou` → `race_bonus`）。
+    ///
+    /// **幂等**：条件满足时合计最多生效一次（`super_ramen_saihou_applied` 置位后不再加），
+    /// 故「模拟路径（[`Self::run_begin`]）」与「重放路径（`into_game`）」同时调用也不会重复加。
+    ///
+    /// 生效条件：`turn >= 72`（已进入超级拉面段）且已选超级拉面档位（`ramen.super_ramen` 为 `Some`）。
+    /// 返回本次是否真正生效（供调用方决定日志）。
+    ///
+    /// 背景：协议帧不含 `raceBonus`，重放时 `parse_basegame` 只从支援卡累计，
+    /// 缺了这 +100 会让 URA 段（turn 73/75/77 三次比赛）收益被系统性低估（×1.55 而非 ×2.55）。
+    pub fn apply_super_ramen_saihou(&mut self) -> bool {
+        if self.super_ramen_saihou_applied {
+            return false;
+        }
+        if self.base.turn < 72 || self.ramen.super_ramen.is_none() {
+            return false;
+        }
+        let saihou = global!(RAMENDATA).finals_effect.base.saihou;
+        self.uma.race_bonus += saihou;
+        self.super_ramen_saihou_applied = true;
+        diag!(
+            "超级拉面赛后加成（一次性）: race_bonus +{} → {}",
+            saihou,
+            self.uma.race_bonus
+        );
+        true
+    }
+
     /// Begin 阶段：动态人头管理、隐藏风味、事件处理
     ///
     /// turn 2 只跑前半段，地区选择交给独立的 `RegionSelect` 阶段；
@@ -1324,8 +1343,7 @@ impl RamenGame {
                 }
             }
             // 应用 finals_effect.base 的 vital/motivation 恢复效果（每回合）
-            // + saihou（赛后加成）一次性应用：仅在进入超级拉面第一回合（turn=72）+saihou，
-            // 之后回合保留已生效值，不重复累加
+            // + saihou（赛后加成）一次性应用（幂等，见 `apply_super_ramen_saihou`）
             let ramen_data = global!(RAMENDATA);
             let finals_base = &ramen_data.finals_effect.base;
             let value = ActionValue {
@@ -1334,22 +1352,13 @@ impl RamenGame {
                 ..Default::default()
             };
             self.uma.add_value(&value);
-            if self.base.turn == 72 {
-                // 进入超级拉面第一回合时一次性加 saihou（之后回合不再累加）
-                self.uma.race_bonus += finals_base.saihou;
-                diag!(
-                    "超级拉面自动恢复: 体力+{}, 干劲+{}, 赛后+{}（一次性）",
-                    finals_base.vital,
-                    finals_base.motivation,
-                    finals_base.saihou
-                );
-            } else {
-                diag!(
-                    "超级拉面自动恢复: 体力+{}, 干劲+{}",
-                    finals_base.vital,
-                    finals_base.motivation
-                );
-            }
+            // 一次性赛后加成（race_bonus +saihou）：条件满足时合计只生效一次
+            self.apply_super_ramen_saihou();
+            diag!(
+                "超级拉面自动恢复: 体力+{}, 干劲+{}",
+                finals_base.vital,
+                finals_base.motivation
+            );
         }
 
         Ok(())
@@ -1674,15 +1683,30 @@ impl RamenGame {
 
     /// 动态人头管理：根据回合数添加友人卡、NPC和记者
     fn manage_persons_on_turn_start(&mut self) -> Result<()> {
-        // 第2回合（turn==2）开始：添加友人卡和NPC
-        if self.base.turn == 2 && !self.persons.iter().any(|p| p.person_type == PersonType::ScenarioCard) {
-            self.add_friend_and_npcs()?;
-            diag!(">> 第2回合：添加友人卡和NPC，当前人头数 {}", self.persons.len());
+        // 第2回合起：按需补齐友人卡与 5 个 NPC（各自独立判存在性，幂等）。
+        //
+        // **不能用**「是否已存在 ScenarioCard（友人卡人头）」当「已补过友人卡+NPC」
+        // 的判据：协议层 `into_game` 重建 turn<2 帧时已把友人卡建成 ScenarioCard
+        // 人头，用它会误判"已补齐"而整批跳过 NPC——链式推进出的 turn2 局面因此比
+        // 真实帧少 5 个 NPC，训练值系统性偏低，运气分在 turn2 出现假跳升。
+        if self.base.turn >= 2 {
+            let mut added = false;
+            if !self.persons.iter().any(|p| p.person_type == PersonType::ScenarioCard) {
+                self.add_friend_card()?;
+                added = true;
+            }
+            if !self.persons.iter().any(|p| p.person_type == PersonType::Npc) {
+                self.add_npcs();
+                added = true;
+            }
+            if added {
+                diag!(">> 回合 {}：补人头，当前人头数 {}", self.base.turn, self.persons.len());
+            }
         }
-        // 第12回合（turn==12）开始：添加记者
-        if self.base.turn == 12 && !self.persons.iter().any(|p| p.person_type == PersonType::Reporter) {
+        // 第12回合起：按需添加记者（幂等）
+        if self.base.turn >= 12 && !self.persons.iter().any(|p| p.person_type == PersonType::Reporter) {
             self.add_reporter();
-            diag!(">> 第12回合：添加记者，当前人头数 {}", self.persons.len());
+            diag!(">> 回合 {}：添加记者，当前人头数 {}", self.base.turn, self.persons.len());
         }
         Ok(())
     }
@@ -2518,6 +2542,38 @@ struct AlwaysTrueRng;
         Ok(())
     }
 
+    /// 回归：协议层重建的 turn<2 帧（友人卡已是 ScenarioCard 人头）推进到 turn2 时，
+    /// 必须补齐 5 个 NPC。
+    ///
+    /// 旧守卫用「是否存在 ScenarioCard」判「是否已补过友人卡+NPC」：`into_game`
+    /// 重建 turn<2 帧时已把友人卡建成 ScenarioCard，于是 turn2 整批跳过
+    /// `add_friend_and_npcs` → 链式推进出的 turn2 局面少 5 个 NPC，训练值系统性
+    /// 偏低（运气分 turn2 出现 ~+1300 假跳升）。
+    #[test]
+    fn test_turn2_backfills_npcs_when_friend_already_present() -> Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let mut game = RamenGame::newgame(TEST_UMA_ID, &TEST_DECK, TEST_INHERIT)?;
+        // 模拟 `into_game` 重建的 turn<2 帧：友人卡已作为 ScenarioCard 人头存在
+        game.add_friend_card()?;
+        let npc_before = game.persons.iter().filter(|p| p.person_type == PersonType::Npc).count();
+        println!("turn<2 重建布局: persons={} npc={npc_before}", game.persons.len());
+
+        game.base.turn = 2;
+        game.manage_persons_on_turn_start()?;
+        let npc_after = game.persons.iter().filter(|p| p.person_type == PersonType::Npc).count();
+        println!("turn2 后: persons={} npc={npc_after}", game.persons.len());
+
+        let mut c = Checks::new();
+        c.check(npc_before == 0, "turn<2 无 NPC");
+        c.check(npc_after == 5, "turn2 补齐 5 个 NPC");
+        c.check(game.persons.len() == 12, "turn2 人头总数为 12");
+        c.finish()
+    }
+
     /// 训练参数分解日志专项测试
     ///
     /// 固定场景：回合 31（第二年，Lv=4），3 张速卡（杏目 id=0、洛林 id=3、里见 id=4）
@@ -2884,8 +2940,9 @@ struct AlwaysTrueRng;
             "超级拉面, PT=5000, RMJ都成功: card_deyilv_only={} 实际 deyilv={}",
             card_deyilv_only2, actual_deyilv2
         );
-        // 期望：actual_deyilv = card_deyilv_only + (pt(5000档=80) + rmj_success[2]=250) = +330
-        assert_eq!(actual_deyilv2, card_deyilv_only2 + 330.0);
+        // 期望：actual_deyilv = card_deyilv_only + rmj_success[2]=250 = +250
+        // （超级拉面不叠加 pt_effect 的 deyilv=80）
+        assert_eq!(actual_deyilv2, card_deyilv_only2 + 250.0);
 
         // ========== 无卡人头返回 0，友人卡按自己的卡组槽位取值 ==========
         // 旧断言写死「person_index >= 6 返回 0」，但拉面布局下人头 6 正是友人卡。
@@ -2911,8 +2968,8 @@ struct AlwaysTrueRng;
         let friend_deyilv = game2.deyilv(friend_idx as i32);
         println!(
             "[{}] 友人卡(人头 {friend_idx} -> 卡组 {friend_deck_idx}): 期望 {} 实际 {friend_deyilv}",
-            check(friend_deyilv == friend_card_deyilv + 330.0),
-            friend_card_deyilv + 330.0
+            check(friend_deyilv == friend_card_deyilv + 250.0),
+            friend_card_deyilv + 250.0
         );
 
         // 负数人头下标不再 panic
@@ -3423,16 +3480,15 @@ struct AlwaysTrueRng;
         Ok(())
     }
 
-    /// 吃面 PT 增量 / `eat_count += 1` 延后到 NextTurn 阶段（不立即生效）。
+    /// 吃面 PT 增量 / `eat_count += 1` 在 `ground_ramen_effects`（吃面当刻）立即入账。
     ///
-    /// 回归吃面前后 `scenario_pt` 的语义边界：
-    /// - `ground_ramen_effects` 后：`scenario_pt` / `eat_count` **不变**（仅设 `current_ramen` /
-    ///   消耗诀窍 / 分身 / 羁绊效果）
-    /// - `calc_ramen_training_effect` 用"吃面前 PT"算 `ramen_pt_effect` 档位
-    ///   （关键：避免本次吃面立即抬高档位）
-    /// - `NextTurn` 阶段才累加 `scenario_pt += pt_gain`、`eat_count += 1`
+    /// 语义边界：
+    /// - `ground_ramen_effects` 后：`scenario_pt += pt_gain`、`eat_count += 1` 立即生效
+    /// - `calc_ramen_training_effect` 按"吃面后 PT"取 `ramen_pt_effect` / `region_bonus` 档位
+    ///   （与实机一致：协议帧在训练时已是吃面后累计值）
+    /// - `NextTurn` 不再累加（避免重复入账）
     #[test]
-    fn test_eat_ramen_pt_gain_defers_to_next_turn() -> Result<()> {
+    fn test_eat_ramen_pt_gain_lands_immediately() -> Result<()> {
         use crate::gamedata::ramen::RAMENDATA;
 
         let workspace_root = get_workspace_root()?;
@@ -3470,94 +3526,76 @@ struct AlwaysTrueRng;
         game.ground_ramen_effects(&mut rng)?;
 
         let mut c = Checks::new();
+        let pt_after_eat = pt_before + 300; // 年 1 第一面 gain_pt_base=300, eat=0 → 300
         println!(
             "吃面 ground 后: PT={} eat={} current_ramen={:?}",
             game.ramen.scenario_pt, game.ramen.eat_count, game.ramen.current_ramen
         );
         c.check(
-            game.ramen.scenario_pt == pt_before,
-            "ground_ramen_effects 不应立即增加 scenario_pt",
+            game.ramen.scenario_pt == pt_after_eat,
+            "ground_ramen_effects 应立即 +300（年 1 第一面）",
         );
         c.check(
-            game.ramen.eat_count == eat_before,
-            "ground_ramen_effects 不应立即 eat_count += 1",
+            game.ramen.eat_count == eat_before + 1,
+            "ground_ramen_effects 应立即 eat_count += 1",
         );
         c.check(
             game.ramen.current_ramen == Some(0),
             "ground_ramen_effects 应设置 current_ramen = Some(0)",
         );
 
-        // 关键回归点：吃面后 calc_ramen_training_effect 的 ramen_pt_effect 档位
-        // 必须用吃面前 PT（900，pt_min=500 档），xunlian 增量仅来自 basic + region。
-        // 错误实现下 scenario_pt=1200 → pt_min=1000 档 → xunlian 比基线多 3（5→8）。
+        // 关键回归点：吃面后 calc_ramen_training_effect 按吃面后 PT（900→1200，pt_min=500→1000 档）
+        // 取档位；xunlian 增量 = basic + region + 档位跃升。
         let ramen_data = global!(RAMENDATA);
-        let pt_tier_correct = ramen_data
+        let tier_before = ramen_data
             .ramen_pt_effect
             .iter()
             .rposition(|pe| pe.pt_min <= pt_before)
             .unwrap_or(0);
-        let pt_tier_wrong = ramen_data
+        let tier_after = ramen_data
             .ramen_pt_effect
             .iter()
-            .rposition(|pe| pe.pt_min <= pt_before + 300)
+            .rposition(|pe| pe.pt_min <= pt_after_eat)
             .unwrap_or(0);
-        let pt_xunlian_correct = ramen_data.ramen_pt_effect[pt_tier_correct].xunlian;
-        let pt_xunlian_wrong = ramen_data.ramen_pt_effect[pt_tier_wrong].xunlian;
         println!(
-            "ramen_pt_effect 档位: 正确 pt_min={} xunlian={} / 错误 pt_min={} xunlian={}",
-            ramen_data.ramen_pt_effect[pt_tier_correct].pt_min,
-            pt_xunlian_correct,
-            ramen_data.ramen_pt_effect[pt_tier_wrong].pt_min,
-            pt_xunlian_wrong,
+            "ramen_pt_effect 档位: 吃面前 pt_min={} xunlian={} / 吃面后 pt_min={} xunlian={}",
+            ramen_data.ramen_pt_effect[tier_before].pt_min,
+            ramen_data.ramen_pt_effect[tier_before].xunlian,
+            ramen_data.ramen_pt_effect[tier_after].pt_min,
+            ramen_data.ramen_pt_effect[tier_after].xunlian,
         );
-        // 吃面前后拉面效果增量的预期值：
-        // 1) 正确：basic.xunlian + region_xunlian（ramen_pt_effect 档位不变 → 增量不含 3）
-        // 2) 错误：basic.xunlian + region_xunlian + 3（PT 提前跳档 → 增量多 +3）
-        let basic_year1 = &ramen_data.ramen_basic_effect[0];
-        let region0 = &ramen_data.ramen_region_effect[0];
-        let expected_delta_correct = basic_year1.xunlian + region0.xunlian;
-        let expected_delta_wrong = basic_year1.xunlian + region0.xunlian + (pt_xunlian_wrong - pt_xunlian_correct);
-        println!(
-            "吃面后 xunlian 增量: 正确期望={} / 错误期望={} (差值 {})",
-            expected_delta_correct,
-            expected_delta_wrong,
-            expected_delta_wrong - expected_delta_correct,
-        );
+        let expected_delta = ramen_data.ramen_basic_effect[0].xunlian
+            + ramen_data.ramen_region_effect[0].xunlian
+            + (ramen_data.ramen_pt_effect[tier_after].xunlian - ramen_data.ramen_pt_effect[tier_before].xunlian);
 
         let effect_after =
             crate::game::ramen::effects::calc_ramen_training_effect(&game, 0, false);
         let delta = effect_after.xunlian - xunlian_baseline;
         println!(
-            "calc_ramen_training_effect xunlian: 吃面前={} 吃面后={} 增量={}",
-            xunlian_baseline, effect_after.xunlian, delta
+            "calc_ramen_training_effect xunlian: 吃面前={} 吃面后={} 增量={} (期望 {})",
+            xunlian_baseline, effect_after.xunlian, delta, expected_delta
         );
         c.check(
-            delta == expected_delta_correct,
+            delta == expected_delta,
             &format!(
-                "calc_ramen_training_effect 用吃面前 PT 算 ramen_pt_effect 档位 \
-                 (期望增量 {} / 错误增量 {} = basic+region + 跳档 +{})",
-                expected_delta_correct,
-                expected_delta_wrong,
-                pt_xunlian_wrong - pt_xunlian_correct,
+                "calc_ramen_training_effect 应按吃面后 PT 取档位（档位跃升 {} → 期望增量 {}）",
+                ramen_data.ramen_pt_effect[tier_after].xunlian - ramen_data.ramen_pt_effect[tier_before].xunlian,
+                expected_delta,
             ),
         );
 
-        // 手动触发 NextTurn 阶段，验证 PT 增量 / eat_count += 1 在此处生效
+        // NextTurn 不应再次累加（PT 已在吃面当刻入账）
         game.stage = RamenStage::NextTurn;
         game.next();
-        let pt_after_expected = pt_before + 300; // 年 1 第一面 gain_pt_base=300, eat=0 → 300
         println!(
             "NextTurn 后: PT={} eat={}",
             game.ramen.scenario_pt, game.ramen.eat_count
         );
         c.check(
-            game.ramen.scenario_pt == pt_after_expected,
-            "NextTurn 后 scenario_pt 应 += 300（年 1 第一面）",
+            game.ramen.scenario_pt == pt_after_eat,
+            "NextTurn 不应再次累加 scenario_pt",
         );
-        c.check(
-            game.ramen.eat_count == 1,
-            "NextTurn 后 eat_count 应 += 1",
-        );
+        c.check(game.ramen.eat_count == 1, "NextTurn 不应再次累加 eat_count");
         c.finish()
     }
 
@@ -3840,6 +3878,47 @@ struct AlwaysTrueRng;
 
         println!("saihou 一次性 +100（不跨回合累积）验证通过");
 
+        Ok(())
+    }
+
+    /// `apply_super_ramen_saihou` 幂等：条件满足时合计只 +saihou 一次
+    ///
+    /// 覆盖「模拟 run_begin」与「协议重放 into_game」两条路径合计不重复加：
+    /// - turn<72 或未选超级拉面（None）→ 不生效；
+    /// - turn>=72 且已选超级拉面 → 首次 +100，二次调用不再加。
+    #[test]
+    fn test_apply_super_ramen_saihou_idempotent() -> Result<()> {
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("info");
+        let _ = init_global();
+
+        let mut game = RamenGame::newgame(TEST_UMA_ID, &TEST_DECK, TEST_INHERIT)?;
+        game.add_friend_and_npcs()?;
+        game.ramen.super_ramen = Some(1);
+
+        // turn<72：不生效
+        game.base.turn = 71;
+        let base_bonus = game.uma.race_bonus;
+        assert!(!game.apply_super_ramen_saihou(), "turn<72 不应生效");
+        assert_eq!(game.uma.race_bonus, base_bonus, "turn<72 race_bonus 不应变");
+
+        // turn=72：首次生效 +100
+        game.base.turn = 72;
+        assert!(game.apply_super_ramen_saihou(), "turn>=72 且已选超级拉面应首次生效");
+        let after_first = game.uma.race_bonus;
+        assert_eq!(after_first - base_bonus, 100, "应一次性 +100");
+
+        // 二次调用（模拟重放已生效后 run_begin 仍被调）：不重复加
+        assert!(!game.apply_super_ramen_saihou(), "二次调用不应生效");
+        assert_eq!(game.uma.race_bonus, after_first, "race_bonus 不应再涨");
+
+        // 未选超级拉面（None）：不生效
+        let mut game2 = RamenGame::newgame(TEST_UMA_ID, &TEST_DECK, TEST_INHERIT)?;
+        game2.base.turn = 75;
+        assert!(!game2.apply_super_ramen_saihou(), "未选超级拉面不应生效");
+
+        println!("apply_super_ramen_saihou 幂等性验证通过");
         Ok(())
     }
 

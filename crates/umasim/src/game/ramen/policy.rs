@@ -96,6 +96,9 @@ pub struct RamenPolicyConfig {
     ///
     /// `0.0` = 关闭（与普通回合一样回落 `pt_rate` 口径）。配置 token `trdsN`。
     pub pt_tradeoff_super: f32,
+    /// 实验：在剩余主属性不足 N 次本次训练收益时，连续过渡到满位 PT 价格。
+    /// 0 关闭，保留正式策略；正数仅影响未满位的 PT 估值。
+    pub pt_cap_blend_turns: f32,
     /// 主属性快满时"残余收益"折扣强度（方案 E，0~1）。
     ///
     /// 配卡决定训练效率（3 速 build 速位每次 +90 天然更快接近上限），凸评分曲线
@@ -235,6 +238,8 @@ pub struct RamenPolicyConfig {
     // ===== Event =====
     /// 事件体力每点折算
     pub event_vital_weight: f32,
+    /// 实验：0=固定选项二，1=固定选项一，2=固定选项三，3=按终盘缺口和卡数选范围。
+    pub super_choice_mode: u8,
     /// 事件干劲每点折算
     pub event_motivation_weight: f32,
     /// 事件获得 bad flag（ill/bad_trainer）的惩罚
@@ -254,6 +259,7 @@ impl Default for RamenPolicyConfig {
             pt_tradeoff: 0.0,
             pt_tradeoff_shining: 0.0,
             pt_tradeoff_super: 0.0,
+            pt_cap_blend_turns: 0.0,
             cap_discount_weight: 0.0,
             failure_penalty: 60.0,
             effective_ramen_failure: true,
@@ -279,6 +285,7 @@ impl Default for RamenPolicyConfig {
             region_main_bias_bonus: 0.0,
             region_y3_single_focus: 0,
             event_vital_weight: 2.2,
+            super_choice_mode: 0,
             event_motivation_weight: 40.0,
             event_bad_flag_penalty: 300.0
         }
@@ -1008,7 +1015,14 @@ impl RamenPolicy {
         // 0.0 = 关闭（保留旧口径，行为逐位不变）。
         let cap_left_main = (game.uma().five_status_limit[train] - game.uma().five_status[train]).max(0);
         let main_full = inc_main > 0 && cap_left_main == 0;
-        let eff_pt_rate = if main_full && self.config.pt_tradeoff > 0.0 {
+        let blend = if inc_main > 0 && self.config.pt_cap_blend_turns > 0.0 {
+            (cap_left_main as f32 / (inc_main as f32 * self.config.pt_cap_blend_turns)).clamp(0.0, 1.0)
+        } else if main_full {
+            0.0
+        } else {
+            1.0
+        };
+        let eff_pt_rate = if blend < 1.0 && self.config.pt_tradeoff > 0.0 {
             // 彩圈分级：有彩圈（友情训练）的已满位 PT 真实产出高（实测 267-340），
             // 用 pt_tradeoff_shining 定价；无彩圈（PT≈40）用 pt_tradeoff 重压。
             let base = if eval.shining > 0 && self.config.pt_tradeoff_shining > 0.0 {
@@ -1016,10 +1030,15 @@ impl RamenPolicy {
             } else {
                 self.config.pt_tradeoff
             };
-            if self.config.pt_tradeoff_super > 0.0 && game.is_super_ramen_turn() {
+            let full_rate = if self.config.pt_tradeoff_super > 0.0 && game.is_super_ramen_turn() {
                 self.config.pt_tradeoff_super
             } else {
                 base
+            };
+            if blend == 0.0 {
+                full_rate
+            } else {
+                full_rate + (self.config.pt_rate - full_rate) * blend
             }
         } else {
             self.config.pt_rate
@@ -1456,18 +1475,45 @@ impl RamenPolicy {
     ///
     /// 不是硬编码返回下标 1，而是**按身份查找**携带该选项的候选位置。
     /// 候选顺序若变化，仍能钉住「选项二」而不是「第 2 个候选」。
-    /// 不按卡组打分（属手写策略调参，不在本次范围）。
+    /// 默认保持固定选项二；super_choice_mode=3 按当前缺口和卡型数估值，不读取未来随机结果。
     pub fn decide_super_ramen(
-        &self, _game: &RamenGame, actions: &[RamenAction]
+        &self, game: &RamenGame, actions: &[RamenAction]
     ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
         if actions.is_empty() {
             anyhow::bail!("SuperRamenSelect 阶段候选为空");
         }
+        let target = match self.config.super_choice_mode { 1 => 0, 2 => 2, _ => FIXED_SUPER_RAMEN_INDEX };
+        if self.config.super_choice_mode == 3 {
+            let options = get_super_ramen_clone_train_options()?;
+            let mut scores = Vec::with_capacity(actions.len());
+            for action in actions {
+                let Operation::SuperRamenSelect(option) = action.operation else {
+                    anyhow::bail!("超级拉面候选类型错误");
+                };
+                let trains = options.get(option).ok_or_else(|| anyhow::anyhow!("超级拉面范围越界"))?;
+                let mut score = 0.0;
+                for &tr in trains {
+                    let i = tr as usize;
+                    // 以卡数估计未来六回合训练能力，属性价值仍由真实终局评分表计算。
+                    let gain = 6 * (50 + 30 * game.card_type_count[i].max(0));
+                    score += self.status_gain(game, i, gain) * (1.0 + game.card_type_count[i].max(0) as f32);
+                }
+                let mut out = RamenPolicyOutput { score, ..Default::default() };
+                if self.collect_details {
+                    out.add("super_range_margin", score);
+                    out.reason = format!("超级拉面选项{}：终盘缺口估值{score:.0}", option + 1);
+                }
+                scores.push(out);
+            }
+            let mut best = actions.iter().position(|a| matches!(a.operation, Operation::SuperRamenSelect(1))).unwrap_or(0);
+            for i in 0..scores.len() { if scores[i].score > scores[best].score { best = i; } }
+            return Ok((best, scores));
+        }
         let idx = actions
             .iter()
-            .position(|a| matches!(a.operation, Operation::SuperRamenSelect(i) if i == FIXED_SUPER_RAMEN_INDEX))
+            .position(|a| matches!(a.operation, Operation::SuperRamenSelect(i) if i == target))
             .ok_or_else(|| {
-                anyhow::anyhow!("候选中找不到超级拉面选项下标 {FIXED_SUPER_RAMEN_INDEX}")
+                anyhow::anyhow!("候选中找不到超级拉面选项下标 {target}")
             })?;
         let mut scores = Vec::with_capacity(actions.len());
         for (i, _) in actions.iter().enumerate() {
@@ -1475,10 +1521,12 @@ impl RamenPolicy {
             if i == idx {
                 out.score = 1.0;
                 if self.collect_details {
-                    out.reason = "固定选项二".to_string();
+                    out.reason = if target == FIXED_SUPER_RAMEN_INDEX { "固定选项二".to_string() }
+                        else { format!("实验固定选项{}", target + 1) };
                 }
             } else if self.collect_details {
-                out.reason = "非选项二".to_string();
+                out.reason = if target == FIXED_SUPER_RAMEN_INDEX { "非选项二".to_string() }
+                    else { format!("非实验固定选项{}", target + 1) };
             }
             scores.push(out);
         }
@@ -1494,6 +1542,84 @@ mod tests {
         gamedata::init_global,
         utils::{get_workspace_root, init_test_logger}
     };
+
+    /// 超级拉面固定实验按动作身份选择，候选顺序变化不能改变选项。
+    #[test]
+    fn test_round5_super_choice_identity() -> anyhow::Result<()> {
+        use crate::utils::Checks;
+        std::env::set_current_dir(get_workspace_root()?)?;
+        init_global()?;
+        let game=make_game()?;
+        let actions=vec![RamenAction::super_ramen_select(2),RamenAction::super_ramen_select(0),RamenAction::super_ramen_select(1)];
+        let mut checks=Checks::new();
+        for (mode,expected) in [(0,2),(1,1),(2,0)] {
+            let mut cfg=RamenPolicyConfig::default(); cfg.super_choice_mode=mode;
+            checks.check(RamenPolicy::new(cfg).decide_super_ramen(&game,&actions)?.0==expected,"按固定选项身份选择");
+        }
+        let mut cfg=RamenPolicyConfig::default(); cfg.super_choice_mode=3;
+        let policy=RamenPolicy::new(cfg);
+        let first=policy.decide_super_ramen(&game,&actions)?.0;
+        let mut reverse=actions.clone(); reverse.reverse();
+        let second=policy.decide_super_ramen(&game,&reverse)?.0;
+        checks.check(actions[first]==reverse[second],"缺口策略不随候选顺序改变");
+        let mut late = game.clone();
+        late.uma.five_status = late.uma.five_status_limit;
+        late.uma.five_status[3] -= 500;
+        late.card_type_count[3] = 2;
+        let (idx, scores) = policy.decide_super_ramen(&late, &actions)?;
+        checks.check(scores[2].score==0.0,"选项二不覆盖唯一有缺口的根性位，估值为零");
+        checks.check(scores[idx].score>0.0 && idx!=2,"自适应选择覆盖缺口的选项");
+        late.uma.five_status = late.uma.five_status_limit;
+        checks.check(policy.decide_super_ramen(&late,&actions)?.0==2,"全部满位平局时回退默认选项二");
+        checks.finish()
+    }
+
+    /// 近上限定价在真实评分入口验证：窗口外/满位端点、连续过渡、彩圈及超拉面。
+    #[test]
+    fn test_pt_cap_blend_scoring_boundaries() -> anyhow::Result<()> {
+        use crate::utils::Checks;
+        let root = get_workspace_root()?;
+        std::env::set_current_dir(root)?;
+        init_global()?;
+        let mut game = make_game()?;
+        game.base.turn = 60;
+        let action = RamenAction::new(Operation::Train(TrainingType::Speed));
+        let mut eval = RamenTrainEval::default();
+        eval.value.status_pt = [100, 0, 0, 0, 0, 10];
+        let mut config = RamenPolicyConfig::default();
+        config.pt_rate = 64.0;
+        config.pt_tradeoff = 37.0;
+        config.pt_tradeoff_shining = 36.0;
+        config.pt_tradeoff_super = 35.0;
+        let base = RamenPolicy::new(config.clone());
+        config.pt_cap_blend_turns = 2.0;
+        let blend = RamenPolicy::new(config);
+        let mut checks = Checks::new();
+        for (left, expected_rate) in [(300,64.0), (200,64.0), (100,50.5), (1,37.135), (0,37.0)] {
+            game.uma.five_status[0] = game.uma.five_status_limit[0] - left;
+            let old = base.score_train_action_eval(&game, &action, &eval)?;
+            let new = blend.score_train_action_eval(&game, &action, &eval)?;
+            let pt = new.breakdown.iter().find(|(name,_)| *name=="pt").map(|(_,v)|*v).unwrap_or(-1.0);
+            println!("left={left} old={} new={} pt={pt}",old.score,new.score);
+            checks.check((pt-expected_rate*10.0).abs()<0.001,"PT价格符合独立手算预期");
+            if left==0 || left>=200 {
+                checks.check(old==new,"满位和窗口外完整输出与原策略逐位相同");
+            }
+        }
+        game.uma.five_status[0] = game.uma.five_status_limit[0] - 100;
+        eval.shining = 1;
+        for (turn,want) in [(60,500.0),(72,495.0)] {
+            game.base.turn=turn;
+            let out=blend.score_train_action_eval(&game,&action,&eval)?;
+            let pt=out.breakdown.iter().find(|(name,_)| *name=="pt").map(|(_,v)|*v).unwrap_or(-1.0);
+            checks.check((pt-want).abs()<0.001,"彩圈/超拉面端点使用对应PT价格");
+        }
+        eval.value.status_pt[0]=0;
+        let old=base.score_train_action_eval(&game,&action,&eval)?;
+        let new=blend.score_train_action_eval(&game,&action,&eval)?;
+        checks.check(old==new,"主属性零增量不误触发过渡或除零");
+        checks.finish()
+    }
 
     #[test]
     fn test_fixed_region_selection() -> anyhow::Result<()> {

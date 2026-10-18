@@ -334,8 +334,44 @@ pub struct LocalRamenConfig {
     /// 原策略主动选择友人外出不受此门控，只受总次数配额约束。`4` 表示关闭。
     pub friend_rest_max_special: i32,
 
+    /// 实验：**第三年**替代休息路径允许的最高隐藏风味（现行口径 = 2）。
+    ///
+    /// 第三年夏合宿（turn 60 +2 / 61-63 各 +1）会把风味顶到 4，之后要等吃面把风味
+    /// 吃到 ≤2 才打开替代路径，晚回合窗口被闸门吃掉，第 5 次出行常走不完。
+    /// 调到 `3` 可提早约 1 次吃面的窗口；代价是该次出行 +2 中有 1 点溢出、且饥饿
+    /// 加成（库存 ≥3 时已为 0）不参与，出行只剩体力/干劲/属性/完链价值。
+    pub friend_y3_overflow_cap: i32,
+
+    /// 实验：第三年剩余配额走不完时，是否强制补足出行次数。
+    ///
+    /// `false` = 现行口径（只受 [`Self::friend_outing_cumulative_caps`] 硬上限约束，
+    /// 用不用得完完全交给动态估值）。`true` 时若"剩余出行次数 > 剩余可出行回合数"
+    /// 且本次出行不溢出（受 [`Self::friend_y3_overflow_cap`] 限制），则该回合直接
+    /// 判定出行胜利，保证 5 次走完。
+    pub friend_y3_urgency_force: bool,
+
+    /// 实验：第三年**必须走完的次数**（`0` = 按配额自动取 `caps[2] - caps[1]`）。
+    ///
+    /// 与 [`Self::friend_y3_urgency_force`] 配合：当"第三年还该走的次数 ≥ 剩余可出行
+    /// 回合数"时强制让出行赢，保证当年配额走完（如 `[0,2,5]` 第三年必须走 3 次）。
+    pub friend_y3_force_remaining: i32,
+
+    /// 友人出行是否**必须走完 5 次**（完成硬门限）。
+    ///
+    /// 由 `game_config.toml` / `default_config.toml` 的 `friend_complete_required`
+    /// 落到此开关（默认开）。开时隐藏风味闸门不再阻断出行（完成优先于风味利用），
+    /// 且"剩余出行次数 ≥ 剩余可出行回合数"时强制出行，保证 5 次走完；
+    /// 关时回到纯动态估值口径（可能主动跳过第 5 次）。
+    pub friend_complete_required: bool,
+
     /// RMJ/第三年5000目标在截止前的可达性紧迫度。
     pub deadline_urgency_scale: f32,
+
+    /// 实验（第八轮）：逐卡 Hint 精确估值倍率（百分比）。
+    ///
+    /// 0.0 = 关闭，沿用固定 hint_bonus；正数 = 用 P/100 x hint_event_expected_value
+    /// 替换固定值，让卡面 hint_level 0~5（1~6 级 Hint）与属性分支按终局评分真实折算。
+    pub hint_card_aware: f32,
 
     /// SpecialSelect 是否按吃后库存、后续可制作集合和年末剩余价值动态选择。
     pub dynamic_special_targets: bool
@@ -391,8 +427,13 @@ impl Default for LocalRamenConfig {
             friend_outing3_recovery_vital: 0,
             friend_outing_cumulative_caps: [5, 5, 5],
             friend_rest_max_special: 4,
+            friend_y3_overflow_cap: 2,
+            friend_y3_urgency_force: false,
+            friend_y3_force_remaining: 0,
+            friend_complete_required: false,
             deadline_urgency_scale: 0.0,
-            dynamic_special_targets: false
+            dynamic_special_targets: false,
+            hint_card_aware: 0.0
         }
     }
 }
@@ -481,6 +522,12 @@ impl LocalRamenTrainer {
                 }
             } else if let Some(v) = token.strip_prefix("friendspecial") {
                 local.friend_rest_max_special = v.parse()?
+            } else if let Some(v) = token.strip_prefix("fov3") {
+                // 第三年替代休息路径的隐藏风味上限（fov33 → 3；fov34 → 4 基本关闸）
+                local.friend_y3_overflow_cap = v.parse()?
+            } else if token == "furg3" {
+                // 第三年配额紧迫度强制补足（配合 fcap 使用，如 fcap035-furg3）
+                local.friend_y3_urgency_force = true
             } else if let Some(v) = token.strip_prefix("deadline") {
                 local.deadline_urgency_scale = v.parse::<f32>()? / 100.0
             } else if token == "specialdynamic" {
@@ -731,7 +778,23 @@ impl LocalRamenTrainer {
     /// 价值，与休息无本质区别；友人次数有限（[0,2,5]），应留给"不溢出 + 低体力"
     /// 的完整价值回合，溢出回合退回休息。
     fn friend_hidden_not_overflow(&self, g: &RamenGame) -> bool {
-        g.ramen.special_feeling <= 2
+        // 完成硬门限开启时，出行完成优先于隐藏风味利用：风味溢出不再是阻断条件
+        // （否则晚回合窗口被闸门吃掉，5 次走不完）。
+        if self.config.friend_complete_required {
+            return true;
+        }
+        let cap = if g.current_year() >= 3 { self.config.friend_y3_overflow_cap } else { 2 };
+        g.ramen.special_feeling <= cap
+    }
+
+    /// 第三年还剩几个**可出行回合**（不含必赛、夏合宿、超级拉面回合）。
+    ///
+    /// 只用于第三年的配额紧迫度判断（[`Self::friend_y3_urgency_force`]）；
+    /// 统一按拉面剧本的固定回合结构（夏合宿 60-63、超级拉面 72-77）与本人赛程计算。
+    fn friend_outing_turns_left(&self, g: &RamenGame) -> i32 {
+        (g.turn()..=71)
+            .filter(|&t| !g.uma.is_race_turn(t) && !(60..64).contains(&t))
+            .count() as i32
     }
 
 
@@ -889,6 +952,51 @@ impl LocalRamenTrainer {
         Ok(best.unwrap_or((0, 0.0)))
     }
 
+    /// 单个带 Hint 人头的价值：默认固定 hint_bonus，启用第八轮实验后按精确模型折算。
+    fn hint_person_value(&self, g: &RamenGame, person_index: usize, tr: usize) -> f32 {
+        if self.config.hint_card_aware > 0.0 {
+            self.config.hint_card_aware * self.hint_event_expected_value(g, person_index, tr)
+        } else {
+            self.config.hint_bonus
+        }
+    }
+
+    /// 单次 Hint 事件的期望终局评分（第八轮实验，见 LocalRamenConfig::hint_card_aware）。
+    ///
+    /// 规则层（RamenGame::handle_hint_event -> push_hint_event）在训练成功且人头带 Hint
+    /// 时必然推 1 个事件（hint_count_bonus 另按次数计）：event_probs.hint_attr = 0.25 走
+    /// 属性事件 hint_event_value[train]，其余走技能事件，给 min(5, 1 + 卡面 hint_level)
+    /// 级 Hint（再受 max_hint_per_card - total_hints 截断；等级 <= 0 时只推属性事件）。
+    ///
+    /// 两者都按终局评分折算：属性增量走 RamenPolicy::status_gain（与训练同一凹凸曲线），
+    /// Hint 等级走 hint_pt_rate x pt_score_rate（6.5 x 2.0 = 13 分/级，见 Uma::total_pt 与
+    /// Uma::score_parts）。固定 hint_bonus 无法表达卡面 hint_level 差异，也表达不了
+    /// “这一位现在还有几级 Hint 可拿”；本函数是逐人头精确模型，无卡人头按 1 级处理。
+    fn hint_event_expected_value(&self, g: &RamenGame, person_index: usize, tr: usize) -> f32 {
+        let cons = global!(GAMECONSTANTS);
+        let attr_prob = crate::utils::system_event_prob("hint_attr").unwrap_or(0.25) as f32;
+        let mut attr_value = 0.0;
+        if let Some(row) = cons.hint_event_value.get(tr) {
+            for (i, &inc) in row.iter().take(5).enumerate() {
+                if inc > 0 {
+                    attr_value += self.policy.status_gain(g, i, inc);
+                }
+            }
+        }
+        let levels = match Game::deck_index_of(g, person_index) {
+            Some(di) => (1 + g.deck()[di].card_value().hint_level)
+                .min(5)
+                .min(cons.max_hint_per_card - g.deck()[di].total_hints),
+            None => 1
+        };
+        if levels <= 0 {
+            // 卡面 Hint 已满：规则层只推属性事件。
+            return attr_value;
+        }
+        let per_level = cons.hint_pt_rate * cons.pt_score_rate;
+        attr_value * attr_prob + (1.0 - attr_prob) * levels as f32 * per_level
+    }
+
     /// 按原人头顺序计算羁绊与 Hint 的长远价值，隐藏 Hint 模式由当前训练位决定。
     fn train_long_term(&self, g: &RamenGame, tr: usize, all_hint: bool) -> f32 {
         let ph = Self::phase(g.turn());
@@ -933,7 +1041,7 @@ impl LocalRamenTrainer {
                         } else {
                             1
                         };
-                        lt += self.config.hint_bonus * hp * repeats as f32
+                        lt += self.hint_person_value(g, i, tr) * hp * repeats as f32
                     }
                 }
                 PersonType::Card if x.hint() => {
@@ -942,7 +1050,7 @@ impl LocalRamenTrainer {
                     } else {
                         1
                     };
-                    lt += self.config.hint_bonus * hp * repeats as f32
+                    lt += self.hint_person_value(g, i, tr) * hp * repeats as f32
                 }
                 _ => {}
             }
@@ -1154,6 +1262,89 @@ impl LocalRamenTrainer {
                 .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)))
                 .map(|(i, _)| i)
                 .ok_or_else(|| anyhow::anyhow!("友人外出达到跨年总配额后没有其他合法动作"))?;
+        }
+        // 实验：第三年配额紧迫度强制补足（`friend_y3_urgency_force`）。
+        //
+        // 第三年可出行回合有限（必赛 + 夏合宿占掉大半），而动态估值只按"这一次值不值"
+        // 定价，没有任何"不补就作废"的紧迫项——实测第 5 次出行常因风味闸门/估值不敌
+        // 训练而走不完。这里在"剩余次数 > 剩余可出行回合数"时直接让出行赢，
+        // 且仍要求本次不溢出（受 `friend_y3_overflow_cap` 约束）。
+        if self.config.friend_y3_urgency_force
+            && g.current_year() >= 3
+            && a.get(c).is_some_and(|x| x.operation != Operation::FriendOuting)
+        {
+            let out_done = g.friend.out_used.iter().filter(|&&x| x).count() as i32;
+            let left = 5 - out_done;
+            // 第三年必须走完的次数：显式目标（`friend_y3_force_remaining`）优先，
+            // 否则用"第三年配额允许的剩余次数"= caps[2] - caps[1]。
+            let caps = self.config.friend_outing_cumulative_caps;
+            let y3_target = if self.config.friend_y3_force_remaining > 0 {
+                self.config.friend_y3_force_remaining
+            } else {
+                (caps[2].saturating_sub(caps[1])) as i32
+            };
+            let must_do = y3_target.min(left).max(0);
+            if must_do > 0 && must_do >= self.friend_outing_turns_left(g) && self.friend_hidden_not_overflow(g) {
+                if let Some(fi) = a.iter().position(|x| x.operation == Operation::FriendOuting) {
+                    if self.friend_outing_within_pacing(g) {
+                        c = fi;
+                    }
+                }
+            }
+        }
+        // 完成硬门限（`friend_complete_required`，默认开）：保证 5 次走完。
+        //
+        // 触发条件：剩余出行次数 ≥ 剩余可出行回合数 ⇒ 本回合不走就来不及了，直接
+        // 让出行赢（含第一年的下限检查：若剩余次数已超过后续全部可出行回合数，
+        // 则第一年也必须补）。不接受"来不及"的极端局面——该分支每回合都会重新
+        // 检查，故只要"剩余次数 ≤ 剩余可出行回合数"成立，就一定能在某个回合补足。
+        if self.config.friend_complete_required
+            && a.get(c).is_some_and(|x| x.operation != Operation::FriendOuting)
+            && self.friend_outing_within_pacing(g)
+        {
+            let out_done = g.friend.out_used.iter().filter(|&&x| x).count() as i32;
+            let left = 5 - out_done;
+            let turns_left = self.friend_outing_turns_left(g);
+            if left > 0 && left >= turns_left {
+                if let Some(fi) = a.iter().position(|x| x.operation == Operation::FriendOuting) {
+                    c = fi;
+                }
+            }
+        }
+        // 诊断：给最终中选的友人出行候选标注决策路径与次优对照。
+        //
+        // 用于区分两种性质完全不同的友人出行：
+        // - `恢复`（低体力守门内与休息二选一）：替换的是**休息**，体力缺口本来就要补，
+        //   机会成本最低；三年皆可承担。
+        // - `常规`（自由打分胜出）：替换的是**训练/比赛**，真实机会成本，
+        //   第三年自由回合少时最伤。
+        // `次优=` 给出不出行时本会选的动作及其分数，`Δ` 为友人分减次优分（负数表示
+        // 该回合友人是被守门路径选中、并非打分胜出）。纯日志，不参与打分。
+        if self.policy.collect_details && a.get(c).is_some_and(|x| x.operation == Operation::FriendOuting) {
+            let path = if recovery_guard { "恢复" } else { "常规" };
+            let best_alt = out
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != c)
+                .max_by(|(li, l), (ri, r)| l.score.total_cmp(&r.score).then_with(|| ri.cmp(li)));
+            if let Some((ai, alt)) = best_alt {
+                let tag = match a[ai].operation {
+                    Operation::Train(t) => format!("{:?}训练", t),
+                    Operation::Race => "比赛".to_string(),
+                    Operation::Rest => "休息".to_string(),
+                    Operation::NormalOuting => "普通出行".to_string(),
+                    Operation::Clinic => "治病".to_string(),
+                    _ => "其他".to_string()
+                };
+                out[c].reason = format!(
+                    "{} | 路径={} 次优={}({:.0}) Δ={:+.0}",
+                    out[c].reason,
+                    path,
+                    tag,
+                    alt.score,
+                    out[c].score - alt.score
+                );
+            }
         }
         Ok(c)
     }
@@ -1800,13 +1991,35 @@ impl RecommendedRamenTrainer {
     /// - `poN`：power 近上限衰减统一覆盖 = N/100（EXP-006e）；`p1o/p2o/p3oN` 分年
     /// - `pg[m]N`：power 短板追赶覆盖 = ±N/100（m 前缀=负号，'-' 是 token 分隔符不能用；EXP-006e）
     /// - `base`：无覆盖（对照）
+    /// - `supermodeN`：0默认二，1固定一，2固定三，3按终盘缺口和卡数选范围。
+    /// - `ptblendN`：近上限 PT 连续定价窗口 N/100 次训练，0 关闭（实验）。
+    /// - `hintlvN`：逐卡 Hint 精确估值倍率 = N/100，0 关闭（实验；见 [`LocalRamenConfig::hint_card_aware`]）。
     ///
     /// 未识别 token 直接报错，防止实验名拼错静默跑成 base。
+    /// 设置"友人出行必须走完 5 次"的完成硬门限（对应 `game_config.toml` 的
+    /// `friend_complete_required`）。返回 `self` 便于链式构造。
+    pub fn with_friend_complete_required(mut self, required: bool) -> Self {
+        for year in self.years.iter_mut() {
+            year.config.friend_complete_required = required;
+        }
+        self
+    }
+
     pub fn with_tokens(tokens: &str) -> Result<Self> {
         let mut trainer = Self::new();
         for token in tokens.split('-') {
             if token == "base" {
                 continue;
+            } else if let Some(v) = token.strip_prefix("supermode") {
+                let mode: u8 = v.parse()?;
+                anyhow::ensure!(mode <= 3, "supermode 需要0..3");
+                for year in trainer.years.iter_mut() { year.policy.config.super_choice_mode = mode; }
+            } else if let Some(v) = token.strip_prefix("ptblend") {
+                let turns: f32 = v.parse::<f32>()? / 100.0;
+                anyhow::ensure!(turns.is_finite() && (0.0..=10.0).contains(&turns), "ptblend 必须在 0..=1000");
+                for year in trainer.years.iter_mut() {
+                    year.policy.config.pt_cap_blend_turns = turns;
+                }
             } else if let Some(v) = token.strip_prefix("wisf") {
                 let floor: i32 = v.parse()?;
                 for year in trainer.years.iter_mut() {
@@ -1909,6 +2122,56 @@ impl RecommendedRamenTrainer {
                 for year in trainer.years.iter_mut() {
                     year.config.reserve_gain_mode = mode;
                 }
+            } else if let Some(v) = token.strip_prefix("fcap") {
+                // 友人出行累计配额（三位数按年编码，如 fcap135 → [1, 3, 5]）
+                anyhow::ensure!(v.len() == 3, "fcap 必须是三个数字，如 135: {v}");
+                let mut caps = [0usize; 3];
+                for (i, ch) in v.chars().enumerate() {
+                    caps[i] = ch
+                        .to_digit(10)
+                        .ok_or_else(|| anyhow::anyhow!("fcap 含非数字字符: {v}"))?
+                        as usize;
+                }
+                anyhow::ensure!(
+                    caps.windows(2).all(|w| w[0] <= w[1]) && caps[2] <= 5,
+                    "fcap 必须单调且不超过5: {v}"
+                );
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_outing_cumulative_caps = caps;
+                }
+            } else if let Some(v) = token.strip_prefix("fov3") {
+                // 第三年替代休息路径的隐藏风味上限（fov33 → 3；fov34 → 4 基本关闸）
+                let cap: i32 = v.parse()?;
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_y3_overflow_cap = cap;
+                }
+            } else if token == "freq" {
+                // 友人完成硬门限（默认由 config 决定；此 token 显式打开）
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_complete_required = true;
+                }
+            } else if token == "freqoff" {
+                // 显式关闭完成硬门限（对照实验）
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_complete_required = false;
+                }
+            } else if let Some(v) = token.strip_prefix("frem3") {
+                // 第三年必须走完的次数（frem33 → 必须走 3 次；配合 furg3 使用）
+                let n: i32 = v.parse()?;
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_y3_force_remaining = n;
+                }
+            } else if token == "furg3" {
+                // 第三年配额紧迫度强制补足（配合 fcap/frem3 使用，如 fcap025-furg3）
+                for year in trainer.years.iter_mut() {
+                    year.config.friend_y3_urgency_force = true;
+                }
+            } else if let Some(v) = token.strip_prefix("hintlv") {
+                let weight = v.parse::<f32>()? / 100.0;
+                anyhow::ensure!(weight.is_finite() && (0.0..=10.0).contains(&weight), "hintlv 必须在 0..=1000");
+                for year in trainer.years.iter_mut() {
+                    year.config.hint_card_aware = weight;
+                }
             } else {
                 anyhow::bail!("未知 token: {token}（完整: {tokens}）");
             }
@@ -1930,8 +2193,9 @@ impl RecommendedRamenTrainer {
             policy.vital_rest_eating = eating_rest;
             // 保守风险预算：只影响策略打分，不改变规则层真实失败率。
             policy.effective_ramen_failure = false;
-            // 残余收益折扣（方案 E）：主属性快满时打折副属性+PT，提前分流。初始 1.0 待矩阵验证。
-            policy.cap_discount_weight = 1.0;
+            // 副属性残余收益折扣（方案 E）：0 = 主属性接近上限时不再给副属性/PT 打折。
+            // 0.0 为第十二轮配对验收的组合值（token capd0）。
+            policy.cap_discount_weight = 0.0;
             // 智力体力豁免开启（2026-09-16 用户规则：高体力不练智选休息=漏洞、
             // 合宿疯狂休息=亏）：智训练体力增量 +5、失败阈值仅 32
             // （training_vital_threshold[4]，其他位 51-54）——体力 >=32 时练智近乎
@@ -1940,7 +2204,10 @@ impl RecommendedRamenTrainer {
             policy.wisdom_vital_floor = 32;
 
             let mut local = LocalRamenConfig::default();
-            local.status_reserve_max = 40.0;
+            // 预留上限空间：40 → 157（第十二轮配对验收组合值，token reserve157）。
+            local.status_reserve_max = 157.0;
+            // 预留惩罚按实际可增长量计算，已满位不再虚增透支（token rgn1）。
+            local.reserve_gain_mode = 1;
             local.dynamic_vital = true;
             local.probabilistic_hint = true;
             local.expected_fail = true;
@@ -1960,8 +2227,10 @@ impl RecommendedRamenTrainer {
             local.friend_future_hidden_weight = 0.0;
             // 动态属性平衡：按五维完成度修正训练边际价值（短板追赶 + 近上限衰减）。
             local.dynamic_status_balance = true;
-            local.status_gap_strength = 0.5;
-            local.status_overflow_strength = 0.5;
+            // 短板追赶 / 近上限衰减强度：0.5 / 0.5 → 4.98 / 3.04（第十二轮组合值，
+            // 对应 token g1498-g2498-g3498-o1304-o2304-o3304）。
+            local.status_gap_strength = 4.98;
+            local.status_overflow_strength = 3.04;
             local.ramen_lookahead_weight = 0.0;
             local.ramen_lookahead_samples = 1;
             local.effective_ramen_failure = false;
@@ -1980,20 +2249,31 @@ impl RecommendedRamenTrainer {
             local.y3_recovery_horizon = true;
             local.friend_outing_replaces_rest = true;
             local.friend_outing3_recovery_vital = 0;
-            local.friend_outing_cumulative_caps = [0, 2, 5];
+            // 友人出行跨年配额定档 [0,3,5]（2026-09-21 用户拍板）：第 1 年不启用
+            // （第一年出行实测在葛城王牌上硬亏 -628，t=-8.6）、第 2 年放宽到 3
+            // 以消化"提前的休息替代"、第 3 年补满 5。实测：第 2 年配额 2→3 两马娘
+            // 均在噪声内（+44 / -51），用满率 77%→80%；第 1 年开配额为纯亏。
+            local.friend_outing_cumulative_caps = [0, 3, 5];
             local.friend_rest_max_special = 4;
             local.deadline_urgency_scale = 0.0;
             local.dynamic_special_targets = true;
-            // 已满位训练 PT 定价：有彩圈 36（评分峰值，7 build×100 局 +533）；无彩圈档由下方 GA 方向上调（16→37）
-            // （上游 c0189d1 固化 pt_tradeoff_shining；GA 仍可通过 ParamOverride.pt_tradeoff_shining 覆盖）
-            policy.pt_tradeoff_shining = 36.0;
             // ===== GA 方向定稿（2026-09-17 ga_lab 合并，9 旋钮组合档）=====
             // 来源：ga_lab fork (479fb38) 跨轮一致 GA 方向；本地 CRN 配对验证
             // （4 马 × 2 种子块 = 420 局配对，组合档 Δ=+1394 t=12.55，8/8 单元显著）。
             // 注意：单项均≤0/惰性，收益来自组合交互；weakboost(ramen_weak_train_boost)
             // 单独 -1017 且拖累组合 → 明确不采纳。
-            policy.pt_tradeoff = 37.0;              // 满位普通档 16→37（GA 100% 上调）覆盖上行定稿
-            policy.pt_tradeoff_super = 35.0;        // 超拉面回合 0→35（GA 97%）
+            // ===== 第十二轮配对验收（2026-09-18）=====
+            // 两个独立随机卡组池（各 160 副全新卡组 × 300 局，同卡组同种子配对）上，本组合相对
+            // 上一版推荐组合（ptblend200-capd0-rgn1-supermode3-hintlv600）随机组 +130.4 [+93.6,+167.2]
+            // 与 +147.6 [+108.2,+187.0]；相对本文件改动前的默认 preset 累计 +517 / +552（同批配对均值可加）。
+            // 消融、验收池说明与限制见 experiments/validated_policy/README.md。
+            policy.pt_tradeoff = 44.25;             // 满位普通档 16→37（GA）→44.25（第十二轮）
+            policy.pt_tradeoff_super = 34.5;        // 超拉面回合 0→35（GA）→34.5（第十二轮）
+            policy.pt_tradeoff_shining = 25.0;      // 已满位有彩圈 36→25（第十二轮）
+            policy.pt_cap_blend_turns = 8.0;        // 近上限连续 PT 定价窗口 = 8.00 次训练（第十二轮）
+            policy.super_choice_mode = 3;           // 超级拉面按终盘属性缺口与卡型数选范围（第十二轮）
+            policy.outing_base = 0.0;               // 外出基准分 15→0（第十一轮消融 +15.2 [+12.1,+18.3]）
+            local.hint_card_aware = 6.0;            // 逐卡 Hint 倍率 0→6.00（沿用已发布档 hintlv600，第十二轮复核 675→600 零损失）
             policy.region_weak_cover_weight = 35.0; // 弱位覆盖 查表→35（GA 97%；>0 直值）
             policy.region_youqing_weight = 0.4;     // 友情词条 1.5→0.4（GA top 100% 降）
             local.hint_bonus = 8.0;                 // 掌握度 6→8
@@ -2035,6 +2315,23 @@ impl RecommendedRamenTrainer {
         } else {
             2
         }
+    }
+
+    /// 复用同年手写地区策略的候选打分（供 MCTS 地区候选预过滤使用同一先验）。
+    ///
+    /// 返回 `(手写 argmax 下标, 与 `actions` 严格同长同序的打分)`；`.score` 即
+    /// `RamenPolicy::decide_region` 的地区分（第 3 年含 `region_y3_single_focus`
+    /// 否决：不合格候选记 0）。调用点与手写路径一致：turn 2/23/47 → 年 idx 0/1/2。
+    pub fn region_prior(
+        &self, game: &RamenGame, actions: &[RamenAction]
+    ) -> Result<(usize, Vec<RamenPolicyOutput>)> {
+        let year_idx = match game.turn() {
+            2 => 0,
+            23 => 1,
+            47 => 2,
+            _ => Self::year(game)
+        };
+        self.years[year_idx].policy.decide_region(game, year_idx, actions)
     }
 }
 
@@ -3077,16 +3374,16 @@ mod tests {
         c.finish()
     }
 
-    /// 正式 preset 必须使用 v44 同种子回归胜出的友人跨年节奏。
+    /// 正式 preset 必须使用定档的友人跨年节奏 [0,3,5]（2026-09-21 拍板替换旧 [0,2,5]）。
     #[test]
     #[allow(clippy::panic)]
-    fn recommended_ramen_uses_025_friend_pacing() {
+    fn recommended_ramen_uses_035_friend_pacing() {
         let trainer = RecommendedRamenTrainer::new();
         let actual = trainer
             .years
             .each_ref()
             .map(|year| year.config.friend_outing_cumulative_caps);
-        let expected = [[0, 2, 5]; 3];
+        let expected = [[0, 3, 5]; 3];
         println!("正式友人累计出门配额: {actual:?}");
         if actual != expected {
             panic!("正式 preset 应使用 {expected:?}，实际为 {actual:?}");
@@ -4036,6 +4333,167 @@ mod tests {
         println!("未知 token trdxx 是否报错: {}", bad.is_err());
         assert!(bad.is_err(), "无法解析的 trd 值必须报错");
         Ok(())
+    }
+
+    /// 二轮组合：只按真实可增长属性计算预留惩罚，保留远离上限时的原结果。
+    #[test]
+    fn test_round2_clipped_reserve_boundaries() -> Result<()> {
+        use crate::{game::{InheritInfo, ramen::RamenGame}, gamedata::init_global,
+            utils::{Checks, get_workspace_root}};
+        std::env::set_current_dir(get_workspace_root()?)?;
+        init_global()?;
+        let mut game = RamenGame::newgame(102601,
+            &[302424,302894,303044,302924,303024,303054],
+            InheritInfo { blue_count:[15,3,0,0,0], extra_count:[0,30,0,0,30,30] })?;
+        game.base.turn=38;
+        // 2026-09-18：两条臂显式钉住 capd/reserve，机制验证不再随 new() 的 preset 漂移。
+        let base=RecommendedRamenTrainer::with_tokens("ptblend200-capd100-reserve40-rgn0")?;
+        let candidate=RecommendedRamenTrainer::with_tokens("ptblend200-capd0-reserve40-rgn1")?;
+        let mut c=Checks::new();
+        for y in 0..3 {
+            let mut expected=base.years[y].policy.config.clone();
+            expected.cap_discount_weight=0.0;
+            c.check(candidate.years[y].policy.config==expected,"policy 只取消副属性折扣");
+            c.check(candidate.years[y].config.reserve_gain_mode==1,"三年均按实际增量算预留");
+            c.check(candidate.years[y].config.status_reserve_max==base.years[y].config.status_reserve_max,
+                "保留预留阈值，不等于关闭预留机制");
+        }
+        let gain=[100,0,0,0,0,0];
+        // turn38 时 r=40*(76-38)/76=20；剩余10时，仅新增10有效。
+        for (space,want) in [(0,0.0),(10,45.0),(200,0.0)] {
+            game.uma.five_status[0]=game.uma.five_status_limit[0]-space;
+            let old=base.years[1].reserve_penalty(&game,&gain);
+            let new=candidate.years[1].reserve_penalty(&game,&gain);
+            println!("space={space}: old={old} clipped={new}");
+            c.check((new-want).abs()<0.001,"符合独立手算的实际增量惩罚");
+            if space==200 { c.check(old==new,"窗口外惩罚不变"); }
+            else { c.check(old>new,"溢出增量不再被重复惩罚"); }
+        }
+        c.finish()
+    }
+
+    /// 第八轮实验：逐卡 Hint 精确估值（token hintlvW）的 token 隔离、非法值与数值方向检查。
+    #[test]
+    fn test_round8_hint_card_aware() -> anyhow::Result<()> {
+        use crate::utils::Checks;
+        use crate::{
+            game::{InheritInfo, ramen::RamenGame},
+            gamedata::init_global,
+            utils::{get_workspace_root, init_test_logger}
+        };
+
+        let workspace_root = get_workspace_root()?;
+        std::env::set_current_dir(workspace_root)?;
+        let _ = init_test_logger("error");
+        let _ = init_global();
+
+        let base = RecommendedRamenTrainer::new();
+        let variant = RecommendedRamenTrainer::with_tokens("hintlv100")?;
+        let mut checks = Checks::new();
+        for year in 0..3 {
+            let got = &variant.years[year].config;
+            checks.check(base.years[year].config.hint_card_aware == 6.0, "preset 启用第十二轮验收的逐卡 Hint 估值");
+            checks.check(got.hint_card_aware == 1.0, "hintlv 写入三年");
+            checks.check(got.hint_bonus == base.years[year].config.hint_bonus
+                && got.max_base_score_sacrifice == base.years[year].config.max_base_score_sacrifice
+                && got.eat_requires_covered_train == base.years[year].config.eat_requires_covered_train,
+                "hintlv 不改动其他本地字段");
+        }
+        for bad in ["hintlvNaN", "hintlv-1", "hintlv1001"] {
+            checks.check(RecommendedRamenTrainer::with_tokens(bad).is_err(), "非法实验值报错");
+        }
+
+        // 满属性下属性分支为 0：每个带 Hint 人头的价值 = 0.75 x 等级 x (6.5 x 2.0)。
+        let mut game = RamenGame::newgame(
+            102601,
+            &[302424, 302894, 303044, 302924, 303024, 303054],
+            InheritInfo { blue_count: [15, 3, 0, 0, 0], extra_count: [0, 30, 0, 0, 30, 30] }
+        )?;
+        for i in 0..5 {
+            game.uma.five_status[i] = game.uma.five_status_limit[i];
+        }
+        let on = &variant.years[2];
+        let off_trainer = RecommendedRamenTrainer::with_tokens("hintlv0")?;
+        let off = &off_trainer.years[2];
+        let mut multi = false;
+        for person_index in 0..game.base.deck.len() {
+            let levels = (1 + game.base.deck[person_index].card_value().hint_level).min(5);
+            let got = on.hint_event_expected_value(&game, person_index, 0);
+            let want = 0.75 * levels as f32 * 6.5 * 2.0;
+            println!("card {person_index} hintLv={levels} value={got}");
+            checks.check((got - want).abs() < 0.01, "满属性下只剩技能分支");
+            checks.check(off.hint_person_value(&game, person_index, 0) == off.config.hint_bonus, "关闭时沿用固定值");
+            multi |= levels > 1;
+        }
+        checks.check(multi, "固定卡组存在多级 Hint 卡面");
+        checks.finish()
+    }
+
+    /// 实验参数仅改变三年的连续窗口，默认关闭且拒绝越界/非有限值。
+    #[test]
+    fn test_pt_cap_blend_token_isolation() -> anyhow::Result<()> {
+        use crate::utils::Checks;
+        let base = RecommendedRamenTrainer::new();
+        let variant = RecommendedRamenTrainer::with_tokens("ptblend200")?;
+        let mut checks = Checks::new();
+        for year in 0..3 {
+            let mut expected = base.years[year].policy.config.clone();
+            checks.check(expected.pt_cap_blend_turns==8.0,"preset 采用第十二轮验收窗口");
+            expected.pt_cap_blend_turns=2.0;
+            checks.check(variant.years[year].policy.config==expected,"只覆盖窗口字段");
+        }
+        for bad in ["ptblendNaN","ptblendinf","ptblend1001","ptblendbad"] {
+            checks.check(RecommendedRamenTrainer::with_tokens(bad).is_err(),"非法实验值报错");
+        }
+        println!("ptblend200 三年隔离与非法参数检查完成");
+        checks.finish()
+    }
+
+    /// 超级拉面开关只覆盖对应字段，固定对照和自适应模式都应用于三年策略。
+    #[test]
+    fn test_super_choice_token_isolation() -> Result<()> {
+        use crate::utils::Checks;
+        let base = RecommendedRamenTrainer::new();
+        let mut checks = Checks::new();
+        for mode in 0..=3 {
+            let variant = RecommendedRamenTrainer::with_tokens(&format!("supermode{mode}"))?;
+            for year in 0..3 {
+                let mut expected = base.years[year].policy.config.clone();
+                checks.check(expected.super_choice_mode == 3, "preset 采用第十二轮验收的自适应范围");
+                expected.super_choice_mode = mode;
+                checks.check(variant.years[year].policy.config == expected, "只覆盖超级拉面模式");
+            }
+        }
+        for bad in ["supermode4", "supermodeNaN", "supermode256", "supermode-1", "evreal3"] {
+            checks.check(RecommendedRamenTrainer::with_tokens(bad).is_err(), "非法或未保留开关报错");
+        }
+        println!("超级拉面模式的三年隔离与参数校验完成");
+        checks.finish()
+    }
+
+    /// 正式 preset 必须与第十二轮验收用的组合串逐位一致。
+    ///
+    /// 该串就是两个独立池上验收的那只（out/rmb/r3f 三项等于 preset 现值，无需 token）；
+    /// 窗口、PT 定价、缺口/溢出强度、预留口径与超级拉面模式一旦漂移，本测试直接失败，
+    /// 避免验收的是一个组合、线上跑的是另一个组合。
+    #[test]
+    fn preset_matches_validated_round12_combo() -> anyhow::Result<()> {
+        use crate::utils::Checks;
+        const COMBO: &str = "ptblend800-capd0-hintlv600-trd4425-trds3450-trdsh2500-g1498-g2498-g3498-o1304-o2304-o3304-reserve157-rgn1-supermode3";
+        let preset = RecommendedRamenTrainer::new();
+        let combo = RecommendedRamenTrainer::with_tokens(COMBO)?;
+        let mut checks = Checks::new();
+        for year in 0..3 {
+            let (p, c) = (&preset.years[year], &combo.years[year]);
+            checks.check(p.policy.config == c.policy.config, "三年策略配置与验收串逐位一致");
+            checks.check(p.config.hint_card_aware == c.config.hint_card_aware, "逐卡 Hint 倍率一致");
+            checks.check(p.config.status_gap_strength == c.config.status_gap_strength, "短板追赶强度一致");
+            checks.check(p.config.status_overflow_strength == c.config.status_overflow_strength, "近上限衰减强度一致");
+            checks.check(p.config.status_reserve_max == c.config.status_reserve_max, "预留上限一致");
+            checks.check(p.config.reserve_gain_mode == c.config.reserve_gain_mode, "预留口径一致");
+        }
+        println!("preset 与第十二轮验收组合串逐位一致");
+        checks.finish()
     }
 }
 

@@ -20,7 +20,7 @@ use serde::Serialize;
 use text_to_ascii_art::to_art;
 use umasim::{
     game::{Game, ramen::RamenStage},
-    gamedata::init_global_with_config,
+    gamedata::{init_global_with_config, RamenTrainerPolicy},
     neural::Evaluator,
     output::{DecisionSink, HumanReadableSink, StdoutJsonSink},
     search::SearchConfig,
@@ -30,13 +30,15 @@ use umasim::{
 
 use crate::{
     decision::{record, LastReasonSink, LuckScoreTracker, RecordingSink},
-    protocol::urafile::UraFileWatcher,
+    protocol::urafile::{self, UraFileWatcher},
+    ramen_nn::build_client_trainer,
     scenario::{onsen, ramen}
 };
 
 pub mod decision;
 pub mod plot;
 pub mod protocol;
+pub mod ramen_nn;
 pub mod scenario;
 pub mod utils;
 
@@ -174,7 +176,10 @@ async fn main_guard() -> Result<()> {
     let mut rng = StdRng::from_os_rng();
 
     // 温泉（onsen）MCTS 训练员
-    let mut trainer = MctsTrainer::new(mcts_config).verbose(true);
+    //
+    // `verbose` 只在 `--json` 模式打开：该开关会把「[回合 X] 均分/运气」经 `info!` 上屏，
+    // 而 human 模式下 sink 已用 `println!` 渲染同一份决策结果（双打印）。
+    let mut trainer = MctsTrainer::new(mcts_config).verbose(!json_mode);
     trainer.mcts_onsen = game_config.mcts_selected_onsen;
     // 这个设置在AI模式下不生效
     trainer.mcts_selection = "score".to_string();
@@ -183,17 +188,29 @@ async fn main_guard() -> Result<()> {
     // RamenMctsTrainer 绑 RamenGame，独立构造。stages 走 game_config.mcts.ramen_search_stages，
     // 与 umasim/src/main.rs 拉面路径口径一致。
     //
-    // verbose=false：关闭 trainer 内部 `info!("[回合 X] 首选...")` 的 `log::info!` 上屏
-    // （避免与下方 human mode 下手动调 `render_reason_lines` 双打印，且
-    // umaai 默认关 log，trainer 走 info! 看不到）。DecisionReasonData 通过
-    // `with_reason_sink(LastReasonSink)` 缓存到 `reason_slot`。
+    // `verbose` 现在只推开训练员自己的摘要日志（`[MCTS][回合 X] 阶段 … N 候选 -> …`
+    // 与终局多维差异 `log_terminal_breakdown`）：决策理由文字**不再**经 `log::info!`
+    // 上屏（`emit_decision_reason` 只发原始数据），human 模式统一由 `scenario::ramen`
+    // 从 `LastReasonSink` 取回后 `println!` 渲染 —— 不会再有「一组 log + 一组 print」。
+    // DecisionReasonData 始终经 `with_reason_sink(LastReasonSink)` 缓存到 `reason_slot`。
     let ramen_mcts_config = SearchConfig::new_game_config(&game_config);
     let ramen_stages = umasim::trainer::RamenSearchStages::parse(&game_config.mcts.ramen_search_stages)?;
     let reason_slot = LastReasonSink::new();
-    let ramen_trainer = RamenMctsTrainer::new(ramen_mcts_config)
+    let ramen_mcts = RamenMctsTrainer::new(ramen_mcts_config)
         .with_stages(ramen_stages)
-        .verbose(true)
+        .with_friend_complete_required(game_config.friend_complete_required)
+        .verbose(!json_mode)
         .with_reason_sink(reason_slot.clone());
+    // 动作决策由 `ramen_trainer_policy` 决定（默认 mcts，与既有逻辑相同）。
+    // 网络模型在此加载一次；未开 onnx feature 或模型缺失时报错退出。
+    let ramen_trainer = build_client_trainer(&game_config, ramen_mcts)?;
+    info!(
+        "{}",
+        format!("拉面决策: {}", ramen_trainer.label()).bright_yellow()
+    );
+    if game_config.ramen_trainer_policy == RamenTrainerPolicy::Nn {
+        info!("ramen_trainer_policy = \"nn\"：动作决策由网络直接给出，[mcts] 搜索配置不再生效");
+    }
 
     // Phase 4 feature 拆分后，onnx 评估器路径已 cfg gate 到 `onnx` feature。
     // 当前通道层不依赖 onnx（不需要 tract-onnx 巨大依赖链），强制走 MctsTrainer
@@ -241,7 +258,16 @@ async fn main_guard() -> Result<()> {
     // （meta.json 结束时间 / end_reason），避免 Ctrl-C 丢局尾数据行。
     let watch_result: Result<()> = (|| {
         loop {
-            let contents = watcher.watch("thisTurn.json")?;
+            let raw = watcher.watch()?;
+            // 终局帧（育成结束·点技能前）：**不进决策链路**——不派发解析、
+            // 不发 compute_* 事件；只把真机终局数据落盘并触发本局收尾打包
+            // （见 `record::on_final`）。两信道判别落在文件名上（用户拍板：终局帧
+            // 走独立文件、payload 扁平不带判别字段）。
+            if raw.file == urafile::TARGET_FINAL_SCORE {
+                record::on_final(&raw.contents);
+                continue;
+            }
+            let contents = raw.contents;
             // 收到一份新 JSON：通知 AIRed "开始计算本回合"
             emit_info("compute_start");
             // 按 baseGame.scenarioId 分发（12=温泉 / 14=拉面）到对应场景模块
@@ -332,20 +358,10 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::{env, path::Path, sync::mpsc};
-
     use anyhow::Result;
-    use colored::Colorize;
     use lexopt::prelude::*;
-    use log::info;
-    use notify::{Event, RecursiveMode, Watcher};
-    use umasim::{gamedata::init_global, utils::init_logger};
 
     use super::Args;
-    use crate::protocol::{
-        GameStatusOnsen,
-        urafile::{UraFileWatcher, parse_game}
-    };
 
     /// 把 lexopt::Parser + 解析逻辑包成一个 helper（与 `parse_args` 同结构，
     /// 但用 `from_iter` 喂手工 vec 避免依赖真实 env arg）
@@ -388,41 +404,4 @@ mod tests {
         assert!(result.is_err(), "未知参数必须报错");
     }
 
-    #[tokio::test]
-    async fn test_watch() -> Result<()> {
-        let local_app_path = env::var("LOCALAPPDATA")?;
-        let urafile_path = format!("{local_app_path}/UmamusumeResponseAnalyzer/PluginData/SendGameStatusPlugin/");
-
-        let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
-        let mut watcher = notify::recommended_watcher(tx)?;
-        println!("{urafile_path}");
-        watcher.watch(Path::new(&urafile_path), RecursiveMode::NonRecursive)?;
-        loop {
-            let event = rx.recv()??;
-            println!("{event:?}");
-        }
-    }
-
-    #[test]
-    fn test_urafile() -> Result<()> {
-        // 2. 根据配置初始化日志
-        init_logger("test", "info")?;
-
-        // 3. 再初始化全局数据
-        init_global()?;
-        let mut watcher = UraFileWatcher::init()?;
-        loop {
-            let contents = watcher.watch("thisTurn.json")?;
-            match parse_game::<GameStatusOnsen>(&contents) {
-                Ok(game) => {
-                    info!("{}", game.explain_distribution()?);
-                    println!("----------");
-                }
-                Err(e) => {
-                    println!("{}", format!("解析回合信息出错: {e}").red());
-                    println!("----------");
-                }
-            }
-        }
-    }
 }

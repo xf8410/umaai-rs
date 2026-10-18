@@ -85,6 +85,20 @@ pub struct RamenState {
     /// 写入点在 `fill_feeling_gauge`（`is_shining` 时累加）。**纯观测**。
     #[serde(default)]
     pub yearly_friend_turns: [i32; 3],
+    /// 观测用：逐年友人出行次数（下标 0/1/2 = 第 1/2/3 年）。
+    ///
+    /// 写入点在 [`super::action::RamenAction::do_friend_outing`] 实际落地出行时。
+    /// **纯观测**，用于诊断友人跨年配额（`friend_outing_cumulative_caps`）是否被
+    /// 赛程挤掉——第三年必赛多时自由回合少，配额用不完即损失隐藏风味补给。
+    #[serde(default)]
+    pub yearly_friend_outings: [i32; 3],
+    /// 观测用：逐年友人出行时**浪费**的隐藏风味数（出行固定 +2，上限 4）。
+    ///
+    /// 出行前库存为 `s` 时浪费 `max(0, s + 2 - 4)`。库存越高浪费越多：第 3 年夏合宿
+    /// （turn 60 +2 / 61-63 各 +1）后库存易满，此时出行只补到上限、实际补给打折。
+    /// **纯观测**。
+    #[serde(default)]
+    pub yearly_friend_flavor_waste: [i32; 3],
     /// 观测用：逐年诀窍获得数（槽满 [`GAUGE_LIMIT`] 清零 +1 的次数）。
     ///
     /// 写入点在 `add_gauge` 清零分支。**纯观测**。
@@ -207,6 +221,13 @@ pub struct RamenGame {
     pub current_effect: RamenEffect,
     /// 是否能触发分身
     pub deck_can_split: bool,
+    /// 超级拉面一次性赛后加成（`finals_effect.base.saihou`）是否已应用（幂等标记）
+    ///
+    /// 该加成累加到 `base.uma.race_bonus`，**不进** `RamenState`、不参与协议序列化：
+    /// 协议帧不含 `raceBonus`，重放时由 `GameStatusRamen::into_game` 在 turn>=72 帧上
+    /// 补调 [`Self::apply_super_ramen_saihou`]。此标记保证「模拟路径（`run_begin`）」与
+    /// 「重放路径（`into_game`）」合计只生效一次，不重复加。
+    pub super_ramen_saihou_applied: bool,
     /// 规则层事件 RNG（可选）
     ///
     /// `Game::next()` 中的吃面效果落地（分身分配）与 RMJ 事件使用此 RNG；
@@ -334,6 +355,7 @@ impl RamenGame {
             ramen: RamenState::default(),
             current_effect: RamenEffect::default(),
             deck_can_split: false,
+            super_ramen_saihou_applied: false,
             internal_rng: None,
             rule_master: None,
             turn_fixed: None,
@@ -388,6 +410,7 @@ impl RamenGame {
             ramen: RamenState::default(),
             current_effect: RamenEffect::default(),
             deck_can_split,
+            super_ramen_saihou_applied: false,
             internal_rng: None,
             rule_master: None,
             turn_fixed: None,
@@ -397,8 +420,18 @@ impl RamenGame {
     }
 
     /// 添加友人卡和NPC（第2回合开始）
+    ///
+    /// 两段式入口的薄包装 = [`Self::add_friend_card`] + [`Self::add_npcs`]。
+    /// **不幂等**——调用方需自行保证人头尚未加入；回合开始时的按需补齐见
+    /// `RamenGame::manage_persons_on_turn_start`（各自判存在性）。
     pub fn add_friend_and_npcs(&mut self) -> Result<()> {
-        // 添加友人卡（card_type >= 5），并更新 friend.person_index
+        self.add_friend_card()?;
+        self.add_npcs();
+        Ok(())
+    }
+
+    /// 添加友人卡人头（`card_type >= 5`），并更新 `friend.person_index`
+    pub fn add_friend_card(&mut self) -> Result<()> {
         let friend_persons: Vec<BasePerson> = self
             .deck
             .iter()
@@ -410,7 +443,11 @@ impl RamenGame {
             self.add_person(p);
             self.friend.person_index = idx;
         }
-        // 添加5个NPC
+        Ok(())
+    }
+
+    /// 添加5个NPC人头
+    pub fn add_npcs(&mut self) {
         for &npc_id in NPC_CHARA_IDS {
             self.add_person(BasePerson {
                 person_index: 0,
@@ -422,7 +459,6 @@ impl RamenGame {
                 card_id: None
             });
         }
-        Ok(())
     }
 
     /// 添加记者（第12回合开始）
