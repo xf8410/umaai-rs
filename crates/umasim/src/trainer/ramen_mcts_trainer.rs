@@ -1613,7 +1613,9 @@ mod tests {
         // 变化）后训练评分上移，训练阶段在 RamenSelect 中提前定型/跳出，落到
         // SpecialSelect 缓存路径的调用量 30→31；重搜数仍为 0（缓存命中语义未变），
         // 调用数基准重抓。
-        c.check(special_calls == 31, "SpecialSelect 调用数与改动前逐位相同");
+        // 2026-10 同步 upstream/master 后训练评分下移，训练阶段更早定型，
+        // SpecialSelect 缓存命中路径调用量 31→28，重搜数仍 0，调用数重抓。
+        c.check(special_calls == 28, "SpecialSelect 调用数与改动前逐位相同");
         c.check(special_searches == 0, "SpecialSelect 重搜数与改动前逐位相同");
         // 再留一条与具体数字解耦的语义上界，防止将来重抓快照时把比例抬上去
         c.check(

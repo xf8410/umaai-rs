@@ -2494,7 +2494,7 @@ pub struct ParamOverride {
     pub friend_outing_replaces_rest: Option<bool>,
     /// 第三年友人外出体力恢复量（preset 0 = 关闭）。
     pub friend_outing3_recovery_vital: Option<i32>,
-    /// 友人外出累计上限（按年，preset [0, 2, 5]，累计口径须单调且 ≤5）。
+    /// 友人外出累计上限（按年，preset [0, 3, 5]，累计口径须单调且 ≤5）。
     pub friend_outing_cumulative_caps: [Option<usize>; 3],
     /// 动态特殊目标开关（preset `true`）。
     pub dynamic_special_targets: Option<bool>
@@ -3115,8 +3115,8 @@ mod tests {
         c.check(from_obs.years[0].policy.config.vital_rest == 40, "第1年 vital_rest preset = 40");
         c.check(from_obs.years[0].policy.config.rest_target_vital == 55, "第1年 rest_target_vital preset = 55");
         c.check(
-            from_obs.years[0].config.friend_outing_cumulative_caps == [0, 2, 5],
-            "友人外出累计上限 preset = [0, 2, 5]"
+            from_obs.years[0].config.friend_outing_cumulative_caps == [0, 3, 5],
+            "友人外出累计上限 preset = [0, 3, 5]"
         );
         c.check(from_obs.years[0].config.dynamic_vital, "dynamic_vital preset = true");
 

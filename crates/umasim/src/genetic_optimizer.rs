@@ -56,7 +56,7 @@ pub mod preset_baseline {
     /// 第三年吃面前软目标体力 preset。
     pub const Y3_PRE_TARGET: i32 = 25;
     /// 友人外出累计上限 preset（按年，累计口径）。
-    pub const FRIEND_CAPS: [usize; 3] = [0, 2, 5];
+    pub const FRIEND_CAPS: [usize; 3] = [0, 3, 5];
     /// 智力训练体力豁免下限 preset（`i32::MAX` = 不豁免）。
     pub const WISDOM_VITAL_FLOOR_OFF: i32 = i32::MAX;
 }
@@ -153,7 +153,7 @@ pub const GENE_SPECS: &[GeneSpec] = &[
     f_gene!("pt_rate_y1", GeneLayer::Policy, 8.0, 96.0, 56.0, 0),
     f_gene!("pt_rate_y2", GeneLayer::Policy, 8.0, 96.0, 64.0, 1),
     f_gene!("pt_rate_y3", GeneLayer::Policy, 8.0, 96.0, 64.0, 2),
-    f_gene!("pt_tradeoff", GeneLayer::Policy, 0.0, 64.0, 37.0),
+    f_gene!("pt_tradeoff", GeneLayer::Policy, 0.0, 64.0, 44.25),
     GeneSpec {
         name: "pt_tradeoff_shining",
         layer: GeneLayer::Policy,
@@ -165,8 +165,8 @@ pub const GENE_SPECS: &[GeneSpec] = &[
         preset: None,
         year: None
     },
-    f_gene!("pt_tradeoff_super", GeneLayer::Policy, 0.0, 64.0, 35.0),
-    f_gene!("cap_discount_weight", GeneLayer::Policy, 0.0, 1.5, 1.0),
+    f_gene!("pt_tradeoff_super", GeneLayer::Policy, 0.0, 64.0, 34.5),
+    f_gene!("cap_discount_weight", GeneLayer::Policy, 0.0, 1.5, 0.0),
     f_gene!("failure_penalty", GeneLayer::Policy, 10.0, 200.0, 60.0),
     b_gene!("effective_ramen_failure", GeneLayer::Policy, 0.0),
     f_gene!("shining_bonus", GeneLayer::Policy, 10.0, 150.0, 60.0),
@@ -177,7 +177,7 @@ pub const GENE_SPECS: &[GeneSpec] = &[
     f_gene!("race_panel_discount", GeneLayer::Policy, 0.05, 1.0, 0.3),
     f_gene!("race_free_urgency_weight", GeneLayer::Policy, 200.0, 6000.0, 2000.0),
     i_gene!("race_gate_slack", GeneLayer::Policy, 0.0, 3.0, 1.0),
-    f_gene!("outing_base", GeneLayer::Policy, 3.0, 40.0, 15.0),
+    f_gene!("outing_base", GeneLayer::Policy, 0.0, 40.0, 0.0),
     f_gene!("friend_outing_bonus", GeneLayer::Policy, 10.0, 120.0, 45.0),
     f_gene!("ramen_pt_weight", GeneLayer::Policy, 0.0, 10.0, 2.0),
     f_gene!("ramen_effect_weight", GeneLayer::Policy, 0.0, 10.0, 3.0),
@@ -199,10 +199,10 @@ pub const GENE_SPECS: &[GeneSpec] = &[
     i_gene!("feeling_overflow_threshold", GeneLayer::Local, 4.0, 20.0, 8.0),
     f_gene!("overflow_value", GeneLayer::Local, 0.0, 20.0, 8.0),
     f_gene!("max_base_score_sacrifice", GeneLayer::Local, 40.0, 400.0, 200.0),
-    f_gene!("status_reserve_max", GeneLayer::Local, 0.0, 120.0, 40.0),
+    f_gene!("status_reserve_max", GeneLayer::Local, 0.0, 200.0, 157.0),
     b_gene!("dynamic_status_balance", GeneLayer::Local, 1.0),
-    f_gene!("status_gap_strength", GeneLayer::Local, 0.0, 2.0, 0.5),
-    f_gene!("status_overflow_strength", GeneLayer::Local, 0.0, 2.0, 0.5),
+    f_gene!("status_gap_strength", GeneLayer::Local, 0.0, 6.0, 4.98),
+    f_gene!("status_overflow_strength", GeneLayer::Local, 0.0, 5.0, 3.04),
     b_gene!("dynamic_vital", GeneLayer::Local, 1.0),
     b_gene!("probabilistic_hint", GeneLayer::Local, 1.0),
     b_gene!("expected_fail", GeneLayer::Local, 1.0),
@@ -1506,8 +1506,10 @@ mod tests {
     // 2026-09-17 重录（fork master）：上游合并 875dd2c（9 旋钮 preset 定稿 + 评估
     // 核心/trainer/policy 行为变化）后实测 64752→92393。GA 的零差异门是
     // "覆盖层 ≡ 现行为"的路径等价（通道 A/B 对比），本锚点只用于锁定当前基线可复现。
-    const MASTER_ANCHOR_SCORE: i32 = 92393;
-    const MASTER_ANCHOR_FIVE: [i32; 5] = [3337, 2445, 2107, 1230, 1251];
+    // 2026-10 同步 upstream/master 后回到旧口径对齐上游（与 bench.rs 同源），重抓
+    // 92393→62918，五维 [3337,2445,2107,1230,1251]→[3337,1900,2081,983,1563]。
+    const MASTER_ANCHOR_SCORE: i32 = 62918;
+    const MASTER_ANCHOR_FIVE: [i32; 5] = [3337, 1900, 2081, 983, 1563];
 
     /// 测试引导：工作目录 + 日志 + 全局数据（与 bench.rs 测试同款）。
     fn bootstrap() -> Result<()> {
@@ -1658,14 +1660,14 @@ mod tests {
         c.check(preset_ov.vital_rest == Some(40), "vital_rest 回环 = Some(40)");
         c.check(preset_ov.rest_target_vital == Some(55), "rest_target_vital 回环 = Some(55)");
         c.check(
-            preset_ov.friend_outing_cumulative_caps == [Some(0), Some(2), Some(5)],
-            "caps 回环 = [Some(0), Some(2), Some(5)]"
+            preset_ov.friend_outing_cumulative_caps == [Some(0), Some(3), Some(5)],
+            "caps 回环 = [Some(0), Some(3), Some(5)]"
         );
         c.check(preset_ov.wisdom_vital_floor.is_none(), "wisdom_vital_floor 回环 = None（preset 不豁免不可单值表示）");
         c.check(preset_ov.pt_tradeoff_shining.is_none(), "pt_tradeoff_shining 回环 = None（动态 preset 不可单值表示）");
         c.check(preset_ov.eat_requires_training == Some(true), "eat_requires_training 回环 = Some(true)");
         c.check(preset_ov.dynamic_special_targets == Some(true), "dynamic_special_targets 回环 = Some(true)");
-        c.check(preset_ov.status_gap_strength == Some(0.5), "status_gap_strength 回环 = Some(0.5)");
+        c.check(preset_ov.status_gap_strength == Some(4.98), "status_gap_strength 回环 = Some(4.98)");
         c.check(preset_ov.ramen_window_weight == Some(0.15), "ramen_window_weight 回环 = Some(0.15)（2026-09-17 GA 定稿同步）");
 
         // 2.5) preset≠Default 陷阱位：GA 基线必须锚在 preset 值，不是 Default。
@@ -1673,8 +1675,8 @@ mod tests {
         //      LocalRamenConfig::default() dynamic_status_balance=false、
         //      effective_ramen_failure preset=false 而 Default=true（policy.rs / local_ramen_trainer.rs）。
         c.check(
-            preset_ov.cap_discount_weight == Some(1.0),
-            "cap_discount_weight 锚 = preset 1.0（Default 0.0=机制全关，严禁当基线）"
+            preset_ov.cap_discount_weight == Some(0.0),
+            "cap_discount_weight 锚 = preset 0.0（第十二轮 capd0，残余折扣全关）"
         );
         c.check(
             preset_ov.dynamic_status_balance == Some(true),
@@ -2120,13 +2122,13 @@ mod tests {
             ("vital_rest", 1.0f32),                        // Some(70) ≠ preset 40
             ("shining_bonus", 1.0),                        // Some(150) ≠ 60
             ("eat_requires_training", 0.0),                // Some(false) ≠ true
-            ("friend_outing_cumulative_caps_y1", 1.0),     // [5,5,5] ≠ [0,2,5]
+            ("friend_outing_cumulative_caps_y1", 1.0),     // [5,5,5] ≠ [0,3,5]
             ("friend_outing_cumulative_caps_y2", 1.0),
             ("friend_outing_cumulative_caps_y3", 1.0),
             ("pt_rate_y2", 1.0),                           // Some(96) ≠ 64
             ("wisdom_vital_floor", 1.0),                   // 启用豁免（repair 会裁到 rest-1）
             ("dynamic_status_balance", 0.0),               // Some(false)
-            ("status_gap_strength", 1.0)                   // Some(2.0) ≠ 0.5
+            ("status_gap_strength", 1.0)                   // Some(6.0) ≠ 4.98
         ] {
             genome.0[gene_index(name)?] = g;
         }
