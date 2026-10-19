@@ -35,6 +35,8 @@ on:
         required: true
         default: '30'
         type: string
+  push:
+    branches: [feat/nn-special-quota]
 
 jobs:
   train:
