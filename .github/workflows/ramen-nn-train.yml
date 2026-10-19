@@ -1,0 +1,125 @@
+name: ramen-nn-train
+
+# 拉面杯 NN 蒸馏模型训练：ramen_export_npy(--raw) → labels.py → train.py → export_onnx.py
+#
+# 数据源 data754/prod_n4096
+#   record_ordered_rollouts=true / search_n=4096 / input_dim=754 / policy_dim=234
+#   采样空间指纹 6c30529e9333fb94 与 sampler.rs 的 GEN1_SPACE_HASH_V1 一致，可用当前代码导出。
+#
+# 产物：model.onnx + model.onnx.json（含 value_normalization）+ best.pt + 训练/标签 sidecar，
+# 供 ramen_root_bench --rollout-model 端到端对比 GBDT leaf / NN leaf / Full rollout。
+
+on:
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 数据集（data754 下的目录名）
+        required: true
+        default: prod_n4096
+        type: string
+      epochs:
+        description: 训练 epoch 数
+        required: true
+        default: '200'
+        type: string
+  push:
+    branches: [feat/nn-train]
+
+concurrency:
+  group: ramen-nn-train
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      DATASET: ${{ github.event.inputs.dataset || 'prod_n4096' }}
+      EPOCHS: ${{ github.event.inputs.epochs || '200' }}
+
+    steps:
+      - name: 检出代码（排除 data754 大数据）
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            /*
+            !/data754
+          sparse-checkout-cone-mode: false
+
+      - name: 检出数据集 data754/${{ env.DATASET }}
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: data754/${{ env.DATASET }}
+          sparse-checkout-cone-mode: false
+          path: dataset
+          fetch-depth: 1
+
+      - name: 拼接分卷并解包
+        run: |
+          set -euo pipefail
+          D="dataset/data754/$DATASET"
+          ls -lh "$D"
+          mkdir -p work/extracted
+          cat $(ls "$D"/*.tar.gz.part* | sort) > work/merged.tar.gz
+          tar -xzf work/merged.tar.gz -C work/extracted
+          EXTRACT_DIR=$(find work/extracted -name 'part_*.bin' | head -1 | xargs dirname)
+          echo "解包后 part 目录: $EXTRACT_DIR"
+          echo "part_*.bin 数量: $(find "$EXTRACT_DIR" -name 'part_*.bin' | wc -l)"
+          test -f "$EXTRACT_DIR/manifest.json" && echo "manifest: OK" || echo "manifest: MISSING"
+          echo "EXTRACT_DIR=$EXTRACT_DIR" >> "$GITHUB_ENV"
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: 安装 Python 依赖
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy onnx onnxruntime
+
+      - name: 导出 npy（--raw 含完整 rollout 列）
+        run: |
+          cargo run --release -p umasim --bin ramen_export_npy -- \
+            --input "$EXTRACT_DIR" \
+            --output-dir npy_v1 --raw
+          echo "=== meta.json ==="
+          cat npy_v1/meta.json
+          ls -lh npy_v1/
+
+      - name: 生成训练标签
+        run: |
+          python scripts/ramen_nn/labels.py --input npy_v1 --output labels_v1
+          echo "=== labels.json ==="
+          cat labels_v1/labels.json 2>/dev/null || ls -lh labels_v1/
+
+      - name: 训练网络
+        run: |
+          python scripts/ramen_nn/train.py \
+            --data npy_v1 --labels labels_v1 \
+            --output-dir saved_models/ramen_v1 \
+            --device cpu \
+            --epochs "$EPOCHS"
+
+      - name: 导出 ONNX
+        run: |
+          python scripts/ramen_nn/export_onnx.py \
+            --checkpoint saved_models/ramen_v1/best.pt \
+            --output saved_models/ramen_v1/model.onnx
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ramen-nn-${{ env.DATASET }}
+          path: |
+            saved_models/ramen_v1/model.onnx
+            saved_models/ramen_v1/model.onnx.json
+            saved_models/ramen_v1/best.pt
+            saved_models/ramen_v1/*.json
+            npy_v1/meta.json
+            labels_v1/*.json
+          retention-days: 90
+          if-no-files-found: error
