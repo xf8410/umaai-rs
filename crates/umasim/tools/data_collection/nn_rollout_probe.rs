@@ -105,12 +105,9 @@ fn main() -> Result<()> {
         bail!("NN_ROLLOUT_MAX_TURN 必须是非负整数");
     }
 
-    let stages = match stages_name.as_str() {
-        "train" => RamenSearchStages::train_only(),
-        "all" => RamenSearchStages::all(),
-        "none" => RamenSearchStages::none(),
-        other => bail!("未知 NN_ROLLOUT_STAGES: {other}（可选 train / all / none）")
-    };
+    // 支持逗号分隔的细粒度组合：train / ramen / special / region / super，
+    // 也可单独用 all / none。例：`train,ramen` 定位「选面+隐藏风味」是否拖后腿。
+    let stages = RamenSearchStages::parse(&stages_name)?;
 
     std::env::set_current_dir(get_workspace_root()?)?;
     init_global_with_config(&load_game_config()?)?;

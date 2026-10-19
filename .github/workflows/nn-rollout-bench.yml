@@ -21,7 +21,7 @@ on:
         required: false
         default: '61444'
       stages:
-        description: '搜索阶段 train / all / none'
+        description: '搜索阶段：train/all/none，或逗号组合 train,ramen,region,super'
         required: false
         default: 'train'
       release_name:
