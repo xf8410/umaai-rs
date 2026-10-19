@@ -201,6 +201,13 @@ where
     /// 为它引入一层泛型参数只会污染所有调用点。
     batch_rollout: Option<Arc<dyn RamenBatchRollout>>,
 
+    /// GBDT leaf 估值器（**仅拉面使用**，`max_depth > 0` 截断估值）
+    ///
+    /// 置上之后，[`FlatSearch::<RamenGame>::search`] 在 `max_depth > 0` 时走
+    /// [`Self::simulate_gbdt_leaf`] 截断路径：模拟到 `max_depth` 回合后用 GBDT
+    /// 对 754 维局面特征同步估「期望终局分」，替代跑到底。纯 CPU，不挂 GPU。
+    gbdt_leaf: Option<Arc<crate::game::ramen::gbdt::GbdtModel>>,
+
     /// 成本探针出口（**仅测量用**，默认 `None`）
     ///
     /// 置上之后每次 [`Self::search_with_terminal`] 结束会追加一条 [`SearchProbe`]。
@@ -313,6 +320,7 @@ where
             rollout_batch_size: 1,
             strict_rollout: false,
             batch_rollout: None,
+            gbdt_leaf: None,
             probe: None
         }
     }
@@ -334,6 +342,12 @@ where
     /// 见 [`RamenBatchRollout`]：只替换「rollout 怎么跑」，排序与统计仍走内核。
     pub fn with_batch_rollout(mut self, backend: Arc<dyn RamenBatchRollout>) -> Self {
         self.batch_rollout = Some(backend);
+        self
+    }
+
+    /// 挂上 GBDT leaf 估值器（仅拉面路径生效，`max_depth > 0` 截断估值用）
+    pub fn with_gbdt_leaf(mut self, model: Arc<crate::game::ramen::gbdt::GbdtModel>) -> Self {
+        self.gbdt_leaf = Some(model);
         self
     }
 
@@ -1148,6 +1162,50 @@ impl FlatSearch<OnsenGame> {
 }
 
 impl FlatSearch<RamenGame> {
+    /// 单次 rollout，跑到终局或 `max_depth` 截断处（GBDT leaf 估值，纯 CPU）
+    ///
+    /// CRN 语义与 [`Self::simulate_common`] 一致：同一 rollout 序号在所有候选上
+    /// 共享，`seed` 同时用于决策 RNG 与 `fork_for_rollout`。
+    ///
+    /// 截断分支用 GBDT 对 754 维局面特征同步估「期望终局分」，替代跑完剩余回合。
+    /// 终局记录在截断时读的是中途面板，仅作观测、不参与排序。
+    fn simulate_gbdt_leaf(
+        &self, game: &RamenGame, action: &RamenAction, seed: u64,
+    ) -> Result<RolloutOutcome<RamenTerminal>> {
+        let rng = &mut StdRng::seed_from_u64(seed);
+        let mut sim_game = game.fork_for_rollout(seed);
+        sim_game.apply_root_action(action, rng)?;
+
+        let start_turn = sim_game.turn();
+        let max_depth = self.config.max_depth as i32;
+        let mut finished = false;
+        loop {
+            if !sim_game.next() {
+                finished = true;
+                break;
+            }
+            sim_game.run_stage(&self.rollout_trainer, rng)?;
+            if (sim_game.turn() - start_turn) >= max_depth {
+                break;
+            }
+        }
+        if finished || sim_game.turn() >= sim_game.max_turn() {
+            sim_game.on_simulation_end(&self.rollout_trainer, rng)?;
+            let s = sim_game.search_score();
+            return Ok(RolloutOutcome { score: s, terminal: RamenTerminal::from_game(&sim_game) });
+        }
+        // 截断：GBDT 同步估分，不挂起、不上 GPU
+        let model = self.gbdt_leaf.as_ref()
+            .ok_or_else(|| anyhow!("max_depth>0 但未配置 GBDT leaf 估值器"))?;
+        let features = crate::game::ramen::features::encode(&sim_game)?;
+        let value = model.predict(&features);
+        // score_pt 维持当前局面的 PT 偏好相对差，避免截断臂与 full 臂口径漂移
+        let cur = sim_game.search_score();
+        let pt_delta = cur.score_pt - cur.score;
+        let score = SearchScore { score: value, score_pt: value + pt_delta };
+        Ok(RolloutOutcome { score, terminal: RamenTerminal::from_game(&sim_game) })
+    }
+
     /// 拉面根节点搜索
     ///
     /// 全部候选走通用 rollout：拉面的 `RamenSelect` / `SpecialSelect` / `Train`
@@ -1167,6 +1225,11 @@ impl FlatSearch<RamenGame> {
         &self, game: &RamenGame, actions: &[RamenAction], rng: &mut StdRng
     ) -> Result<RamenSearchOutput> {
         let Some(backend) = self.batch_rollout.as_ref() else {
+            if self.config.max_depth > 0 {
+                return self.search_with_terminal(game, actions, rng, |game, action, seed| {
+                    self.simulate_gbdt_leaf(game, action, seed)
+                });
+            }
             return self.search_with_terminal(game, actions, rng, |game, action, seed| {
                 self.simulate_common_extract(game, action, seed, seed, RamenTerminal::from_game)
             });
@@ -3261,6 +3324,74 @@ mod tests {
                 "注入的失败被记到 failed 而不是被静默丢弃"
             );
             c.check(p.total_planned() == p.total_succeeded() + p.total_failed(), "总数自洽");
+        }
+        c.finish()
+    }
+
+    /// GBDT leaf 估值器端到端验证：`max_depth>0` 截断 + GBDT 估分，与跑到底对照。
+    ///
+    /// 目的：验证纯 CPU 的 GBDT leaf 估值器（替代 NN rollout 的 GPU 路径）能跑通，
+    /// 且其估分与真实终局分同量级——训练 R²=0.86 → 单点 MAE≈711，16 次 rollout 均值
+    /// 误差更小（中心极限下约 711/√16≈178，留 3000 阈值余量）。无 GBDT 模型工件时
+    /// 跳过（CI 不携带 training_data_npy 大文件）。
+    #[test]
+    fn test_gbdt_leaf_truncation_vs_full() -> Result<()> {
+        let (game, actions) = ramen_root()?;
+        let workspace_root = get_workspace_root()?;
+        let model_path = workspace_root.join("training_data_npy").join("gbdt_model.json");
+        if !model_path.is_file() {
+            eprintln!("跳过：缺少 gbdt_model.json，无法验证 GBDT 截断估值");
+            return Ok(());
+        }
+        let json = std::fs::read_to_string(&model_path)?;
+        let model = Arc::new(crate::game::ramen::gbdt::GbdtModel::from_json(&json)?);
+        let max_depth = 30usize;
+
+        println!(
+            "拉面根局面: 回合 {} 阶段 {:?}，候选 {} 个，截断 depth={max_depth}",
+            game.turn(),
+            game.stage,
+            actions.len()
+        );
+
+        // 跑到底
+        let search_full: FlatSearch<RamenGame> =
+            FlatSearch::new(regression_config().with_max_depth(0));
+        let mut rng_full = StdRng::seed_from_u64(20260919);
+        let out_full = search_full.search(&game, &actions, &mut rng_full)?;
+
+        // 截断 + GBDT
+        let search_cut: FlatSearch<RamenGame> =
+            FlatSearch::new(regression_config().with_max_depth(max_depth))
+                .with_gbdt_leaf(model);
+        let mut rng_cut = StdRng::seed_from_u64(20260919);
+        let out_cut = search_cut.search(&game, &actions, &mut rng_cut)?;
+
+        let mut c = Checks::new();
+        c.check(!out_full.action_results.is_empty(), "full 臂有结果");
+        c.check(!out_cut.action_results.is_empty(), "截断臂有结果");
+        c.check(
+            out_full.action_results.len() == out_cut.action_results.len(),
+            "两臂候选数一致"
+        );
+
+        for (i, (full, cut)) in out_full
+            .action_results
+            .iter()
+            .zip(out_cut.action_results.iter())
+            .enumerate()
+        {
+            // score 轴（GBDT 估的是 score 轴；score_pt 轴只加了 PT 偏置偏移）
+            let mf = full.0.mean();
+            let mt = cut.0.mean();
+            let diff = (mf - mt).abs();
+            println!(
+                "候选 {i}: 跑到底 mean={mf:.0}  截断+GBDT mean={mt:.0}  |Δ|={diff:.0}"
+            );
+            c.check(
+                diff < 3000.0,
+                &format!("候选 {i} 截断估分与真实分偏差 {diff:.0} 应 < 3000")
+            );
         }
         c.finish()
     }

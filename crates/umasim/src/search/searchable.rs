@@ -139,8 +139,9 @@ impl FlatSearchGame for RamenGame {
     /// [`RecommendedRamenTrainer`]: crate::trainer::RecommendedRamenTrainer
     type RolloutTrainer = crate::trainer::RamenRolloutTrainer;
 
-    /// 拉面暂无 leaf 估值器，Phase 1 只允许跑到终局
-    const SUPPORTS_TRUNCATED_LEAF: bool = false;
+    /// 拉面支持 `max_depth > 0` 截断：leaf 估值器为 GBDT（纯 CPU，见
+    /// `FlatSearch::simulate_gbdt_leaf`）。未配置 GBDT 时搜索入口仍拒绝 `max_depth > 0`。
+    const SUPPORTS_TRUNCATED_LEAF: bool = true;
 
     /// rollout 专用实例：三份年的 breakdown 全部关闭
     fn default_rollout_trainer() -> Self::RolloutTrainer {
