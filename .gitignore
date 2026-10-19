@@ -25,3 +25,6 @@ master.mdb
 # 运气分重放分析产物（明细/统计 CSV，按需生成）
 luck_replay*.csv
 
+# GBDT 价值代理训练工件（r3roll 转 npy + 导出模型，本地生成，不入库）
+/training_data_npy/
+/data754/r3roll/r3roll_data.tar.gz

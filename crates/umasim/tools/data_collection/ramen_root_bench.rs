@@ -30,7 +30,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     thread::JoinHandle,
     time::Instant
 };
@@ -47,7 +47,7 @@ use umasim::{
     bench::seeded_rngs,
     game::{
         Game, InheritInfo, Trainer,
-        ramen::{RamenAction, RamenGame, RamenStage, RamenState, features::encode}
+        ramen::{RamenAction, RamenGame, RamenStage, RamenState, features::encode, gbdt::GbdtModel}
     },
     exp_config::{EffectiveSearchFacts, ScoringOverride, report_effective},
     gamedata::{EventChoice, EventData, GAMECONFIG, RamenRegionStrategy, init_global_with_config},
@@ -69,6 +69,12 @@ const POLICY_DIM: usize = 234;
 const OUTPUT_DIM: usize = 245;
 /// 模型输入维度
 const INPUT_DIM: usize = 754;
+
+/// 可选的 GBDT 叶估值模型（`--gbdt-model` 加载后 `set` 一次；`None` 时走 NN value）。
+///
+/// 用全局 `OnceLock` 而非把模型逐层传参：`ramen_root_bench` 是单进程 benchmark，
+/// 一个实验内叶估值器恒定；`advance` 在 rayon 并行段读它（`Arc` 不可变、只读安全）。
+static LEAF_GBDT: OnceLock<Arc<GbdtModel>> = OnceLock::new();
 
 /// 一条 rollout 的身份
 #[derive(Debug, Clone, Copy)]
@@ -301,6 +307,14 @@ struct RootArgs {
     /// 别的模式上会在建局前报错，不静默忽略。full 臂恒定参与，不需要在这里写。
     #[arg(long)]
     leaf_h: Vec<i32>,
+
+    /// GBDT 叶估值模型 JSON 路径（只被 [`Mode::GameSmoke`] 消费）
+    ///
+    /// 给了之后，截断臂（`--leaf-h` / hybrid 路由的 `Turns` 根）在叶边界改用 GBDT
+    /// 同步预测「期望终局分」，不再走 NN value、不占 GPU 批。模型由
+    /// `scripts/ramen_nn/gbdt_export.py` 导出。full 臂不受影响。
+    #[arg(long)]
+    gbdt_model: Option<PathBuf>,
 
     /// 截断模式的根目标
     ///
@@ -547,8 +561,17 @@ fn check_game_route(args: &RootArgs, depths: &[LeafDepth]) -> Result<LeafRoute> 
             "--route-csv 只被 game-smoke 模式消费；{:?} 模式下直接拒绝",
             args.mode
         );
+        ensure!(
+            args.gbdt_model.is_none(),
+            "--gbdt-model 只被 game-smoke 模式消费；{:?} 模式下直接拒绝",
+            args.mode
+        );
         // 其它模式不走整局路由，这个值不会被消费
         return Ok(LeafRoute::Uniform(LeafDepth::Full));
+    }
+    // GBDT 只在截断臂的叶边界介入；全 full（uniform 且无 --leaf-h）时它永远用不上，给了就报错
+    if args.gbdt_model.is_some() && depths.is_empty() && args.game_route == "uniform" {
+        bail!("--gbdt-model 需要截断臂（--leaf-h 或 hybrid 路由）才生效；当前 uniform 且无 --leaf-h 全是 full");
     }
     match args.game_route.as_str() {
         // 既有行为：给了 --leaf-h 就全局截断，没给就全局 full
@@ -2548,6 +2571,30 @@ impl Traj {
                             if leaf_safe_stage(&self.game.stage) {
                                 let actions = self.game.list_actions()?;
                                 ensure!(!actions.is_empty(), "叶边界上候选为空，不估值");
+                                // GBDT 叶估值：同步预测，不挂起、不占批、不发叶请求。
+                                // 放在 diag 判定之前：GBDT 臂先收尾，diag 探测不参与。
+                                if let Some(g) = LEAF_GBDT.get().cloned() {
+                                    let f = encode(&self.game)?;
+                                    ensure!(
+                                        f.len() == INPUT_DIM,
+                                        "叶特征长度 {} 与 INPUT_DIM={INPUT_DIM} 不符",
+                                        f.len()
+                                    );
+                                    let value = g.predict(&f);
+                                    let turn = self.game.turn();
+                                    let note = LeafNote {
+                                        value,
+                                        turn,
+                                        stage: format!("{:?}", self.game.stage),
+                                        turn_delta: turn - self.root_turn,
+                                        deferrals: self.deferrals
+                                    };
+                                    self.leaf_note = Some(note.clone());
+                                    self.leaf_target = None;
+                                    self.outcome = Some(TrajOutcome::Leaf(note));
+                                    self.phase = Phase::Done;
+                                    break;
+                                }
                                 if self.diag {
                                     // 只在诊断模式下多跑一次判定：用 RNG 的**克隆体**探测，
                                     // 不改生产随机流。生产计时臂不付这份开销。
@@ -4837,6 +4884,14 @@ fn main() -> Result<()> {
     match args.mode {
         Mode::SidecarReuse => return run_sidecar_reuse(&args, &search, &nn, plan.uma, &plan.deck, &inherit),
         Mode::GameSmoke => {
+            // GBDT 叶估值模型：加载一次，set 进全局（截断臂在叶边界读它，`None` 走 NN value）
+            if let Some(p) = &args.gbdt_model {
+                let json = std::fs::read_to_string(p)
+                    .with_context(|| format!("读取 GBDT 模型失败: {}", p.display()))?;
+                let model = GbdtModel::from_json(&json)
+                    .with_context(|| format!("解析 GBDT 模型失败: {}", p.display()))?;
+                let _ = LEAF_GBDT.set(Arc::new(model));
+            }
             return run_game_smoke(&args, &search, &nn, plan.uma, &plan.deck, &inherit, game_route);
         }
         Mode::TeacherConsistency => {
