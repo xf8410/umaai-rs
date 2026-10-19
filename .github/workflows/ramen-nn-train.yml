@@ -63,13 +63,8 @@ jobs:
           mkdir -p work/extracted
           cat $(ls "$D"/*.tar.gz.part* | sort) > work/merged.tar.gz
           tar -xzf work/merged.tar.gz -C work/extracted
-          # 用 -print -quit 取首个 part_*.bin，避免 find|head 在 pipefail 下吃 SIGPIPE 误退出
-          EXTRACT_BIN=$(find work/extracted -name 'part_*.bin' -print -quit)
-          EXTRACT_DIR=$(dirname "$EXTRACT_BIN")
-          echo "解包后 part 目录: $EXTRACT_DIR"
-          echo "part_*.bin 数量: $(find "$EXTRACT_DIR" -name 'part_*.bin' | wc -l)"
-          test -f "$EXTRACT_DIR/manifest.json" && echo "manifest: OK" || echo "manifest: MISSING"
-          echo "EXTRACT_DIR=$EXTRACT_DIR" >> "$GITHUB_ENV"
+          echo "part_*.bin 总数: $(find work/extracted -name 'part_*.bin' | wc -l)"
+          echo "shard 目录数: $(find work/extracted -name 'part_*.bin' -printf '%h\n' | sort -u | wc -l)"
 
       - name: 安装 Rust 工具链
         uses: dtolnay/rust-toolchain@stable
@@ -85,8 +80,15 @@ jobs:
 
       - name: 导出 npy（--raw 含完整 rollout 列）
         run: |
+          set -euo pipefail
+          mapfile -t INPUT_DIRS < <(find work/extracted -name 'part_*.bin' -printf '%h\n' | sort -u)
+          echo "待导 shard 目录数: ${#INPUT_DIRS[@]}"
+          INPUT_ARGS=()
+          for d in "${INPUT_DIRS[@]}"; do
+            INPUT_ARGS+=("--input" "$d")
+          done
           cargo run --release -p umasim --bin ramen_export_npy -- \
-            --input "$EXTRACT_DIR" \
+            "${INPUT_ARGS[@]}" \
             --output-dir npy_v1 --raw
           echo "=== meta.json ==="
           cat npy_v1/meta.json
