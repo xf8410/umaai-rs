@@ -13,12 +13,12 @@ on:
       count:
         description: 采集样本条数
         required: true
-        default: '6000'
+        default: '2000'
         type: string
       search_n:
         description: 每候选 rollout 次数
         required: true
-        default: '256'
+        default: '4096'
         type: string
       special_quota_permille:
         description: SpecialSelect 配额（千分之几）
@@ -44,8 +44,8 @@ jobs:
     timeout-minutes: 360
 
     env:
-      COUNT: ${{ inputs.count || '6000' }}
-      SEARCH_N: ${{ inputs.search_n || '256' }}
+      COUNT: ${{ inputs.count || '2000' }}
+      SEARCH_N: ${{ inputs.search_n || '4096' }}
       SPECIAL_Q: ${{ inputs.special_quota_permille || '150' }}
       REGION_Q: ${{ inputs.region_quota_permille || '20,30' }}
       EPOCHS: ${{ inputs.epochs || '100' }}
