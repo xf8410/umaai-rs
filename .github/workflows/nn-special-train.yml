@@ -13,12 +13,12 @@ on:
       count:
         description: 采集样本条数
         required: true
-        default: '200'
+        default: '6000'
         type: string
       search_n:
         description: 每候选 rollout 次数
         required: true
-        default: '64'
+        default: '256'
         type: string
       special_quota_permille:
         description: SpecialSelect 配额（千分之几）
@@ -33,7 +33,7 @@ on:
       epochs:
         description: 训练 epoch 数
         required: true
-        default: '30'
+        default: '100'
         type: string
   push:
     branches: [feat/nn-special-quota]
@@ -44,11 +44,11 @@ jobs:
     timeout-minutes: 360
 
     env:
-      COUNT: ${{ inputs.count || '200' }}
-      SEARCH_N: ${{ inputs.search_n || '64' }}
+      COUNT: ${{ inputs.count || '6000' }}
+      SEARCH_N: ${{ inputs.search_n || '256' }}
       SPECIAL_Q: ${{ inputs.special_quota_permille || '150' }}
       REGION_Q: ${{ inputs.region_quota_permille || '20,30' }}
-      EPOCHS: ${{ inputs.epochs || '30' }}
+      EPOCHS: ${{ inputs.epochs || '100' }}
 
     steps:
       - name: 检出代码（排除 data754 大数据）
