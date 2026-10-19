@@ -773,7 +773,9 @@ fn main() -> Result<()> {
     println!("  ramen_region_strategy   = {:?}", premises.ramen_region_strategy);
     println!(
         "  region_quota_permille    = {:?}",
-        sampler_cfg.region_quota_permille,
+        sampler_cfg.region_quota_permille
+    );
+    println!(
         "  special_quota_permille   = {}",
         sampler_cfg.special_quota_permille
     );
