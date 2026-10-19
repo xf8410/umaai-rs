@@ -24,6 +24,10 @@ on:
         description: '搜索阶段 train / all / none'
         required: false
         default: 'train'
+      release_name:
+        description: 'NN 权重 release 名'
+        required: false
+        default: 'nn-ramen-v1'
   push:
     branches: [feat/nn-rollout-bench]
 
@@ -40,15 +44,16 @@ jobs:
       NN_ROLLOUT_SEED: ${{ inputs.base_seed || '61444' }}
       NN_ROLLOUT_SEARCH_N: ${{ inputs.search_n || '8' }}
       NN_ROLLOUT_STAGES: ${{ inputs.stages || 'train' }}
+      NN_ROLLOUT_RELEASE: ${{ inputs.release_name || 'nn-ramen-v1' }}
       NN_ROLLOUT_CONTROL: '1'
     steps:
       - uses: actions/checkout@v4
 
-      - name: 下载 NN 权重（release nn-ramen-v1）
+      - name: 下载 NN 权重
         run: |
           set -euo pipefail
           mkdir -p weights
-          gh release download nn-ramen-v1 --repo xf8410/umaai-rs \
+          gh release download "$NN_ROLLOUT_RELEASE" --repo xf8410/umaai-rs \
             -D weights -p 'model.onnx' -p 'model.onnx.json'
           ls -lh weights/
         env:
