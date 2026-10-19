@@ -63,7 +63,9 @@ jobs:
           mkdir -p work/extracted
           cat $(ls "$D"/*.tar.gz.part* | sort) > work/merged.tar.gz
           tar -xzf work/merged.tar.gz -C work/extracted
-          EXTRACT_DIR=$(find work/extracted -name 'part_*.bin' | head -1 | xargs dirname)
+          # 用 -print -quit 取首个 part_*.bin，避免 find|head 在 pipefail 下吃 SIGPIPE 误退出
+          EXTRACT_BIN=$(find work/extracted -name 'part_*.bin' -print -quit)
+          EXTRACT_DIR=$(dirname "$EXTRACT_BIN")
           echo "解包后 part 目录: $EXTRACT_DIR"
           echo "part_*.bin 数量: $(find "$EXTRACT_DIR" -name 'part_*.bin' | wc -l)"
           test -f "$EXTRACT_DIR/manifest.json" && echo "manifest: OK" || echo "manifest: MISSING"
