@@ -44,11 +44,11 @@ jobs:
     timeout-minutes: 360
 
     env:
-      COUNT: ${{ inputs.count }}
-      SEARCH_N: ${{ inputs.search_n }}
-      SPECIAL_Q: ${{ inputs.special_quota_permille }}
-      REGION_Q: ${{ inputs.region_quota_permille }}
-      EPOCHS: ${{ inputs.epochs }}
+      COUNT: ${{ inputs.count || '200' }}
+      SEARCH_N: ${{ inputs.search_n || '64' }}
+      SPECIAL_Q: ${{ inputs.special_quota_permille || '150' }}
+      REGION_Q: ${{ inputs.region_quota_permille || '20,30' }}
+      EPOCHS: ${{ inputs.epochs || '30' }}
 
     steps:
       - name: 检出代码（排除 data754 大数据）
