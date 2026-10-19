@@ -1,0 +1,81 @@
+name: NN rollout bench
+
+# CPU 口径：NN rollout 基策 vs 手写 rollout 基策，CRN 配对（同 seed，同局面）。
+#
+# 注意：这不是叶子 value 权威验收（leaf-pilot / teacher-game 需要 GPU 侧车），
+# 而是 CPU tract-onnx 能跑的第一版「rollout 基策」质量信号，用于让迭代循环先转起来。
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: '跑几局（NN 与手写各跑同样局数，同 seed 配对）'
+        required: false
+        default: '5'
+      search_n:
+        description: '每个决策点的 rollout 条数'
+        required: false
+        default: '8'
+      base_seed:
+        description: '基种子（第 i 局 = base_seed + i）'
+        required: false
+        default: '61444'
+      stages:
+        description: '搜索阶段 train / all / none'
+        required: false
+        default: 'train'
+  push:
+    branches: [feat/nn-rollout-bench]
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      NN_ROLLOUT_MODEL: weights/model.onnx
+      NN_ROLLOUT_RUNS: ${{ inputs.runs || '5' }}
+      NN_ROLLOUT_SEED: ${{ inputs.base_seed || '61444' }}
+      NN_ROLLOUT_SEARCH_N: ${{ inputs.search_n || '8' }}
+      NN_ROLLOUT_STAGES: ${{ inputs.stages || 'train' }}
+      NN_ROLLOUT_CONTROL: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载 NN 权重（release nn-ramen-v1）
+        run: |
+          set -euo pipefail
+          mkdir -p weights
+          gh release download nn-ramen-v1 --repo xf8410/umaai-rs \
+            -D weights -p 'model.onnx' -p 'model.onnx.json'
+          ls -lh weights/
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: nn-rollout-bench
+
+      - name: Tune config for 4-core runner
+        run: sed -i 's/^num_threads = 16/num_threads = 4/' game_config.toml
+
+      - name: Build nn_rollout_probe (release, onnx)
+        run: cargo build --release -j 2 -p umasim --features "cli onnx" --bin nn_rollout_probe
+
+      - name: Run NN vs handwritten (CRN paired)
+        run: |
+          set -euo pipefail
+          mkdir -p logs
+          ./target/release/nn_rollout_probe 2>&1 | tee logs/nn_rollout_bench.log
+
+      - name: 归档原始日志
+        uses: actions/upload-artifact@v4
+        with:
+          name: nn-rollout-bench-${{ github.run_number }}
+          path: logs/nn_rollout_bench.log
+          retention-days: 60
+          if-no-files-found: error
