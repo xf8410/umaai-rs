@@ -81,6 +81,9 @@ const TURN_STREAM_TAG: u64 = 0x5455_524E_5F44_5257;
 /// 普通配额上的那些样本的局面，分片续跑的可复现契约因此不受影响。
 const QUOTA_STREAM_TAG: u64 = 0x5155_4F54_415F_5247;
 
+/// SpecialSelect 配额频道标签：与地区配额/截断回合/局内种子分属独立频道。
+const SPECIAL_QUOTA_STREAM_TAG: u64 = 0x5350_4543_5155_4F54;
+
 /// 第 2 年地区选择所在回合（该回合**末**的 `RegionSelect` 阶段）
 const REGION_SELECT_TURN_Y2: i32 = 23;
 
@@ -1193,9 +1196,12 @@ impl SamplingSpace {
         // 地区配额优先：命中则截断回合由配额定死，不再抽
         let (truncate_turn, capture_stage) = match config.region_quota_turn(index) {
             Some(turn) => (turn, Some(RamenStage::RegionSelect)),
-            None => {
-                let turn_draw = derive_seed(config.seed_base, index, TURN_STREAM_TAG);
-                ((turn_draw % (config.max_turn.max(0) as u64 + 1)) as i32, None)
+            None => match config.special_quota_turn(index) {
+                Some(turn) => (turn, Some(RamenStage::SpecialSelect)),
+                None => {
+                    let turn_draw = derive_seed(config.seed_base, index, TURN_STREAM_TAG);
+                    ((turn_draw % (config.max_turn.max(0) as u64 + 1)) as i32, None)
+                }
             }
         };
         SampleSpec {
@@ -1404,7 +1410,17 @@ pub struct SamplerConfig {
     /// `SamplerConfig::default()` 的既有调用方跟着改变样本分布。采集侧由
     /// `ramen_teacher_collect` / `ramen_handwritten_choice` 的
     /// `--region-quota-permille` 显式给出。
-    pub region_quota_permille: [u32; 2]
+    pub region_quota_permille: [u32; 2],
+    /// SpecialSelect（隐藏风味用法）的采样配额，单位千分之几
+    ///
+    /// 存在理由同地区配额：SpecialSelect 决策点仅在「吃面」回合出现，且每个
+    /// 吃面回合的 RamenSelect 恒先命中白名单把样本截走，自由采样永远采不到它。
+    /// 命中配额后强制 capture_stage=SpecialSelect、truncate_turn=0，让采样器
+    /// 跳过 RamenSelect 一路推进到首个 SpecialSelect 决策点才落根。
+    ///
+    /// 默认 0（关闭）；采集侧由 ramen_teacher_collect 的
+    /// `--special-quota-permille` 显式给出。
+    pub special_quota_permille: u32
 }
 
 impl Default for SamplerConfig {
@@ -1415,7 +1431,8 @@ impl Default for SamplerConfig {
             inherit: gen1_inherit(),
             max_turn: 77,
             seed_base: 0x5041_5254_5F31,
-            region_quota_permille: [0, 0]
+            region_quota_permille: [0, 0],
+            special_quota_permille: 0
         }
     }
 }
@@ -1443,6 +1460,23 @@ impl SamplerConfig {
             return None;
         };
         (turn <= self.max_turn).then_some(turn)
+    }
+
+    /// 按工作项序号判定它是否被分配给 SpecialSelect 配额
+    ///
+    /// 走独立频道 [`SPECIAL_QUOTA_STREAM_TAG`]，与地区配额、截断回合、局内种子
+    /// 分属不同频道，调配额不重排其他样本。
+    ///
+    /// SpecialSelect 的回合不固定（取决于吃面时机），故命中即截断回合设为 0：
+    /// 采样器一路推进到首个满足条件的 SpecialSelect 决策点落根。若该局手写策略
+    /// 从不吃面（或候选不足 < min_actions），落根失败计为未捕获，由采集侧记 skipped。
+    fn special_quota_turn(&self, index: u64) -> Option<i32> {
+        let q = self.special_quota_permille.min(1000);
+        if q == 0 {
+            return None;
+        }
+        let draw = (derive_seed(self.seed_base, index, SPECIAL_QUOTA_STREAM_TAG) % 1000) as u32;
+        (draw < q).then_some(0)
     }
 }
 

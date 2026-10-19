@@ -99,7 +99,11 @@ struct CollectArgs {
 
     /// 第 2/3 年地区选择采样配额（千分之几），逗号分隔 `Y2,Y3`
     #[arg(long, value_delimiter = ',', num_args = 1, default_value = "20,30")]
-    region_quota_permille: Vec<u32>
+    region_quota_permille: Vec<u32>,
+
+    /// SpecialSelect 采样配额（千分之几），命中后强制采隐藏风味决策点
+    #[arg(long, default_value_t = 0)]
+    special_quota_permille: u32
 }
 
 // ============================================================================
@@ -220,7 +224,9 @@ struct ManifestSamplerConfig {
     /// 种子基底
     pub seed_base: u64,
     /// 第 2/3 年地区选择配额（千分之几）
-    pub region_quota_permille: [u32; 2]
+    pub region_quota_permille: [u32; 2],
+    /// SpecialSelect 采样配额（千分之几）
+    pub special_quota_permille: u32
 }
 
 impl ManifestSamplerConfig {
@@ -232,7 +238,8 @@ impl ManifestSamplerConfig {
             inherit: cfg.inherit.clone(),
             max_turn: cfg.max_turn,
             seed_base: cfg.seed_base,
-            region_quota_permille: cfg.region_quota_permille
+            region_quota_permille: cfg.region_quota_permille,
+            special_quota_permille: cfg.special_quota_permille
         }
     }
 }
@@ -646,6 +653,7 @@ fn main() -> Result<()> {
 
     let mut sampler_cfg = SamplerConfig::default();
     sampler_cfg.region_quota_permille = quota.as_array();
+    sampler_cfg.special_quota_permille = args.special_quota_permille;
     let sampler_snap = ManifestSamplerConfig::from_sampler(&sampler_cfg);
     let recipe = CollectRecipe {
         format_version: SAMPLE_FORMAT_VERSION,
@@ -765,7 +773,9 @@ fn main() -> Result<()> {
     println!("  ramen_region_strategy   = {:?}", premises.ramen_region_strategy);
     println!(
         "  region_quota_permille    = {:?}",
-        sampler_cfg.region_quota_permille
+        sampler_cfg.region_quota_permille,
+        "  special_quota_permille   = {}",
+        sampler_cfg.special_quota_permille
     );
     println!("  采样空间指纹            : {space_hash}");
     println!("  INPUT_DIM / POLICY_DIM  = {INPUT_DIM} / {POLICY_DIM}");

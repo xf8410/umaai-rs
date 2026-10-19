@@ -1,0 +1,126 @@
+name: nn-special-train
+
+# Phase B：给采样器加 SpecialSelect 配额后，端到端「采集 → 导出 npy → 训练 → ONNX」。
+#
+# 采集用 ramen_teacher_collect 的 --special-quota-permille 强制采隐藏风味决策点，
+# 补上此前结构性缺采的 SpecialSelect 阶段（stage_code=1=0 条）——这是 all 口径判负的根因。
+#
+# 先小规模 smoke 验证 stage 分布含 SpecialSelect，再放大 count / search_n 跑正式版。
+
+on:
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 采集样本条数
+        required: true
+        default: '200'
+        type: string
+      search_n:
+        description: 每候选 rollout 次数
+        required: true
+        default: '64'
+        type: string
+      special_quota_permille:
+        description: SpecialSelect 配额（千分之几）
+        required: true
+        default: '150'
+        type: string
+      region_quota_permille:
+        description: 地区配额 Y2,Y3（千分之几）
+        required: true
+        default: '20,30'
+        type: string
+      epochs:
+        description: 训练 epoch 数
+        required: true
+        default: '30'
+        type: string
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    env:
+      COUNT: ${{ inputs.count }}
+      SEARCH_N: ${{ inputs.search_n }}
+      SPECIAL_Q: ${{ inputs.special_quota_permille }}
+      REGION_Q: ${{ inputs.region_quota_permille }}
+      EPOCHS: ${{ inputs.epochs }}
+
+    steps:
+      - name: 检出代码（排除 data754 大数据）
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            /*
+            !/data754
+          sparse-checkout-cone-mode: false
+
+      - name: 安装 Rust 工具链
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: 缓存 cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: 采集教师数据（含 SpecialSelect 配额）
+        run: |
+          set -euo pipefail
+          cargo run --release -p umasim --bin ramen_teacher_collect -- \
+            --count "$COUNT" \
+            --search-n "$SEARCH_N" \
+            --output-dir work/collect \
+            --special-quota-permille "$SPECIAL_Q" \
+            --region-quota-permille "$REGION_Q"
+          echo "=== 采集产物 ==="
+          ls -lh work/collect/
+          find work/collect -name 'part_*.bin' | wc -l
+
+      - name: 安装 Python 依赖
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install numpy onnx onnxruntime
+
+      - name: 导出 npy（--raw 含完整 rollout 列）
+        run: |
+          set -euo pipefail
+          cargo run --release -p umasim --bin ramen_export_npy -- \
+            --input work/collect \
+            --output-dir npy_v1 --raw
+          echo "=== meta.json ==="
+          cat npy_v1/meta.json
+
+      - name: 生成训练标签
+        run: |
+          python scripts/ramen_nn/labels.py --input npy_v1 --output labels_v1
+          echo "=== labels.json ==="
+          cat labels_v1/labels.json 2>/dev/null || ls -lh labels_v1/
+
+      - name: 训练网络
+        run: |
+          python scripts/ramen_nn/train.py \
+            --data npy_v1 --labels labels_v1 \
+            --output-dir saved_models/ramen_v1 \
+            --device cpu \
+            --epochs "$EPOCHS"
+
+      - name: 导出 ONNX
+        run: |
+          python scripts/ramen_nn/export_onnx.py \
+            --checkpoint saved_models/ramen_v1/best.pt \
+            --output saved_models/ramen_v1/model.onnx
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: nn-special-train
+          path: |
+            saved_models/ramen_v1/model.onnx
+            saved_models/ramen_v1/model.onnx.json
+            saved_models/ramen_v1/best.pt
+            saved_models/ramen_v1/*.json
+            npy_v1/meta.json
+            labels_v1/*.json
+          retention-days: 90
+          if-no-files-found: error
