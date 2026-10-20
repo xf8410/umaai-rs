@@ -1,0 +1,56 @@
+{
+  "checkpoint": "saved_models/ramen_v1/best.pt",
+  "onnx": "saved_models/ramen_v1/model.onnx",
+  "opset": 13,
+  "operators": [
+    "Add",
+    "Concat",
+    "Constant",
+    "Div",
+    "Gather",
+    "Gemm",
+    "MatMul",
+    "Mul",
+    "ReduceMean",
+    "ReduceSum",
+    "Relu",
+    "Reshape",
+    "Slice",
+    "Transpose",
+    "Unsqueeze"
+  ],
+  "dynamic_batch_tested": [
+    1,
+    7
+  ],
+  "max_abs_error": 5.960464477539062e-07,
+  "max_abs_error_by_batch": {
+    "1": 4.76837158203125e-07,
+    "7": 5.960464477539062e-07
+  },
+  "input_dim": 754,
+  "output_dim": 245,
+  "model_config": {
+    "token_dim": 64,
+    "heads": 4,
+    "encoder_blocks": 1,
+    "mlp_width": 192,
+    "mlp_blocks": 2,
+    "dropout": 0.15,
+    "attention_kind": "simple",
+    "card_slot_embedding": false,
+    "factorized_eat_head": false
+  },
+  "value_normalization": {
+    "center": [
+      64250.46889488636,
+      2110.3178858150136,
+      65702.71838636363
+    ],
+    "scale": [
+      2684.1080414609432,
+      733.343755709377,
+      2891.6267683572764
+    ]
+  }
+}

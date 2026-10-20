@@ -1,0 +1,96 @@
+{
+  "device": "cpu",
+  "model_config": {
+    "token_dim": 64,
+    "heads": 4,
+    "encoder_blocks": 1,
+    "mlp_width": 192,
+    "mlp_blocks": 2,
+    "dropout": 0.15,
+    "attention_kind": "simple",
+    "card_slot_embedding": false,
+    "factorized_eat_head": false
+  },
+  "parameters": 308917,
+  "value_normalization": {
+    "center": [
+      64250.46889488636,
+      2110.3178858150136,
+      65702.71838636363
+    ],
+    "scale": [
+      2684.1080414609432,
+      733.343755709377,
+      2891.6267683572764
+    ]
+  },
+  "value_component_weights": [
+    0.2,
+    0.4,
+    0.2
+  ],
+  "stage_weights": [
+    0.7780418395996094,
+    0.0,
+    1.1507799625396729,
+    3.1121673583984375,
+    2.589254856109619
+  ],
+  "stage_counts": [
+    886,
+    0,
+    405,
+    4,
+    80
+  ],
+  "train_action_weights": null,
+  "train_action_counts": null,
+  "split": {
+    "total": 1527,
+    "train": 1375,
+    "validation": 152,
+    "train_stage_counts": [
+      886,
+      0,
+      405,
+      4,
+      80
+    ],
+    "validation_stage_counts": [
+      94,
+      0,
+      50,
+      0,
+      8
+    ],
+    "data_dirs": [
+      "npy_v1"
+    ],
+    "label_dirs": [
+      "labels_v1"
+    ]
+  },
+  "seeds": {
+    "seed": 20260830,
+    "split_seed": 20260830,
+    "init_seed": 20260830
+  },
+  "schedule": {
+    "steps_per_epoch": 2,
+    "patience_epochs": 20,
+    "patience_steps_arg": null,
+    "max_epochs": 200,
+    "max_steps_arg": null,
+    "total_steps": 400,
+    "batch_size": 1024,
+    "early_stop": true,
+    "lr_schedule": "plateau",
+    "lr_warmup_steps": null,
+    "lr_final_factor": null
+  },
+  "diagnostics": {
+    "eval_columns": null,
+    "checkpoint_steps": [],
+    "ema_halflife_steps": []
+  }
+}

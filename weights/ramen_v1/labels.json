@@ -1,0 +1,48 @@
+{
+  "format_version": 1,
+  "source": "npy_v1",
+  "samples": 1527,
+  "candidates": 18569,
+  "rollouts": 4096,
+  "index_ptr_sha256": "df780a04da7b209b172442c17d56580750f0463ea185e658e487f5591f4f64d5",
+  "config": {
+    "bootstrap_draws": 512,
+    "bootstrap_seed": 20260830,
+    "radical_factor": 1.4,
+    "policy_temperature": 1.0,
+    "tie_atol": 1e-05
+  },
+  "value_mean": [
+    64237.63676479617,
+    2104.4119519281794,
+    65686.07640850115
+  ],
+  "value_stdev": [
+    2677.6688610005917,
+    735.17099244566,
+    2880.68617012317
+  ],
+  "stages": {
+    "0": {
+      "samples": 980,
+      "policy_entropy_mean": 0.2133755087852478,
+      "selector_stability_mean": 0.9993841648101807
+    },
+    "2": {
+      "samples": 455,
+      "policy_entropy_mean": 0.12955451011657715,
+      "selector_stability_mean": 0.997947096824646
+    },
+    "3": {
+      "samples": 4,
+      "policy_entropy_mean": 0.36721155047416687,
+      "selector_stability_mean": 1.0
+    },
+    "4": {
+      "samples": 88,
+      "policy_entropy_mean": 1.1351927518844604,
+      "selector_stability_mean": 1.0
+    }
+  },
+  "elapsed_seconds": 3.877520469000018
+}

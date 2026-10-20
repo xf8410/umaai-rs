@@ -1,0 +1,32 @@
+{
+  "export_version": 1,
+  "format_version": 1,
+  "input_dim": 754,
+  "policy_dim": 234,
+  "search_n": 4096,
+  "recipe_hash_fnv1a64": "7d03757c985a51b8",
+  "git_commit": "37a8da218ebec92e431de7e14dedd30c34dfcb09",
+  "sampling_space_hash": "6c30529e9333fb94",
+  "plan_count": 525,
+  "raw": true,
+  "sources": [
+    "work/extracted/prod_n4096_p0"
+  ],
+  "stats": {
+    "samples": 1527,
+    "candidates": 18569,
+    "rollout_width": 4096,
+    "stage_hist": {
+      "0": 980,
+      "2": 455,
+      "3": 4,
+      "4": 88
+    },
+    "stage_names": {
+      "RamenSelect": 980,
+      "RegionSelect": 88,
+      "SuperRamenSelect": 4,
+      "Train": 455
+    }
+  }
+}
