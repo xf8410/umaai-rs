@@ -1,0 +1,92 @@
+name: nn-cpu-eval
+on:
+  workflow_dispatch:
+    inputs:
+      search_n:
+        description: 每个候选 rollout 条数（正式 128）
+        default: '128'
+      seeds_per_plan:
+        description: 每个 plan（马娘）的配对局数
+        default: '20'
+      seed_start:
+        description: 起始 seed
+        default: '61444'
+      plan_indices:
+        description: 逗号分隔的 plan_index 列表
+        default: '0,75,150,225,300,375,450'
+      release:
+        description: 权重 release 名
+        default: 'nn-ramen-v1'
+  push:
+    branches: [workbench/nn-cpu-bench]
+    paths: ['.github/workflows/nn-cpu-eval.yml']
+
+jobs:
+  # 拿到 GEN1 采样空间 525 个计划的「plan_index → 马娘」映射，核对/覆盖多马娘
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: dump GEN1 计划映射（每马娘最小 plan_index）
+        run: |
+          cargo test -p umasim --lib test_gen1_plan_dump -- --nocapture 2>&1 \
+            | grep 'GEN1PLAN ' \
+            | awk '{uma=$3; i=$2+0; if(!(uma in min) || i<min[uma]) min[uma]=i} END{for(u in min) print "UMA " u " -> first plan_index " min[u]}' | sort
+          echo "--- 总计 ---"
+          cargo test -p umasim --lib test_gen1_plan_dump -- --nocapture 2>&1 | grep 'GEN1PLAN_COUNT'
+
+  eval:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        plan: [0, 75, 150, 225, 300, 375, 450]
+    env:
+      REL: ${{ inputs.release || 'nn-ramen-v1' }}
+      SN: ${{ inputs.search_n || '128' }}
+      SPP: ${{ inputs.seeds_per_plan || '20' }}
+      SSTART: ${{ inputs.seed_start || '61444' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: 下载权重（onnx + 反归一化元数据）
+        run: |
+          mkdir -p /tmp/nn
+          curl -fL -o /tmp/nn/model.onnx "https://github.com/xf8410/umaai-rs/releases/download/${REL}/model.onnx"
+          curl -fL -o /tmp/nn/model.onnx.json "https://github.com/xf8410/umaai-rs/releases/download/${REL}/model.onnx.json"
+          ls -la /tmp/nn
+      - name: 编译 ramen_root_bench（cli+onnx）
+        run: cargo build --release -p umasim --bin ramen_root_bench --features cli,onnx
+      - name: CRN 配对（NN 纯 CPU 臂 vs 手写臂）
+        run: |
+          PLAN=${{ matrix.plan }}
+          mkdir -p out
+          RES=out/results_plan_${PLAN}.txt
+          : > "$RES"
+          echo "plan=$PLAN search_n=$SN seeds=$SSTART..$((SSTART+SPP-1))" >> "$RES"
+          for s in $(seq 0 $((SPP-1))); do
+            seed=$((SSTART + s))
+            echo "=== seed=$seed ===" >> "$RES"
+            echo "--- NN(cpu-only) ---" >> "$RES"
+            cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- \
+              --mode teacher-game --rollout-model /tmp/nn/model.onnx --cpu-only \
+              --search-n "$SN" --seed "$seed" --plan-index "$PLAN" 2>&1 \
+              | grep -E '终局评分|整局墙钟|教师决策' >> "$RES"
+            echo "--- HW(handwritten-rollout) ---" >> "$RES"
+            cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- \
+              --mode teacher-game --rollout-model /tmp/nn/model.onnx --handwritten-rollout \
+              --search-n "$SN" --seed "$seed" --plan-index "$PLAN" 2>&1 \
+              | grep -E '终局评分|整局墙钟|教师决策' >> "$RES"
+          done
+          echo "===== DONE plan=$PLAN ====="
+          cat "$RES"
+      - name: 上传结果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results_plan_${{ matrix.plan }}
+          path: out/results_plan_${{ matrix.plan }}.txt
+          retention-days: 7
