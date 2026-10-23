@@ -256,6 +256,13 @@ struct RootArgs {
     #[arg(long, default_value_t = false)]
     handwritten_rollout: bool,
 
+    /// 纯 CPU 整局（teacher-game 专用）：NN rollout 走 tract CPU，不起 GPU 侧车
+    ///
+    /// 与 `--handwritten-rollout` 互斥：那条是「不接网络」的手写臂，这条是「接网络
+    /// 但纯 CPU」的 NN 臂。用它做 CPU-onnx 与手写策略的对拍，不依赖 CUDA。
+    #[arg(long, default_value_t = false)]
+    cpu_only: bool,
+
     /// 整局逐步决策输出 CSV（仅 teacher-game）
     ///
     /// 落的是**实际值**：回合、阶段、候选原顺序、选中下标、决策后 RNG 探针取值。
@@ -493,13 +500,21 @@ fn check_output_flags(args: &RootArgs) -> Result<()> {
         "--trace 只被 compare 写出；{:?} 模式下直接拒绝",
         args.mode
     );
-    for (given, flag) in [(args.handwritten_rollout, "--handwritten-rollout"), (args.steps_csv.is_some(), "--steps-csv")] {
+    for (given, flag) in [
+        (args.handwritten_rollout, "--handwritten-rollout"),
+        (args.cpu_only, "--cpu-only"),
+        (args.steps_csv.is_some(), "--steps-csv")
+    ] {
         ensure!(
             !given || args.mode == Mode::TeacherGame,
             "{flag} 只被 teacher-game 消费；{:?} 模式下直接拒绝",
             args.mode
         );
     }
+    ensure!(
+        !(args.cpu_only && args.handwritten_rollout),
+        "--cpu-only 与 --handwritten-rollout 互斥：一个是纯 CPU NN 臂，一个是手写臂，不能同时给"
+    );
     Ok(())
 }
 
@@ -587,7 +602,7 @@ fn check_game_route(args: &RootArgs, depths: &[LeafDepth]) -> Result<LeafRoute> 
 /// 开关落在不消费它的模式上、与 `--handwritten-rollout` 同时给出，或
 /// `--sidecar-graph` 与 `--adaptive-batch` 同时给出时报错。
 fn check_switch_support(
-    mode: Mode, cache_on: bool, adaptive: bool, graph: bool, handwritten: bool
+    mode: Mode, cache_on: bool, adaptive: bool, graph: bool, handwritten: bool, cpu_only: bool
 ) -> Result<()> {
     // 图按固定行数捕获，换档要重捕；本轮不做这件事，所以直接拒绝而不是悄悄沿用旧图
     ensure!(
@@ -614,9 +629,9 @@ fn check_switch_support(
          支持的模式：gpu-wave / sidecar-reuse / game-smoke / teacher-consistency / teacher-game / leaf-pilot / value-check"
     );
     ensure!(
-        !(mode == Mode::TeacherGame && handwritten),
-        "{names} 与 --handwritten-rollout 同时给出：手写臂不接网络、不起侧车，开关不会生效；\
-         去掉其中之一再跑"
+        !(mode == Mode::TeacherGame && (handwritten || cpu_only)),
+        "{names} 与 --{} 同时给出：该臂不接侧车，开关不会生效；去掉其中之一再跑",
+        if handwritten { "--handwritten-rollout" } else { "--cpu-only" }
     );
     Ok(())
 }
@@ -1560,6 +1575,23 @@ fn run_teacher_game(
             write_steps_csv(p, &steps)?;
             println!("  逐步决策    {} 步 → {}", steps.len(), p.display());
         }
+        return Ok(());
+    }
+    if args.cpu_only {
+        // 纯 CPU 臂：NN rollout 走 tract CPU，不起 GPU 侧车，与上方手写臂同构配对
+        let teacher = build_teacher(config.clone(), Some(Arc::clone(nn)), None)?;
+        print_effective_config(&teacher);
+        let (steps, score, wall) = play_with_teacher(args, uma, deck, inherit, teacher)?;
+        println!("  CPU rollout 基策（整局，tract，不起侧车）");
+        println!("  整局墙钟    {wall:.1} s");
+        println!("  教师决策    {} 步", steps.len());
+        println!("  终局评分    score={:.3} score_pt={:.3}", score.score, score.score_pt);
+        println!("  终局全精度  score={:.17e} score_pt={:.17e}", score.score, score.score_pt);
+        if let Some(p) = args.steps_csv.as_ref() {
+            write_steps_csv(p, &steps)?;
+            println!("  逐步决策    {} 步 → {}", steps.len(), p.display());
+        }
+        println!("  ❗单局不回答策略优劣；CPU 臂与手写臂按各自成本分臂计价。");
         return Ok(());
     }
     let sidecar = Sidecar::start(args)?;
@@ -4685,7 +4717,8 @@ fn main() -> Result<()> {
         args.policy_cache,
         args.adaptive_batch,
         args.sidecar_graph,
-        args.handwritten_rollout
+        args.handwritten_rollout,
+        args.cpu_only
     )?;
     let leaf_depths = check_leaf_support(&args)?;
     let game_route = check_game_route(&args, &leaf_depths)?;
@@ -6203,7 +6236,7 @@ mod tests {
         let mut cases = 0usize;
         for (mode, supported) in modes {
             // 两个开关都不给：任何模式都必须放行
-            let none = check_switch_support(mode, false, false, false, false).is_ok();
+            let none = check_switch_support(mode, false, false, false, false, false).is_ok();
             cases += 1;
             if !none {
                 bad += 1;
@@ -6216,7 +6249,7 @@ mod tests {
                 (true, false, true, "缓存 + 图"),
                 (true, true, false, "缓存 + 自适应批")
             ] {
-                let ok = check_switch_support(mode, cache_on, adaptive, graph, false).is_ok();
+                let ok = check_switch_support(mode, cache_on, adaptive, graph, false, false).is_ok();
                 cases += 1;
                 if ok != supported {
                     bad += 1;
@@ -6227,7 +6260,7 @@ mod tests {
                 );
             }
             // 图与自适应批互斥：即便在支持的模式上也必须拒
-            let both = check_switch_support(mode, false, true, true, false).is_ok();
+            let both = check_switch_support(mode, false, true, true, false, false).is_ok();
             cases += 1;
             if both {
                 bad += 1;
@@ -6240,7 +6273,7 @@ mod tests {
             (false, true, false, "--adaptive-batch"),
             (false, false, true, "--sidecar-graph")
         ] {
-            let ok = check_switch_support(Mode::TeacherGame, cache_on, adaptive, graph, true).is_ok();
+            let ok = check_switch_support(Mode::TeacherGame, cache_on, adaptive, graph, true, false).is_ok();
             cases += 1;
             if ok {
                 bad += 1;
@@ -6248,12 +6281,31 @@ mod tests {
             println!("{} teacher-game + --handwritten-rollout + {label} → 放行 {ok}（期望 false）", if ok { "❗" } else { "ok" });
         }
         // 手写臂不给开关仍要放行
-        let ok = check_switch_support(Mode::TeacherGame, false, false, false, true).is_ok();
+        let ok = check_switch_support(Mode::TeacherGame, false, false, false, true, false).is_ok();
         cases += 1;
         if !ok {
             bad += 1;
         }
         println!("{} teacher-game + --handwritten-rollout 不给开关 → 放行 {ok}（期望 true）", if ok { "ok" } else { "❗" });
+        // cpu_only 臂同手写臂：起了开关必须拒，不给开关仍放行
+        for (cache_on, adaptive, graph, label) in [
+            (true, false, false, "--policy-cache"),
+            (false, true, false, "--adaptive-batch"),
+            (false, false, true, "--sidecar-graph")
+        ] {
+            let ok = check_switch_support(Mode::TeacherGame, cache_on, adaptive, graph, false, true).is_ok();
+            cases += 1;
+            if ok {
+                bad += 1;
+            }
+            println!("{} teacher-game + --cpu-only + {label} → 放行 {ok}（期望 false）", if ok { "❗" } else { "ok" });
+        }
+        let ok = check_switch_support(Mode::TeacherGame, false, false, false, false, true).is_ok();
+        cases += 1;
+        if !ok {
+            bad += 1;
+        }
+        println!("{} teacher-game + --cpu-only 不给开关 → 放行 {ok}（期望 true）", if ok { "ok" } else { "❗" });
         println!("支持矩阵：{cases} 条用例，不符 {bad} 条");
         ensure!(bad == 0, "支持矩阵有 {bad} 条用例与期望不符");
         Ok(())
@@ -6281,13 +6333,26 @@ mod tests {
             ("cpu-flat", "--handwritten-rollout", None, false),
             ("teacher-consistency", "--handwritten-rollout", None, false),
             ("game-smoke", "--steps-csv", Some("x.csv"), false),
-            ("cpu-flat", "--workers", Some("2"), true)
+            ("cpu-flat", "--workers", Some("2"), true),
+            ("teacher-game", "--cpu-only", None, true),
+            ("cpu-flat", "--cpu-only", None, false),
+            ("teacher-consistency", "--cpu-only", None, false),
+            ("game-smoke", "--cpu-only", None, false)
         ] {
             let mut argv = vec!["ramen_root_bench", "--mode", mode, "--rollout-model", "unused.onnx", flag];
             argv.extend(value);
             let args = RootArgs::try_parse_from(&argv)?;
             let ok = check_output_flags(&args).is_ok();
             c.check(ok == want, &format!("{mode} + {flag} → 放行 {ok}（期望 {want}）"));
+        }
+        // --cpu-only 与 --handwritten-rollout 互斥：同时给必须拒
+        {
+            let args = RootArgs::try_parse_from([
+                "ramen_root_bench", "--mode", "teacher-game", "--rollout-model", "unused.onnx",
+                "--cpu-only", "--handwritten-rollout"
+            ])?;
+            let ok = check_output_flags(&args).is_ok();
+            c.check(!ok, "teacher-game + --cpu-only + --handwritten-rollout → 应互斥拒绝");
         }
         c.finish()
     }
