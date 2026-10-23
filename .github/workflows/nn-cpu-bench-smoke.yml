@@ -28,6 +28,10 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    env:
+      # push 触发时 inputs.* 为空，必须给默认值兜底
+      REL: ${{ inputs.release || 'nn-ramen-v1' }}
+      SN: ${{ inputs.search_n || '32' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,15 +43,15 @@ jobs:
       - name: 下载 NN 权重（onnx + 反归一化元数据）
         run: |
           mkdir -p /tmp/nn
-          curl -fL -o /tmp/nn/model.onnx https://github.com/xf8410/umaai-rs/releases/download/${{ inputs.release }}/model.onnx
-          curl -fL -o /tmp/nn/model.onnx.json https://github.com/xf8410/umaai-rs/releases/download/${{ inputs.release }}/model.onnx.json
+          curl -fL -o /tmp/nn/model.onnx "https://github.com/xf8410/umaai-rs/releases/download/${REL}/model.onnx"
+          curl -fL -o /tmp/nn/model.onnx.json "https://github.com/xf8410/umaai-rs/releases/download/${REL}/model.onnx.json"
           ls -la /tmp/nn
 
       - name: cargo build ramen_root_bench（cli+onnx）
         run: cargo build --release -p umasim --bin ramen_root_bench --features cli,onnx
 
       - name: 冒烟 A：NN 纯 CPU 臂（--cpu-only）
-        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --cpu-only --search-n ${{ inputs.search_n }}
+        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --cpu-only --search-n ${SN}
 
       - name: 冒烟 B：手写臂（--handwritten-rollout）
-        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --handwritten-rollout --search-n ${{ inputs.search_n }}
+        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --handwritten-rollout --search-n ${SN}
