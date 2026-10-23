@@ -1,0 +1,48 @@
+name: nn-cpu-bench-smoke
+
+# CPU 整局冒烟：验证 --cpu-only（NN 纯 CPU 臂）与 --handwritten-rollout（手写臂）
+# 都能下载权重、加载 onnx、纯 CPU 跑完整局并出终局评分。
+# 单局只验「链路通」，不回答策略优劣（程序端已明示）。完整几十小时验收另走。
+
+on:
+  workflow_dispatch:
+    inputs:
+      search_n:
+        description: '每候选 rollout 数（冒烟用小值即可）'
+        required: false
+        default: '32'
+      release:
+        description: 'NN 权重 release 名'
+        required: false
+        default: 'nn-ramen-v1'
+
+concurrency:
+  group: nn-cpu-bench-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust（stable minimal）
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: 下载 NN 权重（onnx + 反归一化元数据）
+        run: |
+          mkdir -p /tmp/nn
+          curl -fL -o /tmp/nn/model.onnx https://github.com/xf8410/umaai-rs/releases/download/${{ inputs.release }}/model.onnx
+          curl -fL -o /tmp/nn/model.onnx.json https://github.com/xf8410/umaai-rs/releases/download/${{ inputs.release }}/model.onnx.json
+          ls -la /tmp/nn
+
+      - name: cargo build ramen_root_bench（cli+onnx）
+        run: cargo build --release -p umasim --bin ramen_root_bench --features cli,onnx
+
+      - name: 冒烟 A：NN 纯 CPU 臂（--cpu-only）
+        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --cpu-only --search-n ${{ inputs.search_n }}
+
+      - name: 冒烟 B：手写臂（--handwritten-rollout）
+        run: cargo run --release -p umasim --bin ramen_root_bench --features cli,onnx -- --mode teacher-game --rollout-model /tmp/nn/model.onnx --handwritten-rollout --search-n ${{ inputs.search_n }}
