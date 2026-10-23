@@ -1,0 +1,30 @@
+name: nn-cpu-bench-build
+
+# 纯 CPU 整局（--cpu-only）改动的最小编译 + 守门单测验证
+# 只在 workbench/nn-cpu-bench 分支生效；不碰 master，不改任何源码/数据/权重。
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [workbench/nn-cpu-bench]
+
+concurrency:
+  group: nn-cpu-bench-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust（stable minimal）
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo build ramen_root_bench（cli+onnx）
+        run: cargo build --release -p umasim --bin ramen_root_bench --features cli,onnx
+
+      - name: cargo test 守门单测（ramen_root_bench）
+        run: cargo test --release -p umasim --bin ramen_root_bench --features cli,onnx 2>&1 | tail -40
