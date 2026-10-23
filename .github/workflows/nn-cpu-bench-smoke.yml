@@ -15,6 +15,11 @@ on:
         description: 'NN 权重 release 名'
         required: false
         default: 'nn-ramen-v1'
+  push:
+    # workflow_dispatch 受「必须存在于默认分支」限制，workbench 分支起见用 push 触发冒烟
+    branches: [workbench/nn-cpu-bench]
+    paths:
+      - '.github/workflows/nn-cpu-bench-smoke.yml'
 
 concurrency:
   group: nn-cpu-bench-smoke
