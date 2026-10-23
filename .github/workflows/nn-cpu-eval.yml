@@ -12,8 +12,8 @@ on:
         description: 起始 seed
         default: '61444'
       plan_indices:
-        description: 逗号分隔的 plan_index 列表
-        default: '0,75,150,225,300,375,450'
+        description: 逗号分隔的 plan_index 列表（每个马娘首个 index）
+        default: '0,85,170,220,305,390,475'
       release:
         description: 权重 release 名
         default: 'nn-ramen-v1'
@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        plan: [0, 75, 150, 225, 300, 375, 450]
+        plan: [0, 85, 170, 220, 305, 390, 475]
     env:
       REL: ${{ inputs.release || 'nn-ramen-v1' }}
       SN: ${{ inputs.search_n || '128' }}
