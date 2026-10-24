@@ -273,6 +273,8 @@ pub struct RamenNnTrainer {
     race_shield: bool,
     /// `SpecialSelect` 阶段的推理口径（见 [`Self::with_special_mode`]）
     special_mode: SpecialSelectMode,
+    /// 网络只在列出的阶段定案；其余阶段交给手写基策（实验用，默认 `None` = 全阶段）
+    stage_gate: Option<Vec<RamenStage>>,
     /// 测试专用的实例请求数；避免并行测试污染全局计数。
     #[cfg(test)]
     test_requests: Arc<AtomicU64>
@@ -338,6 +340,7 @@ impl RamenNnTrainer {
             fallback: Arc::new(RecommendedRamenTrainer::for_rollout()),
             race_shield: true,
             special_mode: SpecialSelectMode::Canonical,
+            stage_gate: None,
             #[cfg(test)]
             test_requests: Arc::new(AtomicU64::new(0))
         })
@@ -421,6 +424,12 @@ impl RamenNnTrainer {
         self
     }
 
+    /// 只在列出的阶段让网络定案，其余阶段整段交回手写基策（实验用，默认 `None` = 全阶段）
+    pub fn with_stage_gate(mut self, stages: Vec<RamenStage>) -> Self {
+        self.stage_gate = Some(stages);
+        self
+    }
+
     /// 选择 `SpecialSelect` 阶段的推理口径（默认 [`SpecialSelectMode::Canonical`]）
     ///
     /// 默认取 `Canonical` 而非保持历史行为：`Raw` 让网络在一个**训练集中从未出现**
@@ -470,6 +479,12 @@ impl RamenNnTrainer {
     ) -> Result<LabeledPrep> {
         ensure!(!actions.is_empty(), "候选动作为空");
         let stage = ramen_effective_stage(game, actions);
+        // 阶段门控（实验臂）：不在白名单的阶段整段交回手写基策
+        if let Some(gate) = self.stage_gate.as_ref() {
+            if !gate.contains(&stage) {
+                return Ok(LabeledPrep::HandwrittenStage(self.fallback.select_action(game, actions, rng)?));
+            }
+        }
         // 自选比赛硬守门优先于网络输出：不达标直接育成失败，不是可权衡的价值项
         if self.race_shield && stage == RamenStage::Train {
             if let Some(idx) = free_race_gate_index(game, actions, race_gate_slack()) {

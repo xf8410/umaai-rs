@@ -263,6 +263,13 @@ struct RootArgs {
     #[arg(long, default_value_t = false)]
     cpu_only: bool,
 
+    /// 网络只在指定阶段定案（逗号分隔：`ramen,special,train,region,super`）
+    ///
+    /// 不给 = 全阶段由网络定案（权威口径）。给了之后，白名单外的阶段整段交回
+    /// 手写基策，用于量「网络的哪一段能打」；必须与 `--cpu-only` 同用。
+    #[arg(long)]
+    nn_stages: Option<String>,
+
     /// 整局逐步决策输出 CSV（仅 teacher-game）
     ///
     /// 落的是**实际值**：回合、阶段、候选原顺序、选中下标、决策后 RNG 探针取值。
@@ -3512,6 +3519,27 @@ impl Trainer<RamenGame> for RecordingTeacher {
     }
 }
 
+/// 解析 `--nn-stages`：把短名映射到 [`RamenStage`]，未知名字直接拒绝
+///
+/// # 错误
+/// 空清单或出现未知短名时报错（不静默忽略）。
+fn parse_nn_stages(spec: &str) -> Result<Vec<RamenStage>> {
+    let mut out = Vec::new();
+    for part in spec.split(',').map(str::trim).filter(|x| !x.is_empty()) {
+        let stage = match part {
+            "ramen" => RamenStage::RamenSelect,
+            "special" => RamenStage::SpecialSelect,
+            "train" => RamenStage::Train,
+            "region" => RamenStage::RegionSelect,
+            "super" => RamenStage::SuperRamenSelect,
+            other => bail!("未知阶段 `{other}`：只接受 ramen/special/train/region/super")
+        };
+        out.push(stage);
+    }
+    ensure!(!out.is_empty(), "--nn-stages 至少要给一个阶段");
+    Ok(out)
+}
+
 /// 按生产口径搭一台教师
 ///
 /// 与 `ramen_space_bench` 同一条构造链：`RamenSearchStages::all()` +
@@ -3577,6 +3605,16 @@ fn play_with_teacher(
     // 终局结果提取计入墙钟：统一边界是「最后一次官方汇总与终局结果提取完成」
     let score = game.search_score();
     let wall = t0.elapsed().as_secs_f64();
+    let parts = game.uma.score_parts();
+    let five = game.uma.five_status;
+    println!(
+        "  终局面板    速{} 耐{} 力{} 根{} 智{} | 体力{} | skill_pt={} hints={}",
+        five[0], five[1], five[2], five[3], five[4], game.uma.vital, game.uma.skill_pt, game.uma.total_hints
+    );
+    println!(
+        "  评分分解    五维 {} + 技能 {} + PT {} = {}",
+        parts.five_status.iter().sum::<i32>(), parts.skill, parts.pt, parts.total()
+    );
     let steps = rec.steps.into_inner().map_err(|_| anyhow!("记录锁被毒化"))?;
     Ok((steps, score, wall))
 }
@@ -4818,11 +4856,14 @@ fn main() -> Result<()> {
 
     // 模型加载单独计时：统一口径的性能窗口从「模型就绪之后」才开始
     let load_start = Instant::now();
-    let nn = Arc::new(
-        RamenNnTrainer::load(&args.rollout_model)?
-            .with_special_mode(SpecialSelectMode::Canonical)
-            .with_race_shield(true)
-    );
+    let mut nn = RamenNnTrainer::load(&args.rollout_model)?
+        .with_special_mode(SpecialSelectMode::Canonical)
+        .with_race_shield(true);
+    if let Some(spec) = args.nn_stages.as_deref() {
+        ensure!(args.cpu_only, "--nn-stages 只用于 --cpu-only 实验臂");
+        nn = nn.with_stage_gate(parse_nn_stages(spec)?);
+    }
+    let nn = Arc::new(nn);
     let cpu_model_load_s = load_start.elapsed().as_secs_f64();
     let config = SearchConfig {
         search_n: args.search_n,
@@ -5354,6 +5395,25 @@ mod tests {
         }
         println!("故障注入：{} 条用例，行为不符 {bad} 条", cases.len());
         ensure!(bad == 0, "身份完整性守卫有 {bad} 条用例行为不符");
+        Ok(())
+    }
+
+    /// `--nn-stages` 短名映射与非法输入
+    ///
+    /// # 错误
+    ///
+    /// 映射结果或拒绝行为与期望不符时报错。
+    #[test]
+    fn parse_nn_stages_maps_aliases_and_rejects_unknown() -> Result<()> {
+        let mut c = Chk::default();
+        c.check(
+            parse_nn_stages("ramen,special,train")?
+                == vec![RamenStage::RamenSelect, RamenStage::SpecialSelect, RamenStage::Train],
+            "三个短名按序映射"
+        );
+        c.check(parse_nn_stages(" region , super ")?.len() == 2, "空白被裁剪");
+        c.check(parse_nn_stages("ramen,nope").is_err(), "未知短名被拒绝");
+        c.check(parse_nn_stages(" , ").is_err(), "空清单被拒绝");
         Ok(())
     }
 
